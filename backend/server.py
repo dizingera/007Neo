@@ -236,7 +236,7 @@ async def delete_file(file_id: str, admin_verified: bool = Depends(verify_admin_
 
 @api_router.get("/")
 async def root():
-    return {"message": "Media Gallery API", "version": "1.0"}
+    return {"message": "MagoApp API", "version": "1.0"}
 
 # Include the router in the main app
 app.include_router(api_router)
