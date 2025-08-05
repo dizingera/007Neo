@@ -5,6 +5,144 @@ import axios from "axios";
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
 
+// Chat Component
+const ChatSection = ({ isAdmin }) => {
+  const [messages, setMessages] = useState([]);
+  const [newMessage, setNewMessage] = useState("");
+  const [userName, setUserName] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    loadMessages();
+    // Poll for new messages every 3 seconds
+    const interval = setInterval(loadMessages, 3000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const loadMessages = async () => {
+    try {
+      const response = await axios.get(`${API}/chat/messages`);
+      setMessages(response.data);
+    } catch (error) {
+      console.error('Error loading messages:', error);
+    }
+  };
+
+  const sendMessage = async (e) => {
+    e.preventDefault();
+    if (!newMessage.trim()) return;
+
+    setLoading(true);
+    try {
+      const token = localStorage.getItem('adminToken');
+      const endpoint = isAdmin ? '/admin/chat/message' : '/chat/message';
+      const headers = isAdmin && token ? { 'Authorization': `Bearer ${token}` } : {};
+
+      const messageData = {
+        message: newMessage,
+        sender_name: isAdmin ? "Admin" : (userName || "Benutzer")
+      };
+
+      await axios.post(`${API}${endpoint}`, messageData, { headers });
+      setNewMessage("");
+      loadMessages();
+    } catch (error) {
+      console.error('Error sending message:', error);
+      alert('Fehler beim Senden der Nachricht');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const clearChat = async () => {
+    if (!window.confirm('Alle Nachrichten löschen?')) return;
+    
+    try {
+      const token = localStorage.getItem('adminToken');
+      await axios.delete(`${API}/admin/chat/clear`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      setMessages([]);
+    } catch (error) {
+      console.error('Error clearing chat:', error);
+    }
+  };
+
+  return (
+    <div className="bg-gray-800 rounded-lg p-4 shadow-lg">
+      <div className="flex justify-between items-center mb-4">
+        <h3 className="text-xl font-bold text-white">💬 Chat</h3>
+        {isAdmin && (
+          <button
+            onClick={clearChat}
+            className="text-red-400 hover:text-red-300 text-sm"
+          >
+            🗑️ Löschen
+          </button>
+        )}
+      </div>
+
+      <div className="bg-gray-900 rounded-lg p-3 h-64 overflow-y-auto mb-4 space-y-2">
+        {messages.length === 0 ? (
+          <p className="text-gray-400 text-center">Noch keine Nachrichten...</p>
+        ) : (
+          messages.map((msg) => (
+            <div
+              key={msg.id}
+              className={`flex ${msg.sender === 'admin' ? 'justify-end' : 'justify-start'}`}
+            >
+              <div
+                className={`max-w-xs px-3 py-2 rounded-lg ${
+                  msg.sender === 'admin'
+                    ? 'bg-blue-600 text-white'
+                    : 'bg-gray-700 text-gray-100'
+                }`}
+              >
+                <p className="text-xs opacity-75 mb-1">
+                  {msg.sender_name} • {new Date(msg.timestamp).toLocaleTimeString('de-DE', { 
+                    hour: '2-digit', 
+                    minute: '2-digit' 
+                  })}
+                </p>
+                <p>{msg.message}</p>
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+
+      <form onSubmit={sendMessage} className="space-y-2">
+        {!isAdmin && !userName && (
+          <input
+            type="text"
+            placeholder="Ihr Name (optional)..."
+            value={userName}
+            onChange={(e) => setUserName(e.target.value)}
+            className="w-full p-2 bg-gray-700 text-white rounded border border-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500"
+          />
+        )}
+        <div className="flex space-x-2">
+          <input
+            type="text"
+            placeholder="Nachricht eingeben..."
+            value={newMessage}
+            onChange={(e) => setNewMessage(e.target.value)}
+            className="flex-1 p-2 bg-gray-700 text-white rounded border border-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            disabled={loading}
+          />
+          <button
+            type="submit"
+            disabled={loading || !newMessage.trim()}
+            className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {loading ? "⏳" : "📤"}
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+};
+
 // Admin Upload Component
 const AdminUpload = ({ onFileUploaded, isAdmin, onLogin }) => {
   const [password, setPassword] = useState("");
@@ -79,20 +217,20 @@ const AdminUpload = ({ onFileUploaded, isAdmin, onLogin }) => {
 
   if (!isAdmin) {
     return (
-      <div className="bg-white p-6 rounded-lg shadow-lg max-w-md mx-auto">
-        <h2 className="text-2xl font-bold mb-4 text-center">Admin Login</h2>
+      <div className="bg-gray-800 p-6 rounded-lg shadow-lg max-w-md mx-auto">
+        <h2 className="text-2xl font-bold mb-4 text-center text-white">Admin Login</h2>
         <form onSubmit={handleLogin} className="space-y-4">
           <input
             type="password"
             placeholder="Passwort eingeben..."
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            className="w-full p-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="w-full p-3 bg-gray-700 text-white border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
             required
           />
           <button
             type="submit"
-            className="w-full bg-blue-500 text-white p-3 rounded-lg hover:bg-blue-600 transition-colors"
+            className="w-full bg-blue-600 text-white p-3 rounded-lg hover:bg-blue-700 transition-colors"
           >
             Einloggen
           </button>
@@ -102,14 +240,14 @@ const AdminUpload = ({ onFileUploaded, isAdmin, onLogin }) => {
   }
 
   return (
-    <div className="bg-white p-6 rounded-lg shadow-lg">
-      <h2 className="text-2xl font-bold mb-4 text-center">📁 Dateien Hochladen</h2>
+    <div className="bg-gray-800 p-6 rounded-lg shadow-lg">
+      <h2 className="text-2xl font-bold mb-4 text-center text-white">📁 Dateien Hochladen</h2>
       
       <div
         className={`border-2 border-dashed p-8 rounded-lg text-center transition-colors ${
           dragActive 
-            ? 'border-blue-500 bg-blue-50' 
-            : 'border-gray-300 hover:border-gray-400'
+            ? 'border-blue-500 bg-blue-900 bg-opacity-20' 
+            : 'border-gray-600 hover:border-gray-500'
         }`}
         onDragEnter={handleDrag}
         onDragLeave={handleDrag}
@@ -118,10 +256,10 @@ const AdminUpload = ({ onFileUploaded, isAdmin, onLogin }) => {
       >
         <div className="space-y-4">
           <div className="text-4xl">📎</div>
-          <p className="text-lg text-gray-600">
+          <p className="text-lg text-gray-300">
             Dateien hier hinziehen oder auswählen
           </p>
-          <p className="text-sm text-gray-500">
+          <p className="text-sm text-gray-400">
             Alle Formate unterstützt: Bilder, Videos, PDFs, Dokumente
           </p>
           
@@ -135,7 +273,7 @@ const AdminUpload = ({ onFileUploaded, isAdmin, onLogin }) => {
           />
           <label
             htmlFor="fileInput"
-            className="inline-block bg-blue-500 text-white px-6 py-3 rounded-lg cursor-pointer hover:bg-blue-600 transition-colors"
+            className="inline-block bg-blue-600 text-white px-6 py-3 rounded-lg cursor-pointer hover:bg-blue-700 transition-colors"
           >
             Dateien Auswählen
           </label>
@@ -144,8 +282,8 @@ const AdminUpload = ({ onFileUploaded, isAdmin, onLogin }) => {
 
       {uploading && (
         <div className="mt-4 text-center">
-          <div className="inline-flex items-center px-4 py-2 bg-blue-100 text-blue-800 rounded-lg">
-            <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-800 mr-2"></div>
+          <div className="inline-flex items-center px-4 py-2 bg-blue-900 bg-opacity-50 text-blue-300 rounded-lg">
+            <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-300 mr-2"></div>
             Wird hochgeladen...
           </div>
         </div>
@@ -156,7 +294,7 @@ const AdminUpload = ({ onFileUploaded, isAdmin, onLogin }) => {
           localStorage.removeItem('adminToken');
           onLogin(false);
         }}
-        className="mt-4 text-red-500 hover:text-red-700 text-sm"
+        className="mt-4 text-red-400 hover:text-red-300 text-sm"
       >
         Abmelden
       </button>
@@ -173,14 +311,6 @@ const MediaGallery = ({ files, onDeleteFile, isAdmin }) => {
     if (mimeType.includes('document') || mimeType.includes('word')) return '📝';
     if (mimeType.includes('zip') || mimeType.includes('rar')) return '📁';
     return '📎';
-  };
-
-  const formatFileSize = (bytes) => {
-    if (bytes === 0) return '0 Bytes';
-    const k = 1024;
-    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
   };
 
   const handleDelete = async (fileId) => {
@@ -202,26 +332,26 @@ const MediaGallery = ({ files, onDeleteFile, isAdmin }) => {
     return (
       <div className="text-center py-12">
         <div className="text-6xl mb-4">📁</div>
-        <h3 className="text-xl text-gray-600">Noch keine Dateien hochgeladen</h3>
-        <p className="text-gray-500">Als Admin können Sie oben Dateien hinzufügen</p>
+        <h3 className="text-xl text-gray-300">Noch keine Dateien hochgeladen</h3>
+        <p className="text-gray-400">Als Admin können Sie oben Dateien hinzufügen</p>
       </div>
     );
   }
 
   return (
     <div className="space-y-4">
-      <h2 className="text-2xl font-bold text-center mb-6">📚 MagoApp Galerie</h2>
+      <h2 className="text-2xl font-bold text-center mb-6 text-white">📚 MagoApp Galerie</h2>
       
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {files.map((file) => (
-          <div key={file.id} className="bg-white rounded-lg shadow-lg overflow-hidden">
+          <div key={file.id} className="bg-gray-800 rounded-lg shadow-lg overflow-hidden">
             <div className="p-4">
               <div className="flex items-center justify-between mb-3">
                 <span className="text-2xl">{getFileIcon(file.mime_type)}</span>
                 {isAdmin && (
                   <button
                     onClick={() => handleDelete(file.id)}
-                    className="text-red-500 hover:text-red-700 text-sm"
+                    className="text-red-400 hover:text-red-300 text-sm"
                   >
                     🗑️
                   </button>
@@ -239,19 +369,14 @@ const MediaGallery = ({ files, onDeleteFile, isAdmin }) => {
                 </div>
               )}
               
-              <h3 className="font-semibold text-sm truncate mb-2" title={file.original_filename}>
+              <h3 className="font-semibold text-sm truncate mb-3 text-gray-200" title={file.original_filename}>
                 {file.original_filename}
               </h3>
-              
-              <div className="text-xs text-gray-500 space-y-1">
-                <p>Größe: {formatFileSize(file.file_size)}</p>
-                <p>Datum: {new Date(file.upload_date).toLocaleDateString('de-DE')}</p>
-              </div>
               
               <a
                 href={`${API}/media/download/${file.id}`}
                 download={file.original_filename}
-                className="block w-full bg-green-500 text-white text-center py-2 rounded mt-3 hover:bg-green-600 transition-colors text-sm"
+                className="block w-full bg-green-600 text-white text-center py-2 rounded hover:bg-green-700 transition-colors text-sm"
               >
                 ⬇️ Herunterladen
               </a>
@@ -300,23 +425,23 @@ function App() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gray-100 flex items-center justify-center">
+      <div className="min-h-screen bg-black flex items-center justify-center">
         <div className="text-center">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto mb-4"></div>
-          <p>Lade Medien...</p>
+          <p className="text-white">Lade Medien...</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gray-100">
+    <div className="min-h-screen bg-black text-white">
       <div className="container mx-auto px-4 py-8 max-w-6xl">
         <div className="text-center mb-8">
-          <h1 className="text-4xl font-bold text-gray-800 mb-2">
+          <h1 className="text-4xl font-bold text-white mb-2">
             📱 MagoApp
           </h1>
-          <p className="text-gray-600">
+          <p className="text-gray-400">
             WhatsApp-ähnliche Medien-Sharing App
           </p>
         </div>
@@ -333,6 +458,8 @@ function App() {
             onDeleteFile={handleFileDeleted}
             isAdmin={isAdmin}
           />
+          
+          <ChatSection isAdmin={isAdmin} />
         </div>
       </div>
     </div>

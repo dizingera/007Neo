@@ -52,11 +52,20 @@ class MediaFileResponse(BaseModel):
     id: str
     filename: str
     original_filename: str
-    file_size: int
     mime_type: str
-    upload_date: datetime
     download_url: str
     preview_url: Optional[str] = None
+
+class ChatMessage(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    message: str
+    sender: str  # "admin" or "user"
+    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    sender_name: Optional[str] = None
+
+class ChatMessageCreate(BaseModel):
+    message: str
+    sender_name: Optional[str] = None
 
 class AdminLogin(BaseModel):
     password: str
@@ -135,9 +144,7 @@ async def upload_file(
             id=existing_file["id"],
             filename=existing_file["filename"],
             original_filename=existing_file["original_filename"],
-            file_size=existing_file["file_size"],
             mime_type=existing_file["mime_type"],
-            upload_date=existing_file["upload_date"],
             download_url=f"/api/media/download/{existing_file['id']}",
             preview_url=f"/api/media/preview/{existing_file['id']}" if is_image(existing_file["mime_type"]) else None
         )
@@ -160,9 +167,7 @@ async def upload_file(
         id=media_file.id,
         filename=media_file.filename,
         original_filename=media_file.original_filename,
-        file_size=media_file.file_size,
         mime_type=media_file.mime_type,
-        upload_date=media_file.upload_date,
         download_url=f"/api/media/download/{media_file.id}",
         preview_url=f"/api/media/preview/{media_file.id}" if is_image(mime_type) else None
     )
@@ -178,9 +183,7 @@ async def get_all_media_files():
             id=media_file["id"],
             filename=media_file["filename"],
             original_filename=media_file["original_filename"],
-            file_size=media_file["file_size"],
             mime_type=media_file["mime_type"],
-            upload_date=media_file["upload_date"],
             download_url=f"/api/media/download/{media_file['id']}",
             preview_url=f"/api/media/preview/{media_file['id']}" if is_image(media_file["mime_type"]) else None
         ))
@@ -233,6 +236,46 @@ async def delete_file(file_id: str, admin_verified: bool = Depends(verify_admin_
     await db.media_files.delete_one({"id": file_id})
     
     return {"message": "File deleted successfully"}
+
+# Chat Routes
+@api_router.post("/admin/chat/message", response_model=ChatMessage)
+async def send_admin_message(
+    message_data: ChatMessageCreate,
+    admin_verified: bool = Depends(verify_admin_token)
+):
+    """Admin sends a message"""
+    chat_message = ChatMessage(
+        message=message_data.message,
+        sender="admin",
+        sender_name="Admin"
+    )
+    
+    await db.chat_messages.insert_one(chat_message.dict())
+    return chat_message
+
+@api_router.post("/chat/message", response_model=ChatMessage)
+async def send_user_message(message_data: ChatMessageCreate):
+    """Public endpoint for users to send messages"""
+    chat_message = ChatMessage(
+        message=message_data.message,
+        sender="user",
+        sender_name=message_data.sender_name or "Benutzer"
+    )
+    
+    await db.chat_messages.insert_one(chat_message.dict())
+    return chat_message
+
+@api_router.get("/chat/messages", response_model=List[ChatMessage])
+async def get_chat_messages():
+    """Get all chat messages (public endpoint)"""
+    messages = await db.chat_messages.find().sort("timestamp", 1).to_list(1000)
+    return [ChatMessage(**msg) for msg in messages]
+
+@api_router.delete("/admin/chat/clear")
+async def clear_chat(admin_verified: bool = Depends(verify_admin_token)):
+    """Admin can clear all chat messages"""
+    await db.chat_messages.delete_many({})
+    return {"message": "Chat cleared successfully"}
 
 @api_router.get("/")
 async def root():
