@@ -111,31 +111,51 @@ const ChatSection = ({ isAdmin }) => {
         )}
       </div>
 
-      <form onSubmit={sendMessage} className="space-y-2">
+      <form onSubmit={sendMessage} className="space-y-3">
         {!isAdmin && !userName && (
-          <input
-            type="text"
-            placeholder="Ihr Name (optional)..."
-            value={userName}
-            onChange={(e) => setUserName(e.target.value)}
-            className="w-full p-2 bg-gray-700 text-white rounded border border-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500"
-          />
+          <div className="bg-gray-700 rounded-full px-4 py-2 border border-gray-600">
+            <input
+              type="text"
+              placeholder="Ihr Name (optional)..."
+              value={userName}
+              onChange={(e) => setUserName(e.target.value)}
+              className="w-full bg-transparent text-white placeholder-gray-400 focus:outline-none"
+            />
+          </div>
         )}
-        <div className="flex space-x-2">
-          <input
-            type="text"
-            placeholder="Nachricht eingeben..."
-            value={newMessage}
-            onChange={(e) => setNewMessage(e.target.value)}
-            className="flex-1 p-2 bg-gray-700 text-white rounded border border-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500"
-            disabled={loading}
-          />
+        <div className="flex items-end space-x-3">
+          <div className="flex-1 bg-gray-700 rounded-3xl px-4 py-3 border border-gray-600 min-h-[48px]">
+            <input
+              type="text"
+              placeholder="Nachricht..."
+              value={newMessage}
+              onChange={(e) => setNewMessage(e.target.value)}
+              className="w-full bg-transparent text-white placeholder-gray-400 focus:outline-none resize-none"
+              disabled={loading}
+              onKeyPress={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault();
+                  if (!loading && newMessage.trim()) {
+                    sendMessage(e);
+                  }
+                }
+              }}
+            />
+          </div>
           <button
             type="submit"
             disabled={loading || !newMessage.trim()}
-            className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+            className={`w-12 h-12 rounded-full flex items-center justify-center transition-all duration-200 ${
+              newMessage.trim() && !loading
+                ? 'bg-green-600 hover:bg-green-700 scale-100'
+                : 'bg-gray-600 scale-90 opacity-50'
+            }`}
           >
-            {loading ? "⏳" : "📤"}
+            {loading ? (
+              <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
+            ) : (
+              <span className="text-xl">➤</span>
+            )}
           </button>
         </div>
       </form>
