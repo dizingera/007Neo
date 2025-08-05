@@ -31,7 +31,7 @@ UPLOAD_DIR.mkdir(exist_ok=True)
 ADMIN_PASSWORD = "admin123"  # Change this!
 
 # Create the main app
-app = FastAPI(title="Media Gallery API")
+app = FastAPI(title="MagoApp API")
 api_router = APIRouter(prefix="/api")
 
 # Security
