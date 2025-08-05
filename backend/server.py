@@ -14,6 +14,7 @@ from datetime import datetime
 import shutil
 import mimetypes
 import hashlib
+import re
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -38,6 +39,35 @@ api_router = APIRouter(prefix="/api")
 security = HTTPBearer()
 
 # Models
+class User(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    phone_number: str
+    first_name: str
+    last_name: str
+    registration_date: datetime = Field(default_factory=datetime.utcnow)
+    is_active: bool = True
+
+class UserRegistration(BaseModel):
+    phone_number: str
+    first_name: str
+    last_name: str
+
+class UserResponse(BaseModel):
+    id: str
+    phone_number: str
+    first_name: str
+    last_name: str
+    registration_date: datetime
+    is_active: bool
+
+class UserLogin(BaseModel):
+    phone_number: str
+
+class UserLoginResponse(BaseModel):
+    user: UserResponse
+    access_token: str
+    message: str
+
 class MediaFile(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     filename: str
@@ -61,11 +91,11 @@ class ChatMessage(BaseModel):
     message: str
     sender: str  # "admin" or "user"
     timestamp: datetime = Field(default_factory=datetime.utcnow)
-    sender_name: Optional[str] = None
+    sender_name: str
+    user_id: Optional[str] = None  # For user messages
 
 class ChatMessageCreate(BaseModel):
     message: str
-    sender_name: Optional[str] = None
 
 class AdminLogin(BaseModel):
     password: str
@@ -77,6 +107,18 @@ class AdminResponse(BaseModel):
 # Helper functions
 def verify_admin_password(password: str) -> bool:
     return password == ADMIN_PASSWORD
+
+def validate_phone_number(phone: str) -> bool:
+    """Validate German phone number format"""
+    # Remove spaces and special characters
+    phone_clean = re.sub(r'[^\d+]', '', phone)
+    # German phone number patterns
+    patterns = [
+        r'^\+49\d{10,11}$',  # +49 followed by 10-11 digits
+        r'^0\d{10,11}$',     # 0 followed by 10-11 digits
+        r'^\d{11,12}$'       # 11-12 digits
+    ]
+    return any(re.match(pattern, phone_clean) for pattern in patterns)
 
 def get_file_hash(file_path: Path) -> str:
     """Generate hash for file deduplication"""
@@ -98,7 +140,84 @@ async def verify_admin_token(credentials: HTTPAuthorizationCredentials = Depends
         raise HTTPException(status_code=401, detail="Invalid admin token")
     return True
 
-# Routes
+# User Authentication
+async def verify_user_token(credentials: HTTPAuthorizationCredentials = Depends(security)):
+    token = credentials.credentials
+    if token == "admin-token":
+        return {"is_admin": True, "user_id": None}
+    
+    # Check if it's a valid user token (user_id)
+    user = await db.users.find_one({"id": token, "is_active": True})
+    if not user:
+        raise HTTPException(status_code=401, detail="Invalid user token")
+    
+    return {"is_admin": False, "user_id": token, "user": user}
+
+# User Routes
+@api_router.post("/users/register", response_model=UserResponse)
+async def register_user(user_data: UserRegistration):
+    # Validate phone number
+    if not validate_phone_number(user_data.phone_number):
+        raise HTTPException(status_code=400, detail="Invalid phone number format")
+    
+    # Check if user already exists
+    existing_user = await db.users.find_one({"phone_number": user_data.phone_number})
+    if existing_user:
+        raise HTTPException(status_code=400, detail="User with this phone number already exists")
+    
+    # Validate names
+    if len(user_data.first_name.strip()) < 2:
+        raise HTTPException(status_code=400, detail="First name must be at least 2 characters")
+    if len(user_data.last_name.strip()) < 2:
+        raise HTTPException(status_code=400, detail="Last name must be at least 2 characters")
+    
+    # Create user
+    user = User(
+        phone_number=user_data.phone_number.strip(),
+        first_name=user_data.first_name.strip(),
+        last_name=user_data.last_name.strip()
+    )
+    
+    # Save to database
+    await db.users.insert_one(user.dict())
+    
+    return UserResponse(**user.dict())
+
+@api_router.post("/users/login", response_model=UserLoginResponse)
+async def login_user(login_data: UserLogin):
+    # Find user by phone number
+    user_doc = await db.users.find_one({"phone_number": login_data.phone_number, "is_active": True})
+    if not user_doc:
+        raise HTTPException(status_code=404, detail="User not found or inactive")
+    
+    user = UserResponse(**user_doc)
+    
+    return UserLoginResponse(
+        user=user,
+        access_token=user.id,  # Using user ID as token for simplicity
+        message="Login successful"
+    )
+
+@api_router.get("/admin/users", response_model=List[UserResponse])
+async def get_all_users(admin_verified: bool = Depends(verify_admin_token)):
+    """Admin endpoint to get all users"""
+    users = await db.users.find().sort("registration_date", -1).to_list(1000)
+    return [UserResponse(**user) for user in users]
+
+@api_router.delete("/admin/users/{user_id}")
+async def deactivate_user(user_id: str, admin_verified: bool = Depends(verify_admin_token)):
+    """Admin can deactivate a user"""
+    result = await db.users.update_one(
+        {"id": user_id},
+        {"$set": {"is_active": False}}
+    )
+    
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    return {"message": "User deactivated successfully"}
+
+# Admin Routes
 @api_router.post("/admin/login", response_model=AdminResponse)
 async def admin_login(login_data: AdminLogin):
     if not verify_admin_password(login_data.password):
@@ -172,6 +291,7 @@ async def upload_file(
         preview_url=f"/api/media/preview/{media_file.id}" if is_image(mime_type) else None
     )
 
+# Media Routes
 @api_router.get("/media/files", response_model=List[MediaFileResponse])
 async def get_all_media_files():
     """Public endpoint to get all media files"""
@@ -254,13 +374,27 @@ async def send_admin_message(
     return chat_message
 
 @api_router.post("/chat/message", response_model=ChatMessage)
-async def send_user_message(message_data: ChatMessageCreate):
-    """Public endpoint for users to send messages"""
-    chat_message = ChatMessage(
-        message=message_data.message,
-        sender="user",
-        sender_name=message_data.sender_name or "Benutzer"
-    )
+async def send_user_message(
+    message_data: ChatMessageCreate,
+    auth_data: dict = Depends(verify_user_token)
+):
+    """Authenticated users can send messages"""
+    if auth_data["is_admin"]:
+        # Admin using user endpoint
+        chat_message = ChatMessage(
+            message=message_data.message,
+            sender="admin",
+            sender_name="Admin"
+        )
+    else:
+        # Regular user
+        user = auth_data["user"]
+        chat_message = ChatMessage(
+            message=message_data.message,
+            sender="user",
+            sender_name=f"{user['first_name']} {user['last_name']}",
+            user_id=user["id"]
+        )
     
     await db.chat_messages.insert_one(chat_message.dict())
     return chat_message
