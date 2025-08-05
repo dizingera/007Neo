@@ -389,10 +389,6 @@ const MediaGallery = ({ files, onDeleteFile, isAdmin }) => {
                 </div>
               )}
               
-              <h3 className="font-semibold text-sm truncate mb-3 text-gray-200" title={file.original_filename}>
-                {file.original_filename}
-              </h3>
-              
               <a
                 href={`${API}/media/download/${file.id}`}
                 download={file.original_filename}
