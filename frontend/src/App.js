@@ -89,13 +89,13 @@ const ChatSection = ({ isAdmin }) => {
           messages.map((msg) => (
             <div
               key={msg.id}
-              className={`flex ${msg.sender === 'admin' ? 'justify-end' : 'justify-start'}`}
+              className={`flex mb-3 ${msg.sender === 'admin' ? 'justify-end' : 'justify-start'}`}
             >
               <div
-                className={`max-w-xs px-3 py-2 rounded-lg ${
+                className={`max-w-xs px-4 py-2 rounded-2xl shadow-sm ${
                   msg.sender === 'admin'
-                    ? 'bg-blue-600 text-white'
-                    : 'bg-gray-700 text-gray-100'
+                    ? 'bg-green-600 text-white rounded-br-sm'
+                    : 'bg-gray-700 text-gray-100 rounded-bl-sm'
                 }`}
               >
                 <p className="text-xs opacity-75 mb-1">
@@ -104,7 +104,7 @@ const ChatSection = ({ isAdmin }) => {
                     minute: '2-digit' 
                   })}
                 </p>
-                <p>{msg.message}</p>
+                <p className="text-sm leading-relaxed">{msg.message}</p>
               </div>
             </div>
           ))
