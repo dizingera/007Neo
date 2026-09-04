@@ -1,0 +1,11 @@
+# Kern des Systems
+fastapi>=0.110
+uvicorn>=0.27
+websockets>=12.0        # Live-Verbindung zur Kabinenanzeige
+PyYAML>=6.0             # Konfigurationsdatei
+
+# GPS-Empfänger am USB-/Serial-Port
+pyserial>=3.5
+
+# Nur auf den Client-Traktoren nötig (Abgleich mit dem Master)
+httpx>=0.26

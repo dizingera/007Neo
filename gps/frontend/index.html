@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#0d1117">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="manifest" href="manifest.webmanifest">
+<!-- Leeres Icon: spart auf einem Pi ohne Internet die vergebliche Anfrage -->
+<link rel="icon" href="data:,">
+<title>AgriPilot</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- Lichtbalken: die eine Anzeige, die man im Augenwinkel lesen kann -->
+<div id="lightbar" class="lightbar"></div>
+
+<header class="topbar">
+  <div class="readout">
+    <div class="readout-value" id="xte">--</div>
+    <div class="readout-label">cm Abweichung</div>
+  </div>
+  <div class="readout small">
+    <div class="readout-value" id="speed">--</div>
+    <div class="readout-label">km/h</div>
+  </div>
+  <div class="readout small">
+    <div class="readout-value" id="pass">--</div>
+    <div class="readout-label">Spur</div>
+  </div>
+  <div class="readout small">
+    <div class="readout-value" id="area">--</div>
+    <div class="readout-label">ha bearbeitet</div>
+  </div>
+  <div class="status-block">
+    <div class="chip" id="fixChip">kein GPS</div>
+    <div class="chip" id="steerChip">Lenkung aus</div>
+    <div class="chip" id="netChip">--</div>
+  </div>
+</header>
+
+<main class="stage">
+  <canvas id="map"></canvas>
+
+  <div class="overlay-left">
+    <div class="field-label" id="fieldLabel">Kein Feld</div>
+    <div class="line-label" id="lineLabel">Keine Spur</div>
+    <div class="hint" id="hint"></div>
+  </div>
+
+  <div class="overlay-right">
+    <button class="round" id="zoomIn" title="Näher">+</button>
+    <button class="round" id="zoomOut" title="Weiter">−</button>
+    <button class="round" id="viewMode" title="Ansicht drehen">↑</button>
+  </div>
+
+  <div class="sections" id="sections"></div>
+</main>
+
+<nav class="toolbar">
+  <button class="tool" id="btnA"><b>A</b><span>Punkt setzen</span></button>
+  <button class="tool" id="btnB"><b>B</b><span>Spur anlegen</span></button>
+  <button class="tool" id="btnCurve"><b>∿</b><span>Kurve</span></button>
+  <button class="tool" id="btnBoundary"><b>⬠</b><span>Grenze</span></button>
+  <button class="tool nudge" id="btnNudgeLeft"><b>◀</b><span>1 cm</span></button>
+  <button class="tool nudge" id="btnNudgeRight"><b>▶</b><span>1 cm</span></button>
+  <button class="tool wide" id="btnJob"><b>▶</b><span>Arbeit starten</span></button>
+  <button class="tool wide danger" id="btnSteer"><b>⦿</b><span>Lenkung</span></button>
+  <button class="tool" id="btnMenu"><b>☰</b><span>Menü</span></button>
+</nav>
+
+<!-- Menü-Ebenen -->
+<div class="sheet" id="sheet" hidden>
+  <div class="sheet-head">
+    <div class="tabs">
+      <button data-tab="fields" class="tab active">Felder</button>
+      <button data-tab="lines" class="tab">Spuren</button>
+      <button data-tab="jobs" class="tab">Aufträge</button>
+      <button data-tab="machine" class="tab">Maschine</button>
+      <button data-tab="system" class="tab">System</button>
+    </div>
+    <button class="close" id="sheetClose">✕</button>
+  </div>
+
+  <section class="tab-panel" data-panel="fields">
+    <div class="row">
+      <input id="newFieldName" placeholder="Name des Feldes, z.B. Oberes Feld">
+      <button id="btnNewField" class="primary">Feld hier anlegen</button>
+    </div>
+    <p class="note">Das Feld wird an der aktuellen Position verankert. Danach die
+      Grenze einmal umfahren – daraus kommt die Hektarzahl.</p>
+    <div class="list" id="fieldList"></div>
+  </section>
+
+  <section class="tab-panel" data-panel="lines" hidden>
+    <div class="row">
+      <button id="btnAPlus" class="primary">A+ Spur in aktueller Fahrtrichtung</button>
+    </div>
+    <p class="note">A+ legt eine Spur durch die aktuelle Position in die Richtung,
+      in die der Traktor gerade fährt – praktisch, wenn kein Platz für einen B-Punkt ist.</p>
+    <div class="list" id="lineList"></div>
+  </section>
+
+  <section class="tab-panel" data-panel="jobs" hidden>
+    <div class="row">
+      <a class="button" id="btnJobsCsv" href="/api/jobs.csv">Alle Arbeiten als CSV</a>
+    </div>
+    <div class="list" id="jobList"></div>
+  </section>
+
+  <section class="tab-panel" data-panel="machine" hidden>
+    <div class="grid" id="profileForm">
+      <label>Arbeitsbreite (m)<input type="number" step="0.01" name="width_m"></label>
+      <label>Überlappung (m)<input type="number" step="0.01" name="overlap_m"></label>
+      <label>Sektionen<input type="number" step="1" min="1" max="24" name="sections"></label>
+      <label>Antenne nach vorn (m)<input type="number" step="0.01" name="antenna_forward_m"></label>
+      <label>Antenne nach rechts (m)<input type="number" step="0.01" name="antenna_right_m"></label>
+      <label>Gerät hinter Achse (m)<input type="number" step="0.01" name="tool_trailing_m"></label>
+      <label>Gerät seitlich (m)<input type="number" step="0.01" name="tool_offset_m"></label>
+      <label>Radstand (m)<input type="number" step="0.01" name="wheelbase_m"></label>
+      <label>Max. Lenkeinschlag (°)<input type="number" step="1" name="max_steer_deg"></label>
+      <label>Lenkschärfe<input type="number" step="0.05" name="steer_gain"></label>
+      <label>Bezeichnung<input type="text" name="name"></label>
+    </div>
+    <div class="row">
+      <button id="btnSaveProfile" class="primary">Übernehmen</button>
+      <label class="switch"><input type="checkbox" id="autoSections" checked>
+        Sektionen automatisch schalten</label>
+    </div>
+    <p class="note">Die Antennenwerte sind entscheidend: gemessen wird ab Mitte
+      Hinterachse. Stimmen sie nicht, liegt jede Spur um genau diesen Betrag daneben.</p>
+  </section>
+
+  <section class="tab-panel" data-panel="system" hidden>
+    <div class="list" id="systemList"></div>
+    <div class="row" id="simRow" hidden>
+      <label>Simulator km/h <input type="range" id="simSpeed" min="0" max="15" step="0.5" value="9"></label>
+      <label>Lenken <input type="range" id="simSteer" min="-30" max="30" step="1" value="0"></label>
+    </div>
+  </section>
+</div>
+
+<div class="toast" id="toast" hidden></div>
+
+<script src="app.js"></script>
+</body>
+</html>
