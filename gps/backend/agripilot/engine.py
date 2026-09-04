@@ -23,9 +23,11 @@ from dataclasses import asdict
 from typing import Any, Optional
 
 from . import geo, storage
+from .actuators import SteerContext
 from .config import Config
 from .coverage import CoverageMap, Section, build_sections
 from .guidance import GuidanceLine, GuidanceState, HeadingFilter, VehicleProfile
+from .imu import terrain_offset
 from .nmea import Fix
 
 TRACK_MIN_DISTANCE_M = 1.0
@@ -70,6 +72,8 @@ class Engine:
         self._last_update_at: Optional[float] = None
         self.steering = None    # set by the server once the controller exists
         self.simulator = None   # set when running on the simulator source
+        self.imu = None         # set when a tilt sensor is configured
+        self.terrain_offset_m = (0.0, 0.0)   # (rechts, vorn) - nur zur Anzeige
 
     # -- profile ----------------------------------------------------------
 
@@ -293,18 +297,24 @@ class Engine:
             self.plane = geo.LocalPlane(fix.lat, fix.lon)
 
         self.position = self.plane.to_local(fix.lat, fix.lon)
+        dt = (now - self._last_update_at) if self._last_update_at else 0.0
+        self._last_update_at = now
+
+        attitude = self.imu.attitude if self.imu is not None else None
+        yaw_rate = attitude.yaw_rate_deg_s if (attitude and attitude.fresh) else None
+        use_yaw = yaw_rate if (self.imu is not None
+                               and self.config.imu.use_for_heading) else None
         heading = self.heading_filter.update(
-            fix.course_deg, fix.heading_deg, fix.speed_ms
+            fix.course_deg, fix.heading_deg, fix.speed_ms, use_yaw, dt
         )
         self.heading = heading
         if heading is None:
             return
 
+        self.position = self._compensate_terrain(self.position, heading, attitude)
+
         previous_tool = self.tool_position
         self.tool_position = self.profile.tool_position(self.position, heading)
-
-        dt = (now - self._last_update_at) if self._last_update_at else 0.0
-        self._last_update_at = now
 
         # A position that moved further than the machine could have travelled is
         # a receiver artefact - a re-acquired fix after a gap under trees, or a
@@ -331,6 +341,29 @@ class Engine:
             last = self._recording[-1] if self._recording else None
             if last is None or geo.distance(last, self.tool_position) > 0.5:
                 self._recording.append(self.tool_position)
+
+    def _compensate_terrain(self, antenna: geo.Point, heading: float,
+                            attitude) -> geo.Point:
+        """Von der Antenne auf den Punkt am Boden rechnen.
+
+        Bei drei Metern Antennenhöhe sind sechs Grad Seitenhang gut 30 cm - die
+        Spur wandert genau um diesen Betrag, ohne dass der Empfänger irgendetwas
+        Falsches misst. Deshalb wird die Neigung herausgerechnet, bevor
+        Führung und Fläche daraus etwas machen.
+        """
+        if (attitude is None or not attitude.fresh
+                or not self.config.imu.terrain_compensation):
+            self.terrain_offset_m = (0.0, 0.0)
+            return antenna
+        right_off, forward_off = terrain_offset(
+            attitude, self.profile.antenna_height_m, self.config.imu.roll_sign
+        )
+        self.terrain_offset_m = (right_off, forward_off)
+        h = math.radians(heading)
+        forward = (math.sin(h), math.cos(h))
+        right = (math.cos(h), -math.sin(h))
+        return (antenna[0] - right[0] * right_off - forward[0] * forward_off,
+                antenna[1] - right[1] * right_off - forward[1] * forward_off)
 
     def _update_guidance(self, fix: Fix) -> None:
         if self.line is None or self.tool_position is None or self.heading is None:
@@ -366,7 +399,15 @@ class Engine:
     def _update_steering(self, fix: Fix) -> None:
         if self.steering is None:
             return
-        command = self.steering.update(self.guidance, fix)
+        attitude = self.imu.attitude if self.imu is not None else None
+        context = SteerContext(
+            speed_ms=fix.speed_ms,
+            wheelbase_m=self.profile.wheelbase_m,
+            yaw_rate_deg_s=(attitude.yaw_rate_deg_s
+                            if attitude and attitude.fresh else None),
+            cross_track_m=self.guidance.cross_track_m,
+        )
+        command = self.steering.update(self.guidance, fix, context)
         # On the simulator, close the loop so autosteer can be demonstrated and
         # tuned without a machine.
         if self.simulator is not None:
@@ -446,6 +487,14 @@ class Engine:
                             and len(self._recording) > 2 else 0.0),
                 "pending_a": list(self._pending_a) if self._pending_a else None,
             },
+            "imu": ({
+                **self.imu.attitude.to_dict(),
+                "status": self.imu.status,
+                "healthy": self.imu.healthy,
+                "terrain_offset_cm": [self.terrain_offset_m[0] * 100.0,
+                                      self.terrain_offset_m[1] * 100.0],
+                "compensation": self.config.imu.terrain_compensation,
+            } if self.imu is not None else None),
             "steering": self.steering.status() if self.steering else None,
             "messages": self.messages[-6:],
         }

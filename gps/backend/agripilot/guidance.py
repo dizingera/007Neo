@@ -47,7 +47,7 @@ class VehicleProfile:
     wheelbase_m: float = 2.6
     antenna_forward_m: float = 1.2  # antenna ahead of the rear axle (+ = forward)
     antenna_right_m: float = 0.0    # antenna right of the centre line
-    antenna_height_m: float = 3.0
+    antenna_height_m: float = 3.0   # Boden bis Antenne - Maßstab des Hangausgleichs
     tool_offset_m: float = 0.0      # implement pulled off-centre (+ = right)
     tool_trailing_m: float = 0.0    # distance from rear axle back to the tool
     max_steer_deg: float = 35.0
@@ -293,11 +293,19 @@ class HeadingFilter:
     _history: list[float] = field(default_factory=list)
 
     def update(self, course: Optional[float], true_heading: Optional[float],
-               speed_ms: float) -> Optional[float]:
+               speed_ms: float, yaw_rate_deg_s: Optional[float] = None,
+               dt: float = 0.0) -> Optional[float]:
         if true_heading is not None:
             self.value = true_heading
             return self.value
         if course is None or speed_ms < self.min_speed_ms:
+            # Zu langsam für einen Kurs aus der Bewegung. Liegt eine Drehrate
+            # vom Neigungssensor an, wird der letzte gute Kurs damit
+            # weitergeschrieben - sonst dreht sich am Vorgewende die Anzeige
+            # nicht mit, obwohl der Traktor längst quer steht.
+            if (yaw_rate_deg_s is not None and self.value is not None
+                    and 0.0 < dt < 1.0):
+                self.value = normalize_heading(self.value + yaw_rate_deg_s * dt)
             return self.value
         if self.value is None:
             self.value = course

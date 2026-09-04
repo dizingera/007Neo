@@ -4,8 +4,17 @@ uvicorn>=0.27
 websockets>=12.0        # Live-Verbindung zur Kabinenanzeige
 PyYAML>=6.0             # Konfigurationsdatei
 
-# GPS-Empfänger am USB-/Serial-Port
+# GPS-Empfänger am USB-/Serial-Port (u-blox F9P)
 pyserial>=3.5
 
 # Nur auf den Client-Traktoren nötig (Abgleich mit dem Master)
 httpx>=0.26
+
+# Optional, je nach angeschlossener Hardware:
+#   Lenkmotor an einer Phidget-Motorsteuerung.
+#   ACHTUNG: zusätzlich zum Paket ist der Treiber des Herstellers nötig
+#   (Windows: Phidgets-Installer, Linux: libphidget22).
+# phidget22>=1.17
+#
+#   Neigungssensor (Tinkerforge IMU Brick). Braucht einen laufenden brickd.
+# tinkerforge>=2.1

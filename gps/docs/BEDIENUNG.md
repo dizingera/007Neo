@@ -6,8 +6,8 @@
  ┌──────────────────────────────────────────────────────────────┐
  │ ▓▓▓▓▓▓▓▓▓░░░░░░░░░░░░░░░░░░░░░░░  Lichtbalken               │
  ├──────────────────────────────────────────────────────────────┤
- │   12      8.4      3      2.41    [RTK fix ±2 cm] [Lenkung] │
- │ cm ABW.   km/h    SPUR   ha       [Master · 2 Traktoren]    │
+ │   12      8.4      3      2.41   4.1  [RTK fix ±2 cm]        │
+ │ cm ABW.   km/h    SPUR   ha      ° Hang [Lenkung] [Master]   │
  ├──────────────────────────────────────────────────────────────┤
  │ Oberes Feld                                            + − ↑ │
  │ AB Nord · 6,00 m                                             │
@@ -29,6 +29,12 @@ Die Zahl links daneben nennt die Abweichung in Zentimetern, die Farbe sagt
 dasselbe wie der Balken.
 
 ![Aufträge](bilder/auftraege.png)
+
+**Der Hang-Wert** erscheint nur, wenn ein Neigungssensor eingerichtet ist. Er
+zeigt die Schräglage, und der Ausgleich dazu läuft im Hintergrund: bei 3 m
+Antennenhöhe sind 6° Hang 31 cm, um die die Spur sonst wandern würde. Der Wert
+färbt sich, sobald der Ausgleich mehr als 15 cm ausmacht – dann arbeitet er
+gerade spürbar.
 
 ## Ein Feld anlegen und vermessen
 
@@ -131,6 +137,18 @@ der andere schon bearbeitet hat – und die Sektionen schalten entsprechend ab.
 
 Ohne Verbindung arbeitet jeder Traktor vollständig weiter. Der Abgleich holt
 alles nach, sobald der Master wieder erreichbar ist.
+
+## Neigungssensor nullen
+
+Einmal beim Einbau und danach, wenn der Sensor bewegt wurde: auf **ebenem**
+Boden **Menü → System → Neigungssensor nullen**. Der Sensor sitzt nie exakt
+waagerecht in der Kabine, und ein Grad Montagefehler sind bei 3 m Antennenhöhe
+schon 5 cm Dauerversatz in jeder Spur.
+
+Prüfen lässt sich der Ausgleich am besten so: über eine Furche fahren, sodass
+der Traktor kippelt. Die angezeigte Abweichung darf dabei fast ruhig bleiben.
+Wird sie beim Kippeln größer, arbeitet der Ausgleich verkehrt herum – dann
+gehört in die Konfiguration `roll_sign: -1.0`.
 
 ## Kleine Regeln, die viel sparen
 

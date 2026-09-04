@@ -16,9 +16,20 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Optional
 
-DEFAULT_PATH = Path(
-    os.environ.get("AGRIPILOT_CONFIG", "/etc/agripilot/config.yaml")
-)
+def _default_paths() -> tuple[Path, Path]:
+    """Konfigurations- und Datenpfad je Betriebssystem.
+
+    Auf einem Windows-Tablet gibt es kein /etc und kein /var; dort gehört beides
+    unter ProgramData, damit es Benutzerwechsel und Updates übersteht.
+    """
+    if os.name == "nt":
+        base = Path(os.environ.get("PROGRAMDATA", r"C:\ProgramData")) / "AgriPilot"
+        return base / "config.yaml", base
+    return Path("/etc/agripilot/config.yaml"), Path("/var/lib/agripilot")
+
+
+DEFAULT_PATH = Path(os.environ.get("AGRIPILOT_CONFIG", _default_paths()[0]))
+DEFAULT_DATA_DIR = str(_default_paths()[1])
 
 
 @dataclass
@@ -63,6 +74,68 @@ class NetworkConfig:
 
 
 @dataclass
+class ImuConfig:
+    """Neigungssensor - Hangausgleich und Drehrate.
+
+    Ohne IHN wandert die Spur am Hang um Dezimeter, ohne dass der Empfänger
+    etwas davon merkt: siehe imu.py.
+    """
+
+    source: str = "aus"          # "aus" | "tinkerforge" | "simulator"
+    host: str = "localhost"      # Brick Daemon
+    port: int = 4223
+    uid: str = ""                # leer = erstes gefundenes IMU-Gerät
+    axis_map: str = "standard"   # standard | swapped | inverted | swapped_inverted
+    roll_sign: float = 1.0       # -1, wenn der Ausgleich in die falsche Richtung geht
+    terrain_compensation: bool = True
+    use_for_heading: bool = True  # Kurs vom IMU, wenn GPS zu langsam ist
+
+
+@dataclass
+class PhidgetConfig:
+    """Lenkmotor über eine Phidget-Motorsteuerung.
+
+    Die Rückmeldung entscheidet, wie gut das wird:
+
+    * ``was``       - Radwinkelsensor (Poti an der Achsschenkellenkung) an einem
+                      Spannungsverhältnis-Eingang. Die saubere Lösung.
+    * ``yaw_rate``  - keine Rückmeldung am Rad, dafür die Drehrate aus dem IMU.
+                      Geregelt wird dann nicht der Radwinkel, sondern wie schnell
+                      sich der Traktor dreht. Funktioniert erstaunlich gut und
+                      braucht keinen zusätzlichen Sensor.
+    * ``encoder``   - Drehgeber am Motor, Mitte wird beim Scharfschalten gelernt.
+                      Nur eine Notlösung: die Mitte verliert sich über den Tag.
+    """
+
+    serial_number: int = -1      # -1 = erstes gefundenes Gerät
+    motor_channel: int = 0
+    feedback: str = "yaw_rate"   # was | yaw_rate | encoder
+    invert_motor: bool = False
+
+    # Grenzen für den Motor
+    current_limit_a: float = 2.0     # niedrig halten: das Rad muss von Hand zu übersteuern sein
+    max_duty: float = 0.55           # 0..1, Anteil der vollen Leistung
+    acceleration: float = 2.0        # Anteil pro Sekunde
+    failsafe_ms: int = 500           # Phidget stoppt selbst, wenn wir verstummen
+
+    # Radwinkelsensor
+    was_channel: int = 0
+    was_centre_ratio: float = 0.5    # Spannungsverhältnis bei Geradeausstellung
+    was_deg_per_ratio: float = 200.0 # Grad je Einheit Spannungsverhältnis
+    was_invert: bool = False
+
+    # Drehgeber
+    encoder_channel: int = 0
+    encoder_counts_per_deg: float = 40.0
+
+    # Regler auf die Rückmeldung
+    gain_p: float = 0.09
+    gain_i: float = 0.02
+    gain_d: float = 0.01
+    integral_limit: float = 0.25
+
+
+@dataclass
 class SteeringConfig:
     """Autosteer output.
 
@@ -72,8 +145,8 @@ class SteeringConfig:
     """
 
     enabled: bool = False
-    output: str = "udp"          # "udp" to a steering board, "none" to log only
-    host: str = "192.168.5.9"
+    output: str = "udp"          # "phidget" | "udp" | "none" (nur mitschreiben)
+    host: str = "192.168.5.9"    # nur für "udp"
     port: int = 8888
     min_speed_ms: float = 0.3    # below this the machine must not steer itself
     max_speed_ms: float = 8.0
@@ -86,13 +159,15 @@ class SteeringConfig:
 class ServerConfig:
     host: str = "0.0.0.0"
     port: int = 8080
-    data_dir: str = "/var/lib/agripilot"
+    data_dir: str = DEFAULT_DATA_DIR
     update_hz: float = 10.0
 
 
 @dataclass
 class Config:
     gnss: GnssConfig = field(default_factory=GnssConfig)
+    imu: ImuConfig = field(default_factory=ImuConfig)
+    phidget: PhidgetConfig = field(default_factory=PhidgetConfig)
     ntrip: NtripConfig = field(default_factory=NtripConfig)
     network: NetworkConfig = field(default_factory=NetworkConfig)
     steering: SteeringConfig = field(default_factory=SteeringConfig)
@@ -154,6 +229,8 @@ def load(path: str | Path | None = None) -> Config:
 
     config = Config(
         gnss=GnssConfig(**_subset(GnssConfig, data.get("gnss"))),
+        imu=ImuConfig(**_subset(ImuConfig, data.get("imu"))),
+        phidget=PhidgetConfig(**_subset(PhidgetConfig, data.get("phidget"))),
         ntrip=NtripConfig(**_subset(NtripConfig, data.get("ntrip"))),
         network=NetworkConfig(**_subset(NetworkConfig, data.get("network"))),
         steering=SteeringConfig(**_subset(SteeringConfig, data.get("steering"))),

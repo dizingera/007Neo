@@ -1,5 +1,8 @@
 # Hardware
 
+> Für die Zusammenstellung aus F9P, Phidget-Motor, IMU Brick und Windows-Tablet
+> gibt es eine eigene, kürzere Anleitung: [DEINE_ANLAGE.md](DEINE_ANLAGE.md).
+
 ## Was pro Traktor gebraucht wird
 
 | Teil | Empfehlung | Grober Preis |
@@ -9,8 +12,13 @@
 | Stromversorgung | 12 V → 5 V/3 A Wandler mit Puffer (Kfz-tauglich) | 20–30 € |
 | GNSS-Empfänger | u-blox ZED-F9P (RTK-fähig, zwei Frequenzen) | 200–350 € |
 | Antenne | Mehrfrequenz-Antenne mit Grundplatte, magnetisch | 40–120 € |
+| Neigungssensor | Tinkerforge IMU Brick 2.0 (Hangausgleich) | 60–90 € |
 | Anzeige | vorhandenes Tablet im Browser, oder 7" Touch am Pi | 0–90 € |
 | Netzwerk | WLAN-Router im Hof; im Feld Mobilfunk oder Richtfunk | – |
+
+Statt des Pi geht auch ein **Windows-Tablet**: es hat USB für Empfänger, Sensor
+und Motorsteuerung, einen Bildschirm und einen Akku, der einen Spannungseinbruch
+beim Anlassen übersteht. Einrichtung mit `scripts/install_windows.ps1`.
 
 Der Pi kommt in ein geschlossenes Gehäuse. Staub und Rüttelei sind die zwei
 Dinge, die diese Installation umbringen; ein Lüfter zieht Staub, ein
@@ -86,7 +94,81 @@ Wer das sauber lösen will, nimmt einen **Zweiantennen-Empfänger** (liefert ein
 `HDT`-Satz mit echter Fahrzeugausrichtung); AgriPilot benutzt den automatisch,
 sobald er da ist.
 
-## Lenkautomatik anschließen
+## Neigungssensor (IMU)
+
+Die Antenne sitzt drei Meter über dem Boden. Sechs Grad Seitenhang schieben sie
+31 cm zur Seite – der Empfänger misst dabei alles richtig, er misst eben die
+Antenne. Ohne Ausgleich wandert die Spur genau um diesen Betrag, und weil der
+Hang wechselt, wandert sie unregelmäßig.
+
+Unterstützt werden die Tinkerforge-Geräte **IMU Brick 2.0**, **IMU Brick 1.0**
+und **IMU Bricklet 3.0**. Sie hängen an einem laufenden **Brick Daemon**
+(brickd), der die Brücke zum Programm bildet.
+
+```yaml
+imu:
+  source: tinkerforge
+  uid: ''                  # leer = erstes gefundenes Gerät
+  axis_map: standard       # standard | swapped | inverted | swapped_inverted
+  roll_sign: 1.0
+  terrain_compensation: true
+  use_for_heading: true    # stützt den Kurs, wenn die Fahrt zu langsam ist
+```
+
+Einbau: **fest verschraubt**, nicht lose gelegt. Dann die Antennenhöhe unter
+**Menü → Maschine** eintragen und auf ebenem Boden **Menü → System →
+Neigungssensor nullen** drücken.
+
+Die Abnahme ist eine Fahrt über eine Furche: Kippelt der Traktor und die
+angezeigte Abweichung bleibt fast ruhig, stimmt es. Wird sie beim Kippeln
+größer, arbeitet der Ausgleich verkehrt herum – dann `roll_sign: -1.0`.
+
+Zweiter Nutzen: der IMU liefert die **Drehrate**. Damit bleibt der Kurs am
+Vorgewende brauchbar, wo aus der GPS-Bewegung keiner mehr kommt, und die
+Lenkung kann ohne Radwinkelsensor geregelt werden.
+
+## Lenkmotor an einer Phidget-Motorsteuerung
+
+Der einfachste Weg zur Lenkautomatik ohne selbstgebaute Elektronik: ein
+Gleichstrommotor am Lenkrad, angetrieben von einer Phidget-Motorsteuerung am
+USB. Der Regelkreis läuft dann im Programm (`actuators.py`) mit 50 Hz.
+
+Neben dem Python-Paket `phidget22` ist der **Treiber des Herstellers** nötig
+(Windows: Phidgets-Installer, Linux: `libphidget22`). Fehlt er, sagt das die
+Systemseite im Klartext, statt das System mitzureißen.
+
+Ein Motor allein ist eine offene Steuerung – er dreht, und niemand weiß, wie
+weit. Drei Rückmeldungen, in dieser Reihenfolge zu empfehlen:
+
+| `feedback` | Braucht | Güte |
+|---|---|---|
+| `was` | Radwinkelsensor (Poti) an einem Spannungsverhältnis-Eingang | am besten |
+| `yaw_rate` | nur den IMU | gut – geregelt wird die Drehrate statt des Radwinkels |
+| `encoder` | Drehgeber am Motor, Mitte beim Scharfschalten gelernt | Notlösung |
+
+```yaml
+steering:
+  enabled: true
+  output: phidget
+phidget:
+  serial_number: -1        # aus scripts/scan_devices.py
+  motor_channel: 0
+  feedback: yaw_rate
+  current_limit_a: 2.0     # niedrig: das Lenkrad muss übersteuerbar bleiben
+  max_duty: 0.55
+  failsafe_ms: 500
+```
+
+Zwei Sicherheiten stecken bewusst in der Hardware: die **niedrige Stromgrenze**,
+damit der Fahrer den Motor jederzeit von Hand übersteuern kann, und der
+**Failsafe der Phidget-Steuerung**, die den Motor selbstständig anhält, wenn das
+Programm verstummt.
+
+Ohne Radwinkelsensor kann das Programm einen Fahrereingriff nicht erkennen. Bei
+`feedback: yaw_rate` sind die niedrige Stromgrenze und ein Not-Aus deshalb keine
+Empfehlung, sondern Bedingung.
+
+## Lenkautomatik über eine externe Lenkplatine
 
 > Erst lesen, dann bauen. Eine Lenkung, die sich selbst bewegt, ist keine
 > Bastelei – ohne Not-Aus und ohne Abschaltung bei Fahrereingriff gehört das

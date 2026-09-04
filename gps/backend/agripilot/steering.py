@@ -1,37 +1,32 @@
-"""Autosteer output.
+"""Lenkautomatik: die Entscheidung, ob gelenkt werden darf.
 
-This is the one module that can move a machine, so it is built to refuse rather
-than to try.  Steering only ever engages when every condition holds at once:
+Dies ist das einzige Modul, das eine Maschine bewegen kann. Es ist deshalb so
+gebaut, dass es lieber ablehnt als versucht. Gelenkt wird nur, wenn alles
+gleichzeitig stimmt:
 
-* it is enabled in the config file (a deliberate act during installation),
-* the driver has armed it from the cab screen for this session,
-* a guidance line is active and the machine is close enough to it,
-* the fix is good enough - a float RTK solution can jump half a metre,
-* speed is inside the configured window, and the position data is fresh.
+* in der Konfigurationsdatei freigegeben - eine bewusste Handlung beim Einbau,
+* vom Fahrer für diese Sitzung scharf geschaltet,
+* eine Spur ist aktiv und die Maschine ist nah genug daran,
+* der Fix ist gut genug - eine RTK-Float-Lösung springt um Dezimeter,
+* die Geschwindigkeit liegt im eingestellten Fenster und die Positionsdaten
+  sind frisch.
 
-The moment any of those stops being true the controller sends a disengage and
-says why.  The steering board is expected to centre itself if commands stop
-arriving (see `watchdog_ms`), so a crashed Pi or a pulled cable also ends in
-hands-back-to-the-driver rather than a machine holding a turn.
+Fällt eine Bedingung weg, geht sofort ein Abschaltbefehl raus, samt Grund im
+Klartext. Wie der Befehl bei der Mechanik ankommt, steht in actuators.py; die
+dortigen Ausgänge halten den Motor selbstständig an, wenn von hier nichts mehr
+kommt - ein abgestürztes Programm endet damit in "Fahrer übernimmt" und nicht
+in einer Maschine, die den Einschlag hält.
 """
 
 from __future__ import annotations
 
-import asyncio
-import struct
 import time
 from dataclasses import dataclass
 from typing import Optional
 
+from .actuators import NullOutput, SteerContext, SteerOutput
 from .guidance import GuidanceState
 from .nmea import Fix
-
-# Wire format to the steering board.  Small, fixed, and easy to reimplement on
-# an Arduino or ESP32: magic, version, flags, angle in centidegrees, speed in
-# cm/s, cross track in mm, XOR checksum.
-_FRAME = struct.Struct("<2sBBhHhB")
-_MAGIC = b"AP"
-_VERSION = 1
 
 
 @dataclass
@@ -49,52 +44,32 @@ class SteerCommand:
             "reason": self.reason,
         }
 
-    def encode(self) -> bytes:
-        flags = 1 if self.engaged else 0
-        angle = int(max(-90.0, min(90.0, self.angle_deg)) * 100)
-        speed = int(max(0.0, min(300.0, self.speed_ms)) * 100)
-        xte = int(max(-30.0, min(30.0, self.cross_track_m)) * 1000)
-        body = _FRAME.pack(_MAGIC, _VERSION, flags, angle, speed, xte, 0)
-        checksum = 0
-        for byte in body[:-1]:
-            checksum ^= byte
-        return body[:-1] + bytes([checksum])
-
-
-@dataclass
-class BoardFeedback:
-    """What the steering board reports back, when it reports at all."""
-
-    wheel_angle_deg: Optional[float] = None
-    driver_override: bool = False
-    remote_switch: bool = False
-    received_at: float = 0.0
-
-    @property
-    def fresh(self) -> bool:
-        return self.received_at > 0 and (time.time() - self.received_at) < 2.0
-
 
 class SteeringController:
-    def __init__(self, config) -> None:
+    def __init__(self, config, output: Optional[SteerOutput] = None) -> None:
         self.config = config
-        self.armed = False           # driver-controlled, resets on every stop
+        self.output = output or NullOutput()
+        self.armed = False           # vom Fahrer gesetzt, geht bei jedem Stopp weg
         self.command = SteerCommand()
-        self.feedback = BoardFeedback()
         self.last_sent_at = 0.0
         self.max_rate_deg_s = 25.0
+        self.disengage_count = 0
         self._last_angle = 0.0
         self._last_angle_at = 0.0
-        self._transport: Optional[asyncio.DatagramTransport] = None
-        self.disengage_count = 0
 
-    # -- driver controls --------------------------------------------------
+    # -- Bedienung durch den Fahrer ---------------------------------------
 
     def arm(self) -> str:
         if not self.config.enabled:
             self.armed = False
             return "Lenkautomatik ist in der Konfiguration deaktiviert"
+        if not self.output.ready:
+            self.armed = False
+            return f"Lenkausgang nicht bereit: {self.output.status}"
         self.armed = True
+        self._last_angle = 0.0
+        self._last_angle_at = 0.0
+        self.output.on_arm()
         return "scharf"
 
     def disarm(self, reason: str = "vom Fahrer ausgeschaltet") -> None:
@@ -102,13 +77,19 @@ class SteeringController:
             self.disengage_count += 1
         self.armed = False
         self.command = SteerCommand(reason=reason)
+        self.output.command(False, 0.0, SteerContext())
 
-    # -- main loop --------------------------------------------------------
+    # -- Hauptschleife ----------------------------------------------------
 
     def update(self, guidance: GuidanceState, fix: Fix,
+               context: Optional[SteerContext] = None,
                now: Optional[float] = None) -> SteerCommand:
-        """Decide whether to steer, and how much."""
+        """Entscheiden, ob gelenkt wird - und wie weit."""
         now = now or time.time()
+        context = context or SteerContext()
+        context.speed_ms = fix.speed_ms
+        context.cross_track_m = guidance.cross_track_m
+
         blocked = self._blocking_reason(guidance, fix, now)
         if blocked:
             if self.command.engaged:
@@ -126,17 +107,16 @@ class SteeringController:
                 speed_ms=fix.speed_ms,
                 cross_track_m=guidance.cross_track_m,
             )
-        self._send(self.command)
+        self.output.command(self.command.engaged, self.command.angle_deg, context)
+        self.last_sent_at = now
         return self.command
 
     def _rate_limit(self, target: float, now: float) -> float:
-        """Do not ask for more movement than the actuator can deliver.
+        """Nicht mehr Bewegung verlangen, als die Mechanik liefern kann.
 
-        A steering motor needs about a second to go lock to lock, so a
-        controller that jumps straight to a large angle is asking for something
-        that will not happen and then over-corrects when it arrives late.
-        Limiting the rate here matches the command to the machine and takes the
-        weave out of the first metres after engaging.
+        Ein Lenkmotor braucht rund eine Sekunde von Anschlag zu Anschlag. Ein
+        Regler, der sofort auf einen großen Winkel springt, verlangt etwas, das
+        nicht passiert, und korrigiert dann über, wenn es verspätet ankommt.
         """
         dt = min(0.5, now - self._last_angle_at) if self._last_angle_at else 0.1
         limit = self.max_rate_deg_s * max(0.02, dt)
@@ -148,14 +128,17 @@ class SteeringController:
     def _blocking_reason(self, guidance: GuidanceState, fix: Fix,
                          now: float) -> Optional[str]:
         cfg = self.config
+        feedback = self.output.feedback
         if not cfg.enabled:
             return "in der Konfiguration deaktiviert"
         if not self.armed:
             return "nicht scharf"
-        if self.feedback.fresh and self.feedback.driver_override:
-            # The driver turned the wheel. Hand over immediately and stay off
-            # until they arm again - silently re-engaging would be a nasty
-            # surprise halfway through a manual correction.
+        if not self.output.ready:
+            return f"Lenkausgang gestört: {self.output.status}"
+        if feedback.fresh and feedback.driver_override:
+            # Der Fahrer hat ins Lenkrad gegriffen. Sofort übergeben und aus
+            # bleiben, bis neu geschärft wird - ein stilles Wiedereinschalten
+            # mitten in einer Handkorrektur wäre die übelste Überraschung.
             self.armed = False
             return "Fahrer hat eingegriffen"
         if not guidance.active:
@@ -175,65 +158,24 @@ class SteeringController:
             return f"zu weit von der Spur ({guidance.cross_track_m:.2f} m)"
         return None
 
-    # -- transport --------------------------------------------------------
+    # -- Aufbau und Abbau -------------------------------------------------
 
     async def start(self) -> None:
-        if self.config.output != "udp":
-            return
-        loop = asyncio.get_running_loop()
-
-        controller = self
-
-        class _Protocol(asyncio.DatagramProtocol):
-            def datagram_received(self, data: bytes, addr) -> None:  # noqa: ANN001
-                controller._on_feedback(data)
-
-        self._transport, _ = await loop.create_datagram_endpoint(
-            _Protocol, remote_addr=(self.config.host, self.config.port)
-        )
+        await self.output.start()
 
     async def stop(self) -> None:
         self.disarm("System wird beendet")
-        if self._transport is not None:
-            # One last disengage so the board does not sit on the watchdog.
-            try:
-                self._transport.sendto(SteerCommand().encode())
-            except Exception:  # noqa: BLE001
-                pass
-            self._transport.close()
-            self._transport = None
-
-    def _send(self, command: SteerCommand) -> None:
-        if self._transport is None:
-            return
-        try:
-            self._transport.sendto(command.encode())
-            self.last_sent_at = time.time()
-        except Exception:  # noqa: BLE001
-            pass
-
-    def _on_feedback(self, data: bytes) -> None:
-        """Parse a status frame from the board: angle, override, switch."""
-        if len(data) < 6 or data[:2] != _MAGIC:
-            return
-        try:
-            angle, flags = struct.unpack_from("<hB", data, 3)
-        except struct.error:
-            return
-        self.feedback = BoardFeedback(
-            wheel_angle_deg=angle / 100.0,
-            driver_override=bool(flags & 0x01),
-            remote_switch=bool(flags & 0x02),
-            received_at=time.time(),
-        )
+        await self.output.stop()
 
     def status(self) -> dict:
+        feedback = self.output.feedback
         return {
             "configured": self.config.enabled,
             "armed": self.armed,
             "command": self.command.to_dict(),
-            "wheel_angle_deg": self.feedback.wheel_angle_deg,
-            "driver_override": self.feedback.driver_override and self.feedback.fresh,
-            "board_seen": self.feedback.fresh,
+            "output": self.output.status_dict(),
+            "wheel_angle_deg": feedback.wheel_angle_deg,
+            "driver_override": feedback.driver_override and feedback.fresh,
+            "duty": feedback.duty,
             "disengagements": self.disengage_count,
         }

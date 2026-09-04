@@ -1,5 +1,9 @@
 # Installation
 
+> Für die Zusammenstellung aus F9P, Phidget-Motor, IMU Brick und Windows-Tablet
+> ist [DEINE_ANLAGE.md](DEINE_ANLAGE.md) der kürzere Weg. Diese Seite beschreibt
+> die Einrichtung auf Raspberry Pi allgemein.
+
 Reihenfolge, die sich bewährt: erst am Schreibtisch mit dem Simulator alles
 ansehen, dann den Master aufsetzen, dann die Traktoren. Wer mit dem ersten
 Traktor anfängt, sucht Fehler an drei Stellen gleichzeitig.
@@ -112,6 +116,25 @@ gnss:
 > ```
 >
 > Danach in der Konfiguration `port: /dev/gnss` eintragen.
+
+## 3b. Auf einem Windows-Tablet statt einem Pi
+
+Das Tablet kann die Rolle des Pi vollständig übernehmen – es hat USB für
+Empfänger, Neigungssensor und Motorsteuerung, Bildschirm und Akku. In einer
+PowerShell **als Administrator** im Ordner `gps`:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\install_windows.ps1
+```
+
+Das Skript legt alles unter `C:\AgriPilot` an, schreibt die Konfiguration nach
+`C:\ProgramData\AgriPilot\config.yaml`, gibt Port 8080 in der Firewall frei
+(damit andere Tablets mitschauen können) und trägt einen Start beim Anmelden
+ein. Anschlüsse und Kanäle ermittelt danach:
+
+```powershell
+C:\AgriPilot\venv\Scripts\python.exe C:\AgriPilot\scripts\scan_devices.py
+```
 
 ## 4. Traktoren aufsetzen
 

@@ -211,6 +211,13 @@ class GuidanceTest(unittest.TestCase):
         heading.update(None, 12.0, 0.0)                  # echter Kurs schlägt alles
         self.assertAlmostEqual(heading.value, 12.0)
 
+    def test_heading_filter_uses_the_yaw_rate_when_crawling(self):
+        """Am Vorgewende steht der Kurs sonst still, obwohl der Traktor dreht."""
+        heading = HeadingFilter()
+        heading.update(90.0, None, 3.0)
+        heading.update(None, None, 0.1, yaw_rate_deg_s=20.0, dt=0.5)
+        self.assertAlmostEqual(heading.value, 100.0, places=6)
+
     def test_heading_filter_takes_the_short_way(self):
         heading = HeadingFilter(smoothing=0.5)
         heading.value = 359.0
@@ -379,10 +386,13 @@ class SyncTest(unittest.TestCase):
 
 class SteeringTest(unittest.TestCase):
     def setUp(self):
+        from agripilot.actuators import NullOutput
         from agripilot.config import SteeringConfig
         from agripilot.steering import SteeringController
         self.config = SteeringConfig(enabled=True, output="none")
-        self.controller = SteeringController(self.config)
+        self.output = NullOutput()
+        self.output.ready = True
+        self.controller = SteeringController(self.config, self.output)
         self.controller.max_rate_deg_s = 1000.0    # Ratenlimit hier nicht im Weg
 
     def _fix(self, quality=4, speed=3.0):
@@ -425,9 +435,10 @@ class SteeringTest(unittest.TestCase):
         self.assertFalse(self.controller.update(self._guidance(), stale).engaged)
 
     def test_driver_override_disarms(self):
-        from agripilot.steering import BoardFeedback
+        from agripilot.actuators import OutputFeedback
         self.controller.arm()
-        self.controller.feedback = BoardFeedback(driver_override=True, received_at=time.time())
+        self.output.feedback = OutputFeedback(driver_override=True,
+                                              received_at=time.time())
         command = self.controller.update(self._guidance(), self._fix())
         self.assertFalse(command.engaged)
         self.assertFalse(self.controller.armed)      # bleibt aus, bis neu geschärft
@@ -445,15 +456,116 @@ class SteeringTest(unittest.TestCase):
         command = self.controller.update(self._guidance(steer=-30.0), self._fix(), now=now)
         self.assertGreater(command.angle_deg, -10.0)   # nicht sofort voll eingeschlagen
 
-    def test_frame_is_compact_and_checksummed(self):
-        from agripilot.steering import SteerCommand
-        frame = SteerCommand(True, -3.4, "x", 2.5, 0.08).encode()
+    def test_refuses_when_the_output_is_not_ready(self):
+        self.output.ready = False
+        self.assertIn("nicht bereit", self.controller.arm())
+        self.assertFalse(self.controller.armed)
+
+
+class ActuatorTest(unittest.TestCase):
+    """Die Ausgänge: Telegramm an eine Lenkplatine, Regelgröße beim Motor."""
+
+    def test_udp_frame_is_compact_and_checksummed(self):
+        from agripilot.actuators import SteerContext, UdpOutput
+        frame = UdpOutput("127.0.0.1", 8888)._frame(
+            True, -3.4, SteerContext(speed_ms=2.5, cross_track_m=0.08))
         self.assertEqual(len(frame), 11)
         self.assertEqual(frame[:2], b"AP")
         checksum = 0
         for byte in frame[:-1]:
             checksum ^= byte
         self.assertEqual(frame[-1], checksum)
+
+    def test_wheel_angle_error_when_a_sensor_is_present(self):
+        from agripilot.actuators import PhidgetOutput, SteerContext
+        from agripilot.config import PhidgetConfig
+        output = PhidgetOutput(PhidgetConfig(feedback="was"))
+        output._target_angle = 10.0
+        self.assertAlmostEqual(output._error(4.0), 6.0)
+
+    def test_yaw_rate_error_uses_the_bicycle_model(self):
+        """Ohne Radwinkelsensor wird die Drehrate geregelt, nicht der Winkel."""
+        from agripilot.actuators import PhidgetOutput, SteerContext
+        from agripilot.config import PhidgetConfig
+        output = PhidgetOutput(PhidgetConfig(feedback="yaw_rate"))
+        output._target_angle = 10.0
+        output._context = SteerContext(speed_ms=3.0, wheelbase_m=2.6,
+                                       yaw_rate_deg_s=0.0)
+        # 3 m/s durch 2,6 m Radstand mal tan(10°) = 11,66 Grad je Sekunde
+        self.assertAlmostEqual(output._error(None), 11.66, places=1)
+        # Dreht der Traktor bereits so schnell, ist der Fehler null
+        output._context.yaw_rate_deg_s = 11.66
+        self.assertAlmostEqual(output._error(None), 0.0, places=1)
+
+    def test_yaw_rate_mode_does_nothing_without_a_rate(self):
+        from agripilot.actuators import PhidgetOutput, SteerContext
+        from agripilot.config import PhidgetConfig
+        output = PhidgetOutput(PhidgetConfig(feedback="yaw_rate"))
+        output._target_angle = 20.0
+        output._context = SteerContext(speed_ms=3.0, yaw_rate_deg_s=None)
+        self.assertEqual(output._error(None), 0.0)
+
+    def test_output_choice_follows_the_configuration(self):
+        from agripilot import config as config_module
+        from agripilot.actuators import build_output
+        config = config_module.load("/kein-solcher-pfad.yaml")
+        config.steering.output = "phidget"
+        self.assertEqual(build_output(config).name, "phidget")
+        config.steering.output = "udp"
+        self.assertEqual(build_output(config).name, "udp")
+        config.steering.output = "none"
+        self.assertEqual(build_output(config).name, "none")
+
+
+class ImuTest(unittest.TestCase):
+    """Hangausgleich - der Grund, warum überhaupt ein Neigungssensor dranhängt."""
+
+    def test_terrain_offset_grows_with_slope_and_height(self):
+        from agripilot.imu import Attitude, terrain_offset
+        right, forward = terrain_offset(Attitude(roll_deg=6.0), 3.0)
+        self.assertAlmostEqual(right, 3.0 * math.sin(math.radians(6.0)), places=6)
+        self.assertAlmostEqual(right, 0.3136, places=3)      # gut 31 cm
+        self.assertAlmostEqual(forward, 0.0)
+        # Halbe Antennenhöhe, halber Versatz
+        half, _ = terrain_offset(Attitude(roll_deg=6.0), 1.5)
+        self.assertAlmostEqual(half, right / 2, places=6)
+
+    def test_pitch_shifts_along_the_direction_of_travel(self):
+        from agripilot.imu import Attitude, terrain_offset
+        _, forward = terrain_offset(Attitude(pitch_deg=5.0), 3.0)
+        self.assertAlmostEqual(forward, 3.0 * math.sin(math.radians(5.0)), places=6)
+
+    def test_roll_sign_can_be_flipped_for_the_mounting(self):
+        from agripilot.imu import Attitude, terrain_offset
+        normal, _ = terrain_offset(Attitude(roll_deg=6.0), 3.0, roll_sign=1.0)
+        flipped, _ = terrain_offset(Attitude(roll_deg=6.0), 3.0, roll_sign=-1.0)
+        self.assertAlmostEqual(normal, -flipped, places=6)
+
+    def test_levelling_removes_a_mounting_error(self):
+        from agripilot.imu import SimulatedImu
+        source = SimulatedImu()
+        source._publish(2.5, -1.0, None, 0.0)
+        self.assertAlmostEqual(source.attitude.roll_deg, 2.5)
+        source.level_here()                       # "hier ist eben"
+        source._publish(2.5, -1.0, None, 0.0)
+        self.assertAlmostEqual(source.attitude.roll_deg, 0.0, places=6)
+        source._publish(8.5, -1.0, None, 0.0)     # echte 6 Grad Hang
+        self.assertAlmostEqual(source.attitude.roll_deg, 6.0, places=6)
+
+    def test_axis_mapping_covers_the_usual_mountings(self):
+        from agripilot.imu import TinkerforgeImu
+        standard = TinkerforgeImu(axis_map="standard")
+        self.assertEqual(standard._map_axes(3.0, 1.0), (3.0, 1.0))
+        swapped = TinkerforgeImu(axis_map="swapped")
+        self.assertEqual(swapped._map_axes(3.0, 1.0), (1.0, 3.0))
+        inverted = TinkerforgeImu(axis_map="inverted")
+        self.assertEqual(inverted._map_axes(3.0, 1.0), (-3.0, -1.0))
+
+    def test_attitude_goes_stale(self):
+        from agripilot.imu import Attitude
+        self.assertFalse(Attitude().fresh)
+        self.assertTrue(Attitude(received_at=time.time()).fresh)
+        self.assertFalse(Attitude(received_at=time.time() - 5).fresh)
 
 
 class ExportTest(unittest.TestCase):
@@ -573,6 +685,34 @@ class EngineTest(unittest.TestCase):
         # Danach geht es an der neuen Stelle ganz normal weiter
         self._drive(40.0, 50.0, 70.0, start_time=end + 0.2)
         self.assertGreater(self.engine.coverage.area_m2, area_before + 100.0)
+
+    def test_terrain_compensation_moves_the_position_off_the_antenna(self):
+        """Am Hang steht die Antenne neben dem Punkt, der bearbeitet wird."""
+        from agripilot.imu import SimulatedImu
+
+        field = self.store.save_field({"name": "Hang", "datum_lat": 48.0, "datum_lon": 11.0})
+        self.engine.load_field(field["id"])
+        self.engine.update_profile({"antenna_forward_m": 0.0, "tool_trailing_m": 0.0,
+                                    "antenna_height_m": 3.0})
+        imu = SimulatedImu()
+        self.engine.imu = imu
+
+        # Eben: die Position bleibt, wo der Empfänger sie meldet
+        imu._publish(0.0, 0.0, None, 0.0)
+        self.engine.on_fix(self._fix(0.0, 0.0, 0.0, 3.0, 1000.0))
+        self.engine.on_fix(self._fix(0.0, 10.0, 0.0, 3.0, 1003.0))
+        self.assertAlmostEqual(self.engine.tool_position[0], 0.0, places=3)
+
+        # Sechs Grad Seitenhang, Fahrt nach Norden: gut 31 cm nach links
+        imu._publish(6.0, 0.0, None, 0.0)
+        self.engine.on_fix(self._fix(0.0, 20.0, 0.0, 3.0, 1006.0))
+        self.assertAlmostEqual(self.engine.tool_position[0], -0.3136, places=3)
+        self.assertAlmostEqual(self.engine.terrain_offset_m[0], 0.3136, places=3)
+
+        # Abschalten lässt die Position unverändert stehen
+        self.engine.config.imu.terrain_compensation = False
+        self.engine.on_fix(self._fix(0.0, 30.0, 0.0, 3.0, 1009.0))
+        self.assertAlmostEqual(self.engine.tool_position[0], 0.0, places=3)
 
     def test_ab_line_needs_two_separated_points(self):
         field = self.store.save_field({"name": "F", "datum_lat": 48.0, "datum_lon": 11.0})

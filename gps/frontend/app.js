@@ -112,6 +112,18 @@ function updateHud(s) {
   el('area').textContent = s.job ? s.job.area_ha.toFixed(2)
                                  : (s.coverage ? s.coverage.area_ha.toFixed(2) : '--');
 
+  // Hang und Ausgleich: die Zahl, die erklärt, warum die Spur am Hang sonst
+  // wandert - der Ausgleich steht daneben, damit man ihm ansieht, dass er wirkt.
+  const imu = s.imu;
+  el('tiltBox').hidden = !imu;
+  if (imu) {
+    const correction = Math.abs(imu.terrain_offset_cm ? imu.terrain_offset_cm[0] : 0);
+    el('tilt').textContent = imu.roll_deg.toFixed(1);
+    el('tilt').className = 'readout-value' +
+      (!imu.fresh ? '' : correction > 15 ? ' left' : ' centre');
+    el('tiltBox').title = `Hangausgleich ${correction.toFixed(0)} cm`;
+  }
+
   // Genauigkeit ist die Zahl, an der alles hängt – deshalb immer sichtbar.
   const fixChip = el('fixChip');
   if (!fix) { fixChip.textContent = 'kein GPS'; fixChip.className = 'chip bad'; }
@@ -584,6 +596,13 @@ el('btnSaveProfile').onclick = async () => {
 el('autoSections').onchange = (event) =>
   api('POST', '/api/sections/auto', { enabled: event.target.checked });
 
+el('btnLevel').onclick = async () => {
+  const result = await api('POST', '/api/imu/level');
+  if (result) toast('Neigungssensor genullt');
+};
+el('compensation').onchange = (event) =>
+  api('POST', '/api/imu/compensation', { enabled: event.target.checked });
+
 el('simSpeed').oninput = (event) =>
   api('POST', '/api/simulator', { speed_kmh: parseFloat(event.target.value) });
 el('simSteer').oninput = (event) =>
@@ -694,10 +713,23 @@ function renderSystem() {
   const system = state.live && state.live.system;
   const host = el('systemList');
   if (!system) { host.innerHTML = '<p class="note">Keine Daten.</p>'; return; }
+  const imu = state.live.imu;
+  el('imuRow').hidden = !imu;
+  el('imuNote').hidden = !imu;
+  if (imu) el('compensation').checked = !!imu.compensation;
+
+  const steering = state.live.steering;
   const rows = [
     ['Rolle', system.role === 'master' ? 'Master' : 'Client', true],
     ['Version', system.version, true],
     ['GPS-Quelle', `${system.gnss.source} · ${system.gnss.status}`, system.gnss.healthy],
+    ['Neigungssensor', system.imu.source === 'aus' ? 'nicht eingerichtet'
+      : `${system.imu.status}` + (imu ? ` · Hang ${imu.roll_deg.toFixed(1)}° · ` +
+        `Ausgleich ${Math.abs(imu.terrain_offset_cm[0]).toFixed(0)} cm` : ''),
+      system.imu.source === 'aus' ? true : system.imu.healthy],
+    ['Lenkausgang', `${system.steering_output.typ} · ${system.steering_output.status}` +
+      (steering && steering.duty ? ` · ${(steering.duty * 100).toFixed(0)} %` : ''),
+      system.steering_output.bereit || system.steering_output.typ === 'none'],
     ['Korrekturdaten (RTK)', system.ntrip.status +
       (system.ntrip.bytes ? ` · ${(system.ntrip.bytes / 1024).toFixed(0)} kB` : ''),
       system.ntrip.healthy],

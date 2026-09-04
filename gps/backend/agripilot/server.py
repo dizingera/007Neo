@@ -23,7 +23,8 @@ from fastapi.responses import JSONResponse, PlainTextResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from . import config as config_module
-from . import export, sync
+from . import export, imu as imu_module, sync
+from .actuators import build_output
 from .coverage import CoverageMap
 from .engine import Engine
 from .gnss import SimulatorSource, build_source
@@ -43,11 +44,17 @@ class Application:
         self.config = config
         self.store = Storage(config.db_path)
         self.engine = Engine(config, self.store)
-        self.steering = SteeringController(config.steering)
-        self.engine.steering = self.steering
         self.source = build_source(config, self.engine.on_fix)
         if isinstance(self.source, SimulatorSource):
             self.engine.simulator = self.source
+        # Der Neigungssensor kennt beim Simulator das virtuelle Fahrzeug, damit
+        # Hangausgleich und Drehrate auch ohne Hardware sichtbar werden.
+        self.imu = imu_module.build_source(config, self.engine.simulator)
+        self.engine.imu = self.imu
+        self.steering = SteeringController(
+            config.steering, build_output(config, self.imu)
+        )
+        self.engine.steering = self.steering
         self.relay: Optional[RtcmRelay] = None
         self.ntrip: Optional[NtripClient] = None
         self.rtcm_client: Optional[RtcmRelayClient] = None
@@ -63,8 +70,16 @@ class Application:
             cfg.network.device_id, cfg.network.device_name,
             cfg.network.role, VERSION,
         )
+        if self.imu is not None:
+            # Die Nullung des Sensors gehört zum Einbau und darf einen Neustart
+            # überleben - sonst muss nach jedem Ausschalten neu genullt werden.
+            offsets = self.store.get_setting("imu_offsets") or {}
+            self.imu.roll_offset = float(offsets.get("roll_offset", 0.0))
+            self.imu.pitch_offset = float(offsets.get("pitch_offset", 0.0))
         await self.steering.start()
         self.tasks.append(asyncio.create_task(self.source.run()))
+        if self.imu is not None:
+            self.tasks.append(asyncio.create_task(self.imu.run()))
 
         if cfg.is_master:
             # The master owns the caster connection and re-serves it.
@@ -89,6 +104,8 @@ class Application:
             self.engine.stop_job()
         await self.steering.stop()
         await self.source.stop()
+        if self.imu is not None:
+            await self.imu.stop()
         for component in (self.ntrip, self.rtcm_client, self.sync_client):
             if component is not None:
                 await component.stop()
@@ -149,6 +166,13 @@ class Application:
                 "bytes": (self.ntrip.bytes_received if self.ntrip else
                           self.rtcm_client.bytes_received if self.rtcm_client else 0),
             },
+            "imu": {
+                "source": self.config.imu.source,
+                "status": self.imu.status if self.imu else "aus",
+                "healthy": bool(self.imu and self.imu.healthy),
+                "compensation": self.config.imu.terrain_compensation,
+            },
+            "steering_output": self.steering.output.status_dict(),
             "relay": {
                 "running": bool(self.relay and self.relay.server is not None),
                 "status": self.relay.status if self.relay else "aus",
@@ -374,6 +398,21 @@ def create_app(config=None) -> FastAPI:
         if "auto" in payload:
             section.auto = bool(payload["auto"])
         return ok()
+
+    @api.post("/api/imu/level")
+    async def level_imu():
+        """Aktuelle Lage als eben merken - auf ebenem Boden ausführen."""
+        if application.imu is None:
+            raise HTTPException(400, "Kein Neigungssensor eingerichtet")
+        result = application.imu.level_here()
+        store.set_setting("imu_offsets", result)
+        engine.note("Neigungssensor genullt")
+        return ok(result)
+
+    @api.post("/api/imu/compensation")
+    async def set_compensation(payload: dict = Body(...)):
+        config.imu.terrain_compensation = bool(payload.get("enabled", True))
+        return ok({"compensation": config.imu.terrain_compensation})
 
     @api.post("/api/steering/arm")
     async def arm_steering():
