@@ -76,13 +76,20 @@ imu:
   roll_sign: 1.0
   terrain_compensation: true
 
-ntrip:
-  enabled: false           # RTK-Zugangsdaten hier eintragen
+corrections:
+  # RTK-Korrekturen. Quelle je nach Anlage:
+  #   ntrip  - Caster (Dienst, oder eigene Basis mit Caster wie RTKBase)
+  #   tcp    - roher RTCM3-Strom von einer eigenen Basis, ohne Anmeldung
+  #   serial - Funkmodem an diesem Rechner (z.B. COM4)
+  #   aus    - Funkmodem steckt direkt am Empfänger, oder kein RTK
+  source: aus
   host: ''
   port: 2101
   mountpoint: ''
   username: ''
   password: ''
+  serial_port: ''
+  baudrate: 115200
   send_gga: true
 
 network:

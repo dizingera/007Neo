@@ -1,7 +1,9 @@
-"""RTK corrections: NTRIP client, and a relay so one connection serves the yard.
+"""RTK-Korrekturen: Quellen, und ein Verteiler, damit eine Verbindung den Hof versorgt.
 
-Centimetre accuracy needs a correction stream from a base station.  The usual
-way to get it is an NTRIP caster (a state service, a co-op, or your own base).
+Zentimeter gibt es nur mit einem Korrekturstrom von einer Basisstation. Wie er
+hereinkommt, hängt an der Anlage - ein Dienst spricht NTRIP, eine selbst
+gebaute Basis oft nur einen rohen RTCM3-Strom auf einem Port, und ein Funkmodem
+liefert ihn seriell. Alle drei landen hier bei derselben Senke.
 
 The relay matters for a fleet.  Casters normally allow one connection per
 account, and mobile data in a field is unreliable and metered.  So the master Pi
@@ -23,27 +25,45 @@ from .nmea import build_gga
 RtcmSink = Callable[[bytes], None]
 
 
-class NtripClient:
-    """Streams RTCM3 from a caster and hands the bytes to a sink."""
+class CorrectionSource:
+    """Gemeinsames Verhalten aller Quellen: laufen, melden, sich erholen."""
 
-    def __init__(self, config, sink: RtcmSink,
-                 position: Optional[Callable[[], tuple[float, float]]] = None) -> None:
-        self.config = config
+    def __init__(self, sink: RtcmSink) -> None:
         self.sink = sink
-        self.position = position
         self.running = False
         self.status = "aus"
         self.bytes_received = 0
         self.last_data_at = 0.0
-        self._writer: Optional[asyncio.StreamWriter] = None
 
     @property
     def healthy(self) -> bool:
         return self.running and (time.time() - self.last_data_at) < 10.0
 
+    def _received(self, chunk: bytes) -> None:
+        self.bytes_received += len(chunk)
+        self.last_data_at = time.time()
+        self.sink(chunk)
+
+    async def run(self) -> None:  # pragma: no cover - in Unterklassen
+        raise NotImplementedError
+
+    async def stop(self) -> None:
+        self.running = False
+
+
+class NtripClient(CorrectionSource):
+    """Holt RTCM3 von einem Caster."""
+
+    def __init__(self, config, sink: RtcmSink,
+                 position: Optional[Callable[[], tuple[float, float]]] = None) -> None:
+        super().__init__(sink)
+        self.config = config
+        self.position = position
+        self._writer: Optional[asyncio.StreamWriter] = None
+
     async def run(self) -> None:
-        if not self.config.enabled or not self.config.host:
-            self.status = "aus"
+        if not self.config.host:
+            self.status = "kein Caster eingetragen"
             return
         self.running = True
         backoff = 2.0
@@ -90,9 +110,7 @@ class NtripClient:
                 chunk = await reader.read(4096)
                 if not chunk:
                     raise ConnectionError("Caster hat die Verbindung beendet")
-                self.bytes_received += len(chunk)
-                self.last_data_at = time.time()
-                self.sink(chunk)
+                self._received(chunk)
         finally:
             gga_task.cancel()
             writer.close()
@@ -123,8 +141,110 @@ class NtripClient:
             self._writer.close()
 
 
+class TcpRtcmSource(CorrectionSource):
+    """Roher RTCM3-Strom von einem Netzwerkport, ohne Anmeldung.
+
+    So gibt eine selbst gebaute Basis ihre Daten aus, wenn sie nur einen Server
+    öffnet statt eines Casters - etwa str2str aus RTKLIB im Server-Betrieb. Es
+    gibt keinen Anmeldevorgang und keinen Mountpoint: verbinden und mitlesen.
+    """
+
+    def __init__(self, host: str, port: int, sink: RtcmSink,
+                 beschreibung: str = "Basisstation") -> None:
+        super().__init__(sink)
+        self.host = host
+        self.port = port
+        self.beschreibung = beschreibung
+
+    async def run(self) -> None:
+        if not self.host:
+            self.status = "keine Adresse eingetragen"
+            return
+        self.running = True
+        backoff = 2.0
+        while self.running:
+            try:
+                reader, writer = await asyncio.open_connection(self.host, self.port)
+                self.status = f"{self.beschreibung} {self.host}:{self.port}"
+                backoff = 2.0
+                try:
+                    while self.running:
+                        chunk = await reader.read(4096)
+                        if not chunk:
+                            raise ConnectionError("Gegenstelle hat beendet")
+                        self._received(chunk)
+                finally:
+                    writer.close()
+            except Exception as exc:  # noqa: BLE001
+                self.status = f"Fehler: {exc}"
+                await asyncio.sleep(backoff)
+                backoff = min(30.0, backoff * 2)
+
+
+class SerialRtcmSource(CorrectionSource):
+    """RTCM3 von einem Funkmodem oder direkt von der Basis am seriellen Anschluss.
+
+    Gemeint ist der Fall, dass das Modem am *Rechner* hängt und die Korrekturen
+    von hier an den Empfänger weitergereicht werden. Steckt das Modem
+    unmittelbar am Empfänger, ist hier nichts einzustellen - dann sieht die
+    Software den Strom gar nicht, und das ist auch gut so.
+    """
+
+    def __init__(self, port: str, baudrate: int, sink: RtcmSink) -> None:
+        super().__init__(sink)
+        self.port = port
+        self.baudrate = baudrate
+
+    async def run(self) -> None:
+        if not self.port:
+            self.status = "kein Anschluss eingetragen"
+            return
+        self.running = True
+        backoff = 1.0
+        loop = asyncio.get_running_loop()
+        while self.running:
+            link = None
+            try:
+                import serial
+                link = serial.Serial(self.port, self.baudrate, timeout=1)
+                self.status = f"Funkmodem {self.port} @ {self.baudrate}"
+                backoff = 1.0
+                while self.running:
+                    chunk = await loop.run_in_executor(None, link.read, 512)
+                    if chunk:
+                        self._received(chunk)
+            except ImportError:
+                self.status = "pyserial fehlt (pip install pyserial)"
+                await asyncio.sleep(10)
+            except Exception as exc:  # noqa: BLE001
+                self.status = f"Fehler: {exc}"
+                await asyncio.sleep(backoff)
+                backoff = min(15.0, backoff * 2)
+            finally:
+                if link is not None:
+                    try:
+                        link.close()
+                    except Exception:  # noqa: BLE001
+                        pass
+
+
+def build_corrections(config, sink: RtcmSink,
+                      position: Optional[Callable[[], tuple[float, float]]] = None
+                      ) -> Optional[CorrectionSource]:
+    """Quelle für die Korrekturdaten aus der Konfiguration wählen."""
+    cfg = config.corrections
+    art = (cfg.source or "aus").lower()
+    if art in ("", "aus", "off", "none"):
+        return None
+    if art == "tcp":
+        return TcpRtcmSource(cfg.host, cfg.port, sink)
+    if art == "serial":
+        return SerialRtcmSource(cfg.serial_port, cfg.baudrate, sink)
+    return NtripClient(cfg, sink, position)
+
+
 class RtcmRelay:
-    """Re-serves one correction stream to every machine on the farm network."""
+    """Gibt einen Korrekturstrom an alle Maschinen im Hofnetz weiter."""
 
     def __init__(self, port: int) -> None:
         self.port = port
@@ -188,44 +308,10 @@ class RtcmRelay:
         return len(self.clients)
 
 
-class RtcmRelayClient:
-    """The other side of the relay: a tractor pulling corrections from the master."""
+class RtcmRelayClient(TcpRtcmSource):
+    """Die andere Seite des Verteilers: ein Traktor holt sich die Korrekturen
+    vom Master. Technisch derselbe rohe Strom wie von einer Basis, nur mit einer
+    anderen Beschriftung auf der Systemseite."""
 
     def __init__(self, host: str, port: int, sink: RtcmSink) -> None:
-        self.host = host
-        self.port = port
-        self.sink = sink
-        self.running = False
-        self.status = "aus"
-        self.bytes_received = 0
-        self.last_data_at = 0.0
-
-    @property
-    def healthy(self) -> bool:
-        return self.running and (time.time() - self.last_data_at) < 10.0
-
-    async def run(self) -> None:
-        self.running = True
-        backoff = 2.0
-        while self.running:
-            try:
-                reader, writer = await asyncio.open_connection(self.host, self.port)
-                self.status = f"Korrekturen vom Master {self.host}:{self.port}"
-                backoff = 2.0
-                try:
-                    while self.running:
-                        chunk = await reader.read(4096)
-                        if not chunk:
-                            raise ConnectionError("Master hat die Verbindung beendet")
-                        self.bytes_received += len(chunk)
-                        self.last_data_at = time.time()
-                        self.sink(chunk)
-                finally:
-                    writer.close()
-            except Exception as exc:  # noqa: BLE001
-                self.status = f"Fehler: {exc}"
-                await asyncio.sleep(backoff)
-                backoff = min(30.0, backoff * 2)
-
-    async def stop(self) -> None:
-        self.running = False
+        super().__init__(host, port, sink, beschreibung="Korrekturen vom Master")

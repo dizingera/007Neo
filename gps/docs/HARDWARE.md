@@ -46,24 +46,70 @@ Einmal mit dem Maßband richtig gemessen, stimmt es danach immer.
 
 ## RTK-Korrekturdaten
 
-Zentimeter gibt es nur mit Korrekturdaten von einer Basisstation. Drei Wege:
+Zentimeter gibt es nur mit Korrekturdaten von einer Basisstation. Woher sie
+kommen, ist die eine Frage; **wie sie zum Traktor gelangen**, die andere – und
+die entscheidet, was einzustellen ist.
 
-1. **Öffentlicher/staatlicher Dienst** (in Deutschland z.B. SAPOS, in Österreich
-   APOS, dazu private Anbieter). Zugangsdaten eintragen, fertig. Kostet je nach
-   Bundesland zwischen nichts und einigen hundert Euro im Jahr.
+### Die Quelle
+
+1. **Öffentlicher oder privater Dienst** (in Deutschland z.B. SAPOS, in
+   Österreich APOS, dazu private Anbieter). Spricht NTRIP, Zugangsdaten
+   eintragen, fertig. Kostet je nach Bundesland zwischen nichts und einigen
+   hundert Euro im Jahr.
 2. **Verein oder Nachbar** mit eigener Basis und offenem NTRIP-Caster.
-3. **Eigene Basisstation**: ein zweiter ZED-F9P auf einem festen Punkt am Hof.
-   Einmalig teurer, danach kostenlos und unabhängig vom Mobilfunk. Der Master
-   kann die Korrekturen direkt weitergeben.
+3. **Eigene Basisstation** – ein zweiter ZED-F9P auf einem festen Punkt am Hof.
+   Einmalig teurer, danach kostenlos und unabhängig vom Mobilfunk.
 
-Eingetragen wird das in `/etc/agripilot/config.yaml` unter `ntrip:`. Der Master
-hält **eine** Verbindung zum Caster und gibt den Datenstrom an alle anderen
-Traktoren weiter (Port 2102) – die brauchen dadurch weder eigene SIM-Karte noch
-zweiten Zugang.
+### Der Weg zum Traktor
+
+```yaml
+corrections:
+  source: ntrip        # ntrip | tcp | serial | aus
+```
+
+| `source` | Wann | Einzustellen |
+|---|---|---|
+| `ntrip` | Ein Dienst, oder eine eigene Basis mit Caster (z.B. RTKBase, str2str im Caster-Betrieb) | `host`, `port`, `mountpoint`, `username`, `password` |
+| `tcp` | Eigene Basis, die nur einen Port mit rohem RTCM3 öffnet – ohne Anmeldung, ohne Mountpoint | `host`, `port` |
+| `serial` | Funkmodem am **Rechner**, das die Korrekturen hereinreicht | `serial_port`, `baudrate` |
+| `aus` | Funkmodem steckt **direkt am Empfänger** – dann läuft der Strom an der Software vorbei, und das ist richtig so | nichts |
+
+Der Master hält **eine** Verbindung zur Quelle und gibt den Strom über Port 2102
+an alle anderen Traktoren weiter. Die brauchen dadurch weder eigene SIM-Karte
+noch zweiten Zugang – und bei einer eigenen Basis auch keine zweite Verbindung
+zu ihr.
+
+### Eigene Basisstation: der eine Fehler, der teuer wird
+
+Eine Basis kann ihre Position auf zwei Arten bestimmen:
+
+* **Survey-in** – sie mittelt beim Einschalten ein paar Minuten lang ihre eigene
+  Position ein.
+* **Fester Punkt** – die Koordinaten stehen fest in der Basis.
+
+**Für Landwirtschaft muss es der feste Punkt sein.** Bei Survey-in landet die
+Basis nach jedem Stromausfall auf leicht anderen Koordinaten – und weil alle
+Spuren relativ zur Basis liegen, wandert damit *das ganze Feld* mit. Die
+AB-Linie von letzter Woche liegt dann um Dezimeter daneben, ohne dass irgendwo
+ein Fehler angezeigt wird. Was zählt, ist nicht, wie genau die Basis absolut
+steht, sondern dass sie **jeden Tag auf denselben Koordinaten** steht.
+
+Vorgehen: einmal ein langes Survey-in laufen lassen (mehrere Stunden, je länger
+desto besser), das Ergebnis notieren und anschließend fest als
+`Fixed Mode`-Koordinate in die Basis eintragen. Ab dann nie wieder ändern –
+und die Koordinaten aufschreiben, damit sie nach einem Tausch der Basis wieder
+gesetzt werden können.
+
+### Prüfen, ob der Weg trägt
 
 Die Anzeige oben rechts zeigt jederzeit, woran man ist: `RTK fix` ist das Ziel,
 `RTK float` reicht nicht (die Lösung kann um Dezimeter springen), `DGPS` und
 `GPS` sind reine Orientierung.
+
+Auf der Systemseite steht zusätzlich das **Alter der Korrekturen**. Das ist die
+ehrlichere Zahl als die übertragene Datenmenge: es steigt, sobald der Weg von
+der Basis abreißt, auch wenn die Verbindung noch zu stehen scheint. Über etwa
+30 Sekunden wird die Lösung merklich schlechter.
 
 ## Empfänger einstellen
 

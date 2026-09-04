@@ -63,15 +63,17 @@ static routers=192.168.10.254
 static domain_name_servers=192.168.10.254
 ```
 
-**RTK-Zugangsdaten eintragen:**
+**Korrekturquelle eintragen:**
 
 ```bash
 sudo nano /etc/agripilot/config.yaml
 ```
 
+Ein Dienst oder eine eigene Basis mit Caster:
+
 ```yaml
-ntrip:
-  enabled: true
+corrections:
+  source: ntrip
   host: ntrip.mein-anbieter.de
   port: 2101
   mountpoint: VRS_3_2G_BY
@@ -79,6 +81,18 @@ ntrip:
   password: meinpasswort
   send_gga: true       # Netz-RTK braucht die eigene Position
 ```
+
+Eine eigene Basis, die nur einen Port mit rohem RTCM3 öffnet:
+
+```yaml
+corrections:
+  source: tcp
+  host: 192.168.10.5
+  port: 9000
+```
+
+Weitere Wege (Funkmodem am Rechner, Modem direkt am Empfänger) und der wichtige
+Hinweis zu festen Basiskoordinaten stehen in [HARDWARE.md](HARDWARE.md).
 
 ```bash
 sudo systemctl restart agripilot
@@ -243,7 +257,8 @@ Konfiguration und Daten bleiben unangetastet.
 | Bild | Ursache | Abhilfe |
 |---|---|---|
 | „kein GPS" | Empfänger nicht erkannt | `check_receiver.py`, Anschluss und Baudrate prüfen |
-| Fix bleibt „GPS" statt „RTK fix" | keine Korrekturdaten | **System**-Seite ansehen; NTRIP-Zugang, Mountpoint, Mobilfunk |
+| Fix bleibt „GPS" statt „RTK fix" | keine Korrekturdaten | **System**-Seite ansehen; `corrections.source`, Zugang, Mountpoint, Funkstrecke |
+| Alter der Korrekturen steigt | Weg von der Basis abgerissen | Funk oder Netz prüfen; die Byte-Zahl allein täuscht |
 | „RTK float" hält sich | schlechte Sicht, zu wenig Satelliten | Antennenplatz prüfen, Basisstation zu weit weg (>30 km) |
 | Spur liegt gleichmäßig daneben | Antennenmaße falsch | Werte im Menü **Maschine** nachmessen |
 | Lenkung wird nicht scharf | eine Bedingung fehlt | die Anzeige nennt den Grund im Klartext |

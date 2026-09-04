@@ -10,6 +10,7 @@ Flächen, Vorzeichen der Abweichung, und die Bedingungen, unter denen die
 Lenkautomatik einschalten darf.
 """
 
+import asyncio
 import math
 import os
 import sys
@@ -382,6 +383,100 @@ class SyncTest(unittest.TestCase):
         sync.apply_changes(self.master, sync.collect_changes(self.client, 0))
         merged = sync.merge_field_coverage(self.master, field["id"])
         self.assertAlmostEqual(merged.area_m2, 1200.0, places=1)
+
+
+class CorrectionsTest(unittest.IsolatedAsyncioTestCase):
+    """Woher die RTK-Korrekturen kommen - Dienst, eigene Basis oder Funkmodem."""
+
+    def _config(self, **werte):
+        from agripilot import config as config_module
+        config = config_module.load("/kein-solcher-pfad.yaml")
+        for schluessel, wert in werte.items():
+            setattr(config.corrections, schluessel, wert)
+        return config
+
+    def test_source_choice_picks_the_right_client(self):
+        from agripilot.ntrip import (NtripClient, SerialRtcmSource, TcpRtcmSource,
+                                     build_corrections)
+        sink = []
+        self.assertIsNone(build_corrections(self._config(source="aus"), sink.append))
+        self.assertIsInstance(
+            build_corrections(self._config(source="ntrip"), sink.append), NtripClient)
+        self.assertIsInstance(
+            build_corrections(self._config(source="tcp"), sink.append), TcpRtcmSource)
+        self.assertIsInstance(
+            build_corrections(self._config(source="serial"), sink.append),
+            SerialRtcmSource)
+
+    def test_enabled_follows_the_source(self):
+        self.assertFalse(self._config(source="aus").corrections.enabled)
+        self.assertTrue(self._config(source="tcp").corrections.enabled)
+
+    def test_old_configuration_files_still_work(self):
+        """Dateien mit dem früheren ntrip-Abschnitt dürfen nicht stehen bleiben."""
+        from agripilot import config as config_module
+        with tempfile.TemporaryDirectory() as ordner:
+            pfad = os.path.join(ordner, "alt.yaml")
+            with open(pfad, "w", encoding="utf-8") as datei:
+                datei.write("ntrip:\n  enabled: true\n  host: 192.168.10.5\n"
+                            "  mountpoint: BASIS1\n  username: u\n  password: p\n")
+            config = config_module.load(pfad)
+            self.assertEqual(config.corrections.source, "ntrip")
+            self.assertEqual(config.corrections.host, "192.168.10.5")
+            self.assertEqual(config.corrections.mountpoint, "BASIS1")
+
+            with open(pfad, "w", encoding="utf-8") as datei:
+                datei.write("ntrip:\n  enabled: false\n  host: alt.example\n")
+            self.assertEqual(config_module.load(pfad).corrections.source, "aus")
+
+    def test_password_never_leaves_through_the_interface(self):
+        config = self._config(source="ntrip", password="geheim")
+        self.assertEqual(config.to_dict()["corrections"]["password"], "***")
+
+    async def test_raw_stream_from_an_own_base_arrives(self):
+        """Eine selbst gebaute Basis öffnet oft nur einen Port ohne Anmeldung."""
+        from agripilot.ntrip import TcpRtcmSource
+
+        empfangen = []
+        server = await asyncio.start_server(
+            lambda reader, writer: writer.write(b"\xd3\x00\x13RTCM"),
+            "127.0.0.1", 0)
+        port = server.sockets[0].getsockname()[1]
+        quelle = TcpRtcmSource("127.0.0.1", port, empfangen.append)
+        aufgabe = asyncio.create_task(quelle.run())
+        for _ in range(40):
+            await asyncio.sleep(0.05)
+            if empfangen:
+                break
+        await quelle.stop()
+        aufgabe.cancel()
+        server.close()
+        self.assertEqual(empfangen, [b"\xd3\x00\x13RTCM"])
+        self.assertGreater(quelle.bytes_received, 0)
+        self.assertIn(str(port), quelle.status)
+
+    async def test_relay_passes_the_stream_to_the_other_tractors(self):
+        from agripilot.ntrip import RtcmRelay, RtcmRelayClient
+
+        empfangen = []
+        verteiler = RtcmRelay(0)
+        self.assertTrue(await verteiler.start())
+        port = verteiler.server.sockets[0].getsockname()[1]
+        traktor = RtcmRelayClient("127.0.0.1", port, empfangen.append)
+        aufgabe = asyncio.create_task(traktor.run())
+        for _ in range(40):
+            await asyncio.sleep(0.05)
+            if verteiler.client_count:
+                break
+        verteiler.broadcast(b"\xd3KORREKTUR")
+        for _ in range(40):
+            await asyncio.sleep(0.05)
+            if empfangen:
+                break
+        self.assertEqual(empfangen, [b"\xd3KORREKTUR"])
+        await traktor.stop()
+        aufgabe.cancel()
+        await verteiler.stop()
 
 
 class SteeringTest(unittest.TestCase):

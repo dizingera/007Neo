@@ -28,7 +28,7 @@ from .actuators import build_output
 from .coverage import CoverageMap
 from .engine import Engine
 from .gnss import SimulatorSource, build_source
-from .ntrip import NtripClient, RtcmRelay, RtcmRelayClient
+from .ntrip import CorrectionSource, RtcmRelay, RtcmRelayClient, build_corrections
 from .steering import SteeringController
 from .storage import Storage
 
@@ -56,7 +56,7 @@ class Application:
         )
         self.engine.steering = self.steering
         self.relay: Optional[RtcmRelay] = None
-        self.ntrip: Optional[NtripClient] = None
+        self.corrections: Optional[CorrectionSource] = None
         self.rtcm_client: Optional[RtcmRelayClient] = None
         self.sync_client: Optional[sync.SyncClient] = None
         self.tasks: list[asyncio.Task] = []
@@ -85,8 +85,10 @@ class Application:
             # The master owns the caster connection and re-serves it.
             self.relay = RtcmRelay(cfg.network.rtcm_relay_port)
             await self.relay.start()
-            self.ntrip = NtripClient(cfg.ntrip, self._on_rtcm, self._current_position)
-            self.tasks.append(asyncio.create_task(self.ntrip.run()))
+            self.corrections = build_corrections(
+                cfg, self._on_rtcm, self._current_position)
+            if self.corrections is not None:
+                self.tasks.append(asyncio.create_task(self.corrections.run()))
         else:
             if cfg.network.use_master_rtcm:
                 host = _host_of(cfg.network.master_url)
@@ -106,7 +108,7 @@ class Application:
         await self.source.stop()
         if self.imu is not None:
             await self.imu.stop()
-        for component in (self.ntrip, self.rtcm_client, self.sync_client):
+        for component in (self.corrections, self.rtcm_client, self.sync_client):
             if component is not None:
                 await component.stop()
         if self.relay is not None:
@@ -160,13 +162,19 @@ class Application:
                 "healthy": self.source.healthy,
                 "lines": self.source.lines_received,
             },
-            "ntrip": {
-                "status": self.ntrip.status if self.ntrip else (
+            "corrections": {
+                "source": self.config.corrections.source,
+                "status": self.corrections.status if self.corrections else (
                     self.rtcm_client.status if self.rtcm_client else "aus"),
-                "healthy": bool(self.ntrip and self.ntrip.healthy) or
+                "healthy": bool(self.corrections and self.corrections.healthy) or
                            bool(self.rtcm_client and self.rtcm_client.healthy),
-                "bytes": (self.ntrip.bytes_received if self.ntrip else
+                "bytes": (self.corrections.bytes_received if self.corrections else
                           self.rtcm_client.bytes_received if self.rtcm_client else 0),
+                # Das Alter der Korrekturen meldet der Empfänger selbst im
+                # GGA-Satz. Es ist die ehrlichste Aussage darüber, ob der Weg
+                # von der Basis zum Traktor gerade wirklich trägt.
+                "age_s": (self.engine.fix.age_of_corrections
+                          if self.engine.fix else None),
             },
             "imu": {
                 "source": self.config.imu.source,

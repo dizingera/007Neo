@@ -746,9 +746,15 @@ function renderSystem() {
     ['Lenkausgang', `${system.steering_output.typ} · ${system.steering_output.status}` +
       (steering && steering.duty ? ` · ${(steering.duty * 100).toFixed(0)} %` : ''),
       system.steering_output.bereit || system.steering_output.typ === 'none'],
-    ['Korrekturdaten (RTK)', system.ntrip.status +
-      (system.ntrip.bytes ? ` · ${(system.ntrip.bytes / 1024).toFixed(0)} kB` : ''),
-      system.ntrip.healthy],
+    ['Korrekturdaten (RTK)', system.corrections.status +
+      (system.corrections.bytes ? ` · ${(system.corrections.bytes / 1024).toFixed(0)} kB` : '') +
+      // Das Alter kommt vom Empfänger und sagt mehr als die Byte-Zahl: es
+      // steigt, sobald der Weg von der Basis abreißt, auch wenn die
+      // Verbindung noch zu stehen scheint.
+      (system.corrections.age_s != null
+        ? ` · ${system.corrections.age_s.toFixed(0)} s alt` : ''),
+      system.corrections.healthy &&
+      (system.corrections.age_s == null || system.corrections.age_s < 30)],
     ['Korrektur-Weitergabe', system.relay.running
       ? `aktiv · ${system.relay.clients} Traktor(en)` : 'aus', system.relay.running],
     ['Abgleich', system.sync.status + (system.sync.age_s != null

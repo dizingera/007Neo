@@ -47,17 +47,40 @@ class GnssConfig:
 
 
 @dataclass
-class NtripConfig:
-    """RTK corrections. Without these the system guides, but not to centimetres."""
+class CorrectionsConfig:
+    """RTK-Korrekturdaten. Ohne sie führt das System, aber nicht auf Zentimeter.
 
-    enabled: bool = False
-    host: str = ""
-    port: int = 2101
-    mountpoint: str = ""
+    Die Daten kommen je nach Anlage auf verschiedenen Wegen herein, und der Weg
+    entscheidet, was hier einzustellen ist:
+
+    * ``ntrip``  - ein Caster im Netz. Der übliche Fall bei einem Dienst, und
+                   auch bei einer eigenen Basis, die einen Caster mitbringt
+                   (etwa RTKBase). Es gibt einen Anmeldevorgang und einen
+                   Mountpoint.
+    * ``tcp``    - ein roher RTCM3-Strom auf einem Netzwerkport, ohne
+                   Anmeldung. So gibt eine selbst gebaute Basis ihre Daten aus,
+                   wenn sie nur einen Server öffnet statt eines Casters.
+    * ``serial`` - RTCM3 kommt über ein Funkmodem oder direkt von der Basis an
+                   einem seriellen Anschluss dieses Rechners.
+    * ``aus``    - keine Korrekturen von hier. Richtig, wenn ein Funkmodem
+                   unmittelbar am Empfänger hängt: dann sieht die Software den
+                   Strom gar nicht, der Empfänger bekommt ihn direkt.
+    """
+
+    source: str = "aus"         # ntrip | tcp | serial | aus
+    host: str = ""              # ntrip und tcp
+    port: int = 2101            # ntrip: meist 2101, tcp: was die Basis öffnet
+    mountpoint: str = ""        # nur ntrip
     username: str = ""
     password: str = ""
-    send_gga: bool = True       # required by VRS/NearestBase casters
+    serial_port: str = ""       # nur serial, z.B. COM4 oder /dev/ttyUSB0
+    baudrate: int = 115200
+    send_gga: bool = True       # Netz-RTK braucht die eigene Position
     gga_interval_s: int = 10
+
+    @property
+    def enabled(self) -> bool:
+        return (self.source or "aus").lower() not in ("", "aus", "off", "none")
 
 
 @dataclass
@@ -191,7 +214,7 @@ class Config:
     gnss: GnssConfig = field(default_factory=GnssConfig)
     imu: ImuConfig = field(default_factory=ImuConfig)
     phidget: PhidgetConfig = field(default_factory=PhidgetConfig)
-    ntrip: NtripConfig = field(default_factory=NtripConfig)
+    corrections: CorrectionsConfig = field(default_factory=CorrectionsConfig)
     network: NetworkConfig = field(default_factory=NetworkConfig)
     steering: SteeringConfig = field(default_factory=SteeringConfig)
     server: ServerConfig = field(default_factory=ServerConfig)
@@ -208,7 +231,8 @@ class Config:
     def to_dict(self) -> dict:
         data = {k: v for k, v in asdict(self).items() if k != "path"}
         # The caster password is not something to hand out over the API.
-        data["ntrip"] = {**data["ntrip"], "password": "***" if self.ntrip.password else ""}
+        data["corrections"] = {**data["corrections"],
+                               "password": "***" if self.corrections.password else ""}
         return data
 
     def save(self, path: Optional[Path] = None) -> Path:
@@ -254,7 +278,7 @@ def load(path: str | Path | None = None) -> Config:
         gnss=GnssConfig(**_subset(GnssConfig, data.get("gnss"))),
         imu=ImuConfig(**_subset(ImuConfig, data.get("imu"))),
         phidget=PhidgetConfig(**_subset(PhidgetConfig, data.get("phidget"))),
-        ntrip=NtripConfig(**_subset(NtripConfig, data.get("ntrip"))),
+        corrections=CorrectionsConfig(**_corrections_section(data)),
         network=NetworkConfig(**_subset(NetworkConfig, data.get("network"))),
         steering=SteeringConfig(**_subset(SteeringConfig, data.get("steering"))),
         server=ServerConfig(**_subset(ServerConfig, data.get("server"))),
@@ -266,6 +290,24 @@ def load(path: str | Path | None = None) -> Config:
     if not config.network.device_name:
         config.network.device_name = config.network.device_id
     return config
+
+
+def _corrections_section(data: dict) -> dict:
+    """Den Abschnitt für die Korrekturdaten einlesen.
+
+    Frühere Konfigurationen hatten hier ``ntrip:`` mit einem Schalter
+    ``enabled``. Solche Dateien sollen weiter laufen, ohne dass jemand von Hand
+    umschreiben muss - deshalb wird der alte Abschnitt übernommen und der
+    Schalter in die neue Quellenangabe übersetzt.
+    """
+    if isinstance(data.get("corrections"), dict):
+        return _subset(CorrectionsConfig, data["corrections"])
+    alt = data.get("ntrip")
+    if not isinstance(alt, dict):
+        return {}
+    werte = _subset(CorrectionsConfig, alt)
+    werte["source"] = "ntrip" if alt.get("enabled") else "aus"
+    return werte
 
 
 def _subset(cls: type, values: Any) -> dict:

@@ -60,13 +60,20 @@ gnss:
   baudrate: 115200
   rtcm_out: auto          # Korrekturen zurück an den Empfänger
 
-ntrip:
-  enabled: false          # auf true, sobald die Zugangsdaten eingetragen sind
+corrections:
+  # RTK-Korrekturen. Quelle je nach Anlage:
+  #   ntrip  - Caster (Dienst, oder eigene Basis mit Caster wie RTKBase)
+  #   tcp    - roher RTCM3-Strom von einer eigenen Basis, ohne Anmeldung
+  #   serial - Funkmodem an diesem Rechner
+  #   aus    - Funkmodem steckt direkt am Empfänger, oder kein RTK
+  source: aus
   host: ''
   port: 2101
   mountpoint: ''
   username: ''
   password: ''
+  serial_port: ''
+  baudrate: 115200
   send_gga: true
 
 network:
@@ -136,6 +143,6 @@ echo "Status:   systemctl status agripilot"
 echo "Protokoll: journalctl -u agripilot -f"
 echo
 if [[ "$ROLLE" == "master" ]]; then
-  echo "Nächster Schritt: NTRIP-Zugangsdaten in $KONFIG eintragen und"
-  echo "'enabled: true' setzen, dann 'systemctl restart agripilot'."
+  echo "Nächster Schritt: Korrekturquelle in $KONFIG eintragen"
+  echo "(corrections.source), dann 'systemctl restart agripilot'."
 fi

@@ -46,7 +46,6 @@ Ehrlich aufgelistet, bevor du anfängst:
 
 | Fehlt | Wofür | Grob |
 |---|---|---|
-| **RTK-Korrekturdaten** | Zentimeter statt Meter. Ohne sie ist der F9P ein besserer GPS-Stick. | 0–500 €/Jahr, je nach Anbieter |
 | **12-V-Versorgung** für Tablet, F9P, IMU und Motor | Der Motor zieht deutlich mehr als die Elektronik – eigene, abgesicherte Leitung. | 30–60 € |
 | **Not-Aus** in der Leitung zum Lenkmotor | Nicht verhandelbar, sobald der Motor lenkt. | 20–40 € |
 | **Mechanik am Lenkrad** (Zahnkranz + Reibrad oder Zahnriemen) | Der Motor muss ans Lenkrad. | je nach Bauart |
@@ -110,22 +109,63 @@ Einmalig mit u-center:
 Prüfen mit `scripts\check_receiver.py COM3`. Dort muss nach ein paar Sekunden
 etwas anderes als „kein Fix" stehen.
 
-### 5. RTK-Zugang eintragen
+### 5. Eigene Basisstation anbinden
+
+Du hast eine eigene Basis – damit entfällt der Anbieter, und du bist unabhängig
+vom Mobilfunk. Bleibt die Frage, **wie** die Korrekturen zum Traktor kommen:
+
+**a) Deine Basis läuft als NTRIP-Caster** (z.B. RTKBase oder str2str im
+Caster-Betrieb). Der häufigste Fall bei einer selbst gebauten Basis:
 
 ```yaml
-ntrip:
-  enabled: true
-  host: ntrip.mein-anbieter.de
+corrections:
+  source: ntrip
+  host: 192.168.10.5        # Adresse der Basis im Hofnetz
   port: 2101
-  mountpoint: VRS_3_2G_BY
-  username: meinbenutzer
-  password: meinpasswort
-  send_gga: true
+  mountpoint: BASIS1
+  username: ''              # bei eigener Basis oft leer
+  password: ''
+  send_gga: false           # eine Einzelbasis braucht deine Position nicht
 ```
+
+**b) Deine Basis öffnet nur einen Port** und schickt rohes RTCM3, ohne
+Anmeldung und ohne Mountpoint:
+
+```yaml
+corrections:
+  source: tcp
+  host: 192.168.10.5
+  port: 9000
+```
+
+**c) Ein Funkmodem hängt am Windows-Tablet** und reicht die Korrekturen herein:
+
+```yaml
+corrections:
+  source: serial
+  serial_port: COM4
+  baudrate: 115200
+```
+
+**d) Das Funkmodem steckt direkt am F9P.** Dann `source: aus` – die Korrekturen
+laufen an der Software vorbei direkt in den Empfänger, und das ist genau
+richtig. Du siehst am Fix-Status trotzdem, ob sie ankommen.
+
+`send_gga` braucht nur ein Netz-RTK-Dienst, der eine virtuelle Basis an deiner
+Position rechnet. Bei einer einzelnen eigenen Basis kannst du es abschalten.
+
+> **Der eine Fehler, der teuer wird:** Stelle deine Basis auf **feste
+> Koordinaten** (Fixed Mode), nicht auf Survey-in bei jedem Einschalten. Bei
+> Survey-in landet sie nach jedem Stromausfall auf leicht anderen Koordinaten –
+> und weil alle Spuren relativ zur Basis liegen, wandert das ganze Feld mit.
+> Deine AB-Linie von letzter Woche liegt dann um Dezimeter daneben, ohne dass
+> irgendwo ein Fehler erscheint. Einmal ein langes Survey-in (mehrere Stunden),
+> Ergebnis notieren, fest eintragen, nie wieder ändern.
 
 Ziel ist **RTK fix** in der Anzeige oben rechts. `RTK float` reicht nicht – die
 Lösung springt dann um Dezimeter, und das siehst du erst abends an den Streifen
-im Feld.
+im Feld. Auf der Systemseite steht außerdem das Alter der Korrekturen; steigt es
+über etwa 30 Sekunden, trägt der Weg von der Basis nicht mehr.
 
 ### 6. IMU einrichten
 
@@ -265,7 +305,8 @@ entstehen:
 
 1. Simulator am Schreibtisch – Oberfläche kennenlernen.
 2. F9P dran, Fläche vermessen, eine Fahrt aufzeichnen. **Noch ohne Lenkung.**
-3. RTK-Zugang – warten, bis „RTK fix" dauerhaft steht.
+3. Basis anbinden – prüfen, dass sie auf festen Koordinaten steht, und warten,
+   bis „RTK fix" dauerhaft steht.
 4. IMU dran, nullen, Vorzeichen am Hang prüfen.
 5. Ein paar Stunden als reine Lenkhilfe fahren (Lichtbalken, du lenkst). Erst
    wenn die Spuren sauber liegen, stimmt die Grundlage.
@@ -279,6 +320,9 @@ Maßfehler sind.
 
 | Bild | Ursache | Abhilfe |
 |---|---|---|
+| Fix bleibt „GPS", Korrekturen kommen nicht an | falsche Quelle eingestellt | `corrections.source` prüfen – Caster, roher Port, Funkmodem oder „aus" |
+| Alter der Korrekturen steigt | Weg von der Basis abgerissen | Funkstrecke oder Netz prüfen; die Byte-Zahl allein täuscht |
+| Spuren von letzter Woche liegen daneben | Basis macht Survey-in statt fester Koordinaten | Basis auf Fixed Mode umstellen |
 | Systemseite: „Phidget-Treiber fehlt" | Nur das Python-Paket installiert | Phidgets-Installer von phidgets.com |
 | Systemseite: „Kein IMU Brick gefunden" | brickd läuft nicht | Brick Daemon installieren und starten |
 | Hang zeigt Nick statt Neigung | Sensor quer eingebaut | `axis_map: swapped` |

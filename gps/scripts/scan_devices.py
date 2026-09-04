@@ -179,3 +179,5 @@ if __name__ == "__main__":
     tinkerforge_geraete()
     print("\nDie ausgegebenen Blöcke in die Konfigurationsdatei übernehmen,")
     print("danach den Dienst neu starten.")
+    print("\nFehlt noch der Abschnitt 'corrections' für die RTK-Korrekturen -")
+    print("wie er je nach Basisstation aussieht, steht in docs/HARDWARE.md.")

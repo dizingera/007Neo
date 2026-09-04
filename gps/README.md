@@ -106,7 +106,8 @@ gps/
 │   ├── nmea.py       NMEA-0183-Auswertung, Fix-Qualität, Genauigkeit
 │   ├── gnss.py       Empfänger über Seriell/TCP/UDP – und der Simulator
 │   ├── imu.py        Neigungssensor: Hangausgleich, Drehrate, Kurs im Stand
-│   ├── ntrip.py      RTK-Korrekturen vom Caster, Weitergabe an die Traktoren
+│   ├── ntrip.py      RTK-Korrekturen (Caster, roher Strom, Funkmodem) und
+│                     ihre Weitergabe an die anderen Traktoren
 │   ├── guidance.py   AB-Linien, Kurven, Spurabstand, Abweichung, Lenkwinkel
 │   ├── coverage.py   Bearbeitete Fläche als Raster, Überlappung, Sektionen
 │   ├── steering.py   Lenkbefehl mit allen Sicherheitsbedingungen
@@ -128,7 +129,7 @@ gps/
 cd gps/backend && python3 -m unittest discover -s tests -v
 ```
 
-80 Tests, ohne Zusatzpakete lauffähig. Geprüft wird vor allem, was im Feld Geld
+86 Tests, ohne Zusatzpakete lauffähig. Geprüft wird vor allem, was im Feld Geld
 kostet, wenn es falsch ist: Flächen, das Vorzeichen der Abweichung, der
 Hangausgleich und die Bedingungen, unter denen die Lenkautomatik einschalten
 darf.
