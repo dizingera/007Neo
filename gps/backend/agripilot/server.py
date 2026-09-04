@@ -131,6 +131,8 @@ class Application:
         interval = 1.0 / max(1.0, self.config.server.update_hz)
         while True:
             await asyncio.sleep(interval)
+            # Auch ohne Zuschauer: die Lenkung muss überwacht bleiben.
+            self.engine.tick()
             if not self.clients:
                 # Nobody is looking: drop the delta so a later viewer gets a
                 # full map instead of a half one.
@@ -418,6 +420,24 @@ def create_app(config=None) -> FastAPI:
     async def arm_steering():
         return ok({"message": application.steering.arm(),
                    "armed": application.steering.armed})
+
+    @api.post("/api/steering/centre")
+    async def learn_steering_centre():
+        """Aktuelle Radstellung als Geradeaus lernen.
+
+        Der Drehgeber zählt relativ und kennt keine Geradeausstellung; sie wird
+        beim Scharfschalten gelernt und lässt sich hier ausdrücklich neu setzen,
+        etwa nach einem Eingriff von Hand.
+        """
+        output = application.steering.output
+        if not hasattr(output, "learn_centre"):
+            raise HTTPException(400, "Dieser Lenkausgang lernt keine Mitte")
+        try:
+            result = output.learn_centre()
+        except RuntimeError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        engine.note("Lenkung: Mitte gelernt")
+        return ok(result)
 
     @api.post("/api/steering/disarm")
     async def disarm_steering():

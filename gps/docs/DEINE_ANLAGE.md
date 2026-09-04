@@ -164,19 +164,11 @@ Fehler, statt ihn aufzuheben.
 > ohne Fahrer auf dem Sitz gehört die Anlage nicht in Betrieb. Auf öffentlichen
 > Straßen hat sie nichts zu suchen.
 
-**Wie geregelt wird**, hängt daran, was du zurückmeldest:
-
-| `feedback` | Voraussetzung | Güte |
-|---|---|---|
-| `was` | Radwinkelsensor am Achsschenkel an einem Spannungsverhältnis-Eingang | am besten: geregelt wird genau das, was zählt |
-| `yaw_rate` | **nur der IMU** – kein zusätzlicher Sensor | gut: geregelt wird die Drehrate des Traktors statt des Radwinkels |
-| `encoder` | Drehgeber am Motor | Notlösung: die Mitte läuft über den Tag weg |
-
-Da du den IMU ohnehin hast, ist `yaw_rate` der sinnvolle Start. Der Sollwert
-kommt aus dem Einspurmodell: bei diesem Radwinkel und dieser Geschwindigkeit
-müsste sich der Traktor so und so schnell drehen – und genau das misst der IMU.
-Willst du es später besser, kommt ein Radwinkelsensor an einen freien
-Phidget-Eingang und `feedback: was`.
+**Mit Drehgeber am Motor** – das ist dein Fall, wenn du einen Zählwert je Grad
+hast – regelt die Phidget-Platine selbst. Über den `RescaleFactor` bekommt sie
+ihre Einheit auf Grad gesetzt, danach geht der Sollwinkel direkt in Grad
+hinüber und der PID läuft in der Firmware. Ruhiger als jeder Regelkreis in
+Python, weil er nicht an den zehn Positionen pro Sekunde vom Empfänger hängt.
 
 ```yaml
 steering:
@@ -188,16 +180,43 @@ steering:
   max_cross_track_m: 1.5
 
 phidget:
-  serial_number: -1       # aus scan_devices.py eintragen
+  serial_number: -1        # aus scan_devices.py eintragen
   motor_channel: 0
-  feedback: yaw_rate
-  current_limit_a: 2.0    # bewusst niedrig!
-  max_duty: 0.55
+  control: position
+  counts_per_deg: 40.0     # DEIN Wert: Zählwerte je Grad Radeinschlag am Boden
+  max_wheel_angle_deg: 35.0
+  current_limit_a: 2.0     # bewusst niedrig!
+  velocity_limit: 0.55
+  dead_band_deg: 0.3
   failsafe_ms: 500
-  gain_p: 0.09
-  gain_i: 0.02
-  gain_d: 0.01
+  position_kp: 12000
+  position_ki: 40
+  position_kd: 300000
 ```
+
+**Zu `counts_per_deg`:** der Wert bezieht sich auf den Einschlag der Räder **am
+Boden**, nicht auf die Drehung am Lenkrad – das ist die Größe, die die
+Spurführung rechnet. Kennst du ihn nicht genau, miss ihn aus (Motor bleibt
+stromlos, gelenkt wird von Hand):
+
+```
+C:\AgriPilot\venv\Scripts\python.exe C:\AgriPilot\scripts\measure_steering.py
+```
+
+Das Werkzeug zählt von Anschlag zu Anschlag mit, fragt nach dem gesamten
+Einschlagbereich in Grad und gibt den fertigen Konfigurationsblock aus. Nach
+einer Änderung den Dienst neu starten – der `RescaleFactor` wird beim Verbinden
+gesetzt.
+
+**Die Mitte:** der Drehgeber zählt relativ und kennt keine Geradeausstellung.
+Sie wird beim Scharfschalten gelernt – **beim Scharfschalten stehen die Räder
+also gerade.** Neu setzen über **Menü → System → Lenkung: Mitte lernen**.
+
+**Ohne Drehgeber** bleibt der Weg über die Drehrate: `control: velocity` und
+`feedback: yaw_rate`. Der Sollwert kommt dann aus dem Einspurmodell – bei diesem
+Radwinkel und dieser Geschwindigkeit müsste sich der Traktor so schnell drehen,
+und genau das misst der IMU. Braucht keinen zusätzlichen Sensor, ist aber
+weniger direkt.
 
 **Zwei Sicherheiten stecken bewusst in der Hardware:**
 
@@ -210,15 +229,21 @@ phidget:
   abgestürztes Tablet oder ein abgezogenes USB-Kabel führen damit zum Stillstand
   des Motors – nicht zu einem festgehaltenen Einschlag.
 
-**Zur Ehrlichkeit:** Ohne Radwinkelsensor kann das Programm einen Eingriff des
-Fahrers nicht erkennen – es sieht das Rad ja nicht. Es schaltet dann nicht von
-selbst ab, wenn du gegenhältst. Deshalb sind bei `yaw_rate` die niedrige
-Stromgrenze und der Not-Aus keine Empfehlung, sondern Bedingung. Mit
-Radwinkelsensor erkennt das System den Eingriff und gibt sofort ab.
+**Zur Ehrlichkeit beim Eingriff des Fahrers:** Mit dem Positionsregler bekommt
+das System einen brauchbaren Schutz geschenkt – bleibt die Abweichung groß,
+während die Platine nahe ihrer Leistungsgrenze arbeitet, hält entweder du
+dagegen oder die Mechanik klemmt, und beides führt zum Abgeben. Bei
+`control: velocity` mit `feedback: yaw_rate` geht das **nicht**: dort sieht das
+Programm das Rad nicht und merkt nichts, wenn du gegenhältst. Die niedrige
+Stromgrenze und der Not-Aus sind dort Bedingung, keine Empfehlung.
 
-**Erste Fahrt:** freie Fläche, Schritttempo, Hand am Lenkrad. Zieht es zu träge
-auf die Spur, `gain_p` in Schritten von 0,02 erhöhen. Pendelt es um die Spur,
-`gain_p` verringern oder `gain_d` leicht erhöhen.
+Unabhängig davon: bleibt der Empfänger länger als zwei Sekunden stumm, schaltet
+die Lenkung von selbst ab – zusätzlich zum Failsafe der Platine.
+
+**Erste Fahrt:** freie Fläche, Schritttempo, Hand am Lenkrad, Räder gerade beim
+Scharfschalten. Zieht es zu träge auf die Spur, `position_kp` in Schritten von
+etwa 20 % erhöhen. Zittert der Motor um die Mitte, `position_kp` verringern oder
+`dead_band_deg` leicht erhöhen.
 
 ### 8. Android-Tablet als Anzeige
 
@@ -260,6 +285,9 @@ Maßfehler sind.
 | Beim Kippeln wird die Abweichung größer | Ausgleich verkehrt herum | `roll_sign: -1.0` |
 | Spur liegt gleichmäßig daneben | Antennenmaße | unter **Maschine** nachmessen |
 | Lenkung wird nicht scharf | eine Bedingung fehlt | die Anzeige nennt den Grund |
-| Motor zittert um die Mitte | Regler zu scharf | `gain_p` verringern |
-| Motor folgt zu träge | Regler zu weich oder Strom zu knapp | `gain_p` oder `current_limit_a` erhöhen |
+| Motor zittert um die Mitte | Regler zu scharf | `position_kp` verringern oder `dead_band_deg` erhöhen |
+| Motor folgt zu träge | Regler zu weich oder Strom zu knapp | `position_kp` oder `current_limit_a` erhöhen |
+| Lenkt systematisch zu viel oder zu wenig | `counts_per_deg` falsch | mit `measure_steering.py` neu ausmessen |
+| Lenkung geht in die falsche Richtung | Zählrichtung verkehrt | `invert_motor: true` |
+| „Mitte noch nicht gelernt" | Räder standen beim Scharfschalten schräg | gerade stellen, **System → Lenkung: Mitte lernen** |
 | Android-Tablet erreicht nichts | Firewall oder falsches Netz | Port 8080 freigegeben? Gleiches WLAN? |

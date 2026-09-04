@@ -138,19 +138,66 @@ Neben dem Python-Paket `phidget22` ist der **Treiber des Herstellers** nötig
 Systemseite im Klartext, statt das System mitzureißen.
 
 Ein Motor allein ist eine offene Steuerung – er dreht, und niemand weiß, wie
-weit. Drei Rückmeldungen, in dieser Reihenfolge zu empfehlen:
+weit. Es gibt zwei Betriebsarten, eingestellt über `phidget.control`.
+
+### `control: position` – der Positionsregler der Platine (Voreinstellung)
+
+Der beste Weg, wenn ein **Drehgeber** am Motor sitzt. Über den `RescaleFactor`
+bekommt die Phidget-Steuerung ihre Einheit auf Grad gesetzt; danach geht der
+Sollwinkel direkt als Zahl in Grad hinüber, und der PID läuft in der Firmware
+statt in Python. Der Regelkreis hängt damit weder an den zehn Positionen pro
+Sekunde vom Empfänger noch an der Laufzeit des Programms.
+
+Der eine Wert, auf den es dabei ankommt:
+
+```yaml
+phidget:
+  control: position
+  counts_per_deg: 40.0        # Zählwerte je Grad Einschlag der Räder AM BODEN
+  max_wheel_angle_deg: 35.0   # mechanischer Anschlag
+```
+
+`counts_per_deg` bezieht sich auf den **Radeinschlag am Boden**, nicht auf die
+Drehung am Lenkrad – das ist die Größe, die die Spurführung rechnet. Ausmessen
+von Anschlag zu Anschlag, ohne Strom auf dem Motor:
+
+```bash
+python3 scripts/measure_steering.py
+```
+
+Das Werkzeug zählt mit, während von Hand gelenkt wird, fragt nach dem gesamten
+Einschlagbereich in Grad und gibt den fertigen Konfigurationsblock aus. Der
+`RescaleFactor` wird beim Verbinden gesetzt – nach einer Änderung also den
+Dienst neu starten.
+
+Der Drehgeber zählt relativ und kennt keine Geradeausstellung. Sie wird beim
+Scharfschalten gelernt (`addPositionOffset` schiebt die Zählung der Platine auf
+glatt null) und lässt sich über **Menü → System → Lenkung: Mitte lernen**
+jederzeit neu setzen. Deshalb gilt: **beim Scharfschalten stehen die Räder
+gerade.**
+
+Ein Nebeneffekt dieser Betriebsart ist ein brauchbarer Eingriffsschutz ohne
+weiteren Sensor: bleibt die Abweichung groß, während die Platine nahe ihrer
+Leistungsgrenze arbeitet, hält entweder der Fahrer dagegen oder die Mechanik
+klemmt. Beides ist ein Grund abzugeben, deshalb wird nicht unterschieden.
+
+### `control: velocity` – eigener Regelkreis auf Drehzahl
+
+Für Motoren ohne Drehgeber. Der Regelkreis läuft dann mit 50 Hz im Programm,
+und die Rückmeldung bestimmt, wie gut das wird:
 
 | `feedback` | Braucht | Güte |
 |---|---|---|
 | `was` | Radwinkelsensor (Poti) an einem Spannungsverhältnis-Eingang | am besten |
 | `yaw_rate` | nur den IMU | gut – geregelt wird die Drehrate statt des Radwinkels |
-| `encoder` | Drehgeber am Motor, Mitte beim Scharfschalten gelernt | Notlösung |
+| `encoder` | Drehgeber, Mitte beim Scharfschalten gelernt | Notlösung |
 
 ```yaml
 steering:
   enabled: true
   output: phidget
 phidget:
+  control: velocity
   serial_number: -1        # aus scripts/scan_devices.py
   motor_channel: 0
   feedback: yaw_rate
@@ -164,9 +211,14 @@ damit der Fahrer den Motor jederzeit von Hand übersteuern kann, und der
 **Failsafe der Phidget-Steuerung**, die den Motor selbstständig anhält, wenn das
 Programm verstummt.
 
-Ohne Radwinkelsensor kann das Programm einen Fahrereingriff nicht erkennen. Bei
-`feedback: yaw_rate` sind die niedrige Stromgrenze und ein Not-Aus deshalb keine
-Empfehlung, sondern Bedingung.
+Bei `control: velocity` mit `feedback: yaw_rate` kann das Programm einen
+Fahrereingriff **nicht** erkennen – es sieht das Rad ja nicht. Die niedrige
+Stromgrenze und ein Not-Aus sind dort keine Empfehlung, sondern Bedingung.
+
+Unabhängig von der Betriebsart wacht das System darüber, dass überhaupt noch
+Positionen ankommen: bleibt der Empfänger länger als zwei Sekunden stumm,
+schaltet die Lenkung von selbst ab. Die Hardware fängt denselben Fall über ihren
+Failsafe ab – das eine ersetzt das andere nicht, es sichert es doppelt.
 
 ## Lenkautomatik über eine externe Lenkplatine
 

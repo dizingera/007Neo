@@ -27,7 +27,7 @@ gleichen Netz.
 | **Fahrtenaufzeichnung** | Jede Arbeit mit Datum, Dauer, Strecke, Fläche und Überlappung. Export als GPX, GeoJSON und CSV. |
 | **Mehrere Traktoren** | Der Master verteilt Felder und Spuren und gibt die RTK-Korrekturen weiter. Beide sehen, was der andere schon bearbeitet hat. |
 | **Hangausgleich** | Neigungssensor (Tinkerforge IMU Brick) rechnet die Schräglage heraus. Bei 3 m Antennenhöhe sind 6° Hang sonst 31 cm Versatz. |
-| **Lenkautomatik** | Rechnet den Lenkwinkel und treibt entweder einen Phidget-Motor direkt oder gibt an eine externe Lenkplatine aus – **ab Werk abgeschaltet**, siehe [Sicherheit](#sicherheit). |
+| **Lenkautomatik** | Rechnet den Lenkwinkel und treibt entweder einen Phidget-Motor (Positionsregler der Platine, Sollwinkel in Grad) oder gibt an eine externe Lenkplatine aus – **ab Werk abgeschaltet**, siehe [Sicherheit](#sicherheit). |
 
 ## Ehrlich vorweg: woran die Genauigkeit hängt
 
@@ -117,7 +117,8 @@ gps/
 │   ├── export.py     GPX, GeoJSON, CSV
 │   └── server.py     Weboberfläche, Live-Verbindung, Schnittstelle
 ├── frontend/         Kabinenanzeige (kein Bauschritt nötig)
-├── scripts/          Installation (Pi und Windows), Dienst, Gerätesuche
+├── scripts/          Installation (Pi und Windows), Dienst, Gerätesuche,
+│                     Empfänger- und Lenkung einmessen
 └── docs/             Hardware, Installation, Bedienung, deine Anlage
 ```
 
@@ -127,7 +128,7 @@ gps/
 cd gps/backend && python3 -m unittest discover -s tests -v
 ```
 
-72 Tests, ohne Zusatzpakete lauffähig. Geprüft wird vor allem, was im Feld Geld
+80 Tests, ohne Zusatzpakete lauffähig. Geprüft wird vor allem, was im Feld Geld
 kostet, wenn es falsch ist: Flächen, das Vorzeichen der Abweichung, der
 Hangausgleich und die Bedingungen, unter denen die Lenkautomatik einschalten
 darf.

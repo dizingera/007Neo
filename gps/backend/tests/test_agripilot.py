@@ -505,11 +505,134 @@ class ActuatorTest(unittest.TestCase):
         output._context = SteerContext(speed_ms=3.0, yaw_rate_deg_s=None)
         self.assertEqual(output._error(None), 0.0)
 
+    def test_rescale_factor_turns_counts_into_degrees(self):
+        """Der Zählwert je Grad wird zum RescaleFactor der Platine."""
+        from agripilot.config import PhidgetConfig
+        for counts, erwartet in ((40.0, 0.025), (100.0, 0.01), (12.5, 0.08)):
+            config = PhidgetConfig(counts_per_deg=counts)
+            self.assertAlmostEqual(1.0 / config.counts_per_deg, erwartet, places=9)
+
+    def test_position_output_clamps_to_the_mechanical_stop(self):
+        from agripilot.actuators import PhidgetPositionOutput, SteerContext
+        from agripilot.config import PhidgetConfig
+
+        class FakeController:
+            """Ersetzt die Platine: merkt sich, was ihr aufgetragen wurde."""
+
+            def __init__(self):
+                self.position = 0.0
+                self.target = None
+                self.engaged = None
+                self.failsafe_reset = 0
+
+            def setTargetPosition(self, value): self.target = value
+            def setEngaged(self, value): self.engaged = value
+            def resetFailsafe(self): self.failsafe_reset += 1
+            def getPosition(self): return self.position
+            def getDutyCycle(self): return 0.1
+
+        output = PhidgetPositionOutput(PhidgetConfig(max_wheel_angle_deg=35.0))
+        output.controller = FakeController()
+        output.centred = True
+
+        output.command(True, 12.0, SteerContext())
+        self.assertAlmostEqual(output.controller.target, 12.0)
+        self.assertTrue(output.controller.engaged)
+
+        output.command(True, 90.0, SteerContext())       # weit über dem Anschlag
+        self.assertAlmostEqual(output.controller.target, 35.0)
+
+        output.command(True, -90.0, SteerContext())
+        self.assertAlmostEqual(output.controller.target, -35.0)
+        self.assertEqual(output.controller.failsafe_reset, 3)
+
+    def test_position_output_releases_the_motor_when_not_engaged(self):
+        """Nicht scharf heißt stromlos - sonst hielte der Motor das Lenkrad fest."""
+        from agripilot.actuators import PhidgetPositionOutput, SteerContext
+        from agripilot.config import PhidgetConfig
+
+        class FakeController:
+            def __init__(self): self.engaged = None
+            def setTargetPosition(self, value): pass
+            def setEngaged(self, value): self.engaged = value
+            def resetFailsafe(self): pass
+            def getPosition(self): return 0.0
+            def getDutyCycle(self): return 0.0
+
+        output = PhidgetPositionOutput(PhidgetConfig())
+        output.controller = FakeController()
+        output.centred = True
+        output.command(False, 10.0, SteerContext())
+        self.assertFalse(output.controller.engaged)
+
+    def test_position_output_does_not_drive_before_the_centre_is_known(self):
+        from agripilot.actuators import PhidgetPositionOutput, SteerContext
+        from agripilot.config import PhidgetConfig
+
+        class FakeController:
+            def __init__(self): self.engaged = None
+            def setTargetPosition(self, value): pass
+            def setEngaged(self, value): self.engaged = value
+            def resetFailsafe(self): pass
+            def getPosition(self): return 0.0
+            def getDutyCycle(self): return 0.0
+
+        output = PhidgetPositionOutput(PhidgetConfig())
+        output.controller = FakeController()
+        output.centred = False                     # Mitte noch nicht gelernt
+        output.command(True, 10.0, SteerContext())
+        self.assertFalse(output.controller.engaged)
+
+    def test_position_output_reports_a_blocked_wheel(self):
+        """Motor drückt nahe der Grenze, das Rad folgt nicht: abgeben."""
+        from agripilot.actuators import PhidgetPositionOutput
+        from agripilot.config import PhidgetConfig
+
+        output = PhidgetPositionOutput(
+            PhidgetConfig(override_deg=4.0, velocity_limit=0.5))
+        output.target_deg = 10.0
+
+        # Kleine Abweichung: das ist normales Nachführen
+        self.assertFalse(output._detect_override(9.0, 0.5, True))
+        # Große Abweichung, aber der Motor drückt kaum - kein Eingriff
+        self.assertFalse(output._detect_override(0.0, 0.05, True))
+        # Große Abweichung bei voller Leistung, aber noch nicht lange genug
+        self.assertFalse(output._detect_override(0.0, 0.5, True))
+        output._error_since -= 1.0                 # eine Sekunde später
+        self.assertTrue(output._detect_override(0.0, 0.5, True))
+        # Nicht scharf: nie ein Eingriff
+        self.assertFalse(output._detect_override(0.0, 0.5, False))
+
+    def test_learning_the_centre_needs_a_motor(self):
+        from agripilot.actuators import PhidgetPositionOutput
+        from agripilot.config import PhidgetConfig
+        with self.assertRaises(RuntimeError):
+            PhidgetPositionOutput(PhidgetConfig()).learn_centre()
+
+    def test_learning_the_centre_zeroes_the_encoder(self):
+        from agripilot.actuators import PhidgetPositionOutput
+        from agripilot.config import PhidgetConfig
+
+        class FakeController:
+            def __init__(self): self.position = 137.5
+            def addPositionOffset(self, offset): self.position += offset
+            def setTargetPosition(self, value): self.target = value
+            def getPosition(self): return self.position
+
+        output = PhidgetPositionOutput(PhidgetConfig())
+        output.controller = FakeController()
+        result = output.learn_centre()
+        self.assertAlmostEqual(result["centre_deg"], 0.0)
+        self.assertTrue(output.centred)
+
     def test_output_choice_follows_the_configuration(self):
         from agripilot import config as config_module
         from agripilot.actuators import build_output
         config = config_module.load("/kein-solcher-pfad.yaml")
         config.steering.output = "phidget"
+        # Voreinstellung: der Positionsregler der Platine
+        self.assertEqual(build_output(config).name, "phidget-position")
+        config.phidget.control = "velocity"
         self.assertEqual(build_output(config).name, "phidget")
         config.steering.output = "udp"
         self.assertEqual(build_output(config).name, "udp")
@@ -713,6 +836,28 @@ class EngineTest(unittest.TestCase):
         self.engine.config.imu.terrain_compensation = False
         self.engine.on_fix(self._fix(0.0, 30.0, 0.0, 3.0, 1009.0))
         self.assertAlmostEqual(self.engine.tool_position[0], 0.0, places=3)
+
+    def test_watchdog_disarms_when_the_receiver_falls_silent(self):
+        """Kommen keine Positionen mehr, darf die Lenkung nicht scharf bleiben."""
+        from agripilot.actuators import NullOutput
+        from agripilot.config import SteeringConfig
+        from agripilot.steering import SteeringController
+
+        output = NullOutput()
+        output.ready = True
+        steering = SteeringController(SteeringConfig(enabled=True, output="none"), output)
+        self.engine.steering = steering
+        steering.arm()
+        self.assertTrue(steering.armed)
+
+        self.engine.on_fix(self._fix(0.0, 0.0, 0.0, 3.0, time.time()))
+        self.engine.tick()                      # frische Daten: bleibt scharf
+        self.assertTrue(steering.armed)
+
+        self.engine.fix.received_at = time.time() - 5.0
+        self.engine.tick()
+        self.assertFalse(steering.armed)
+        self.assertIn("keine GPS-Daten", steering.command.reason)
 
     def test_ab_line_needs_two_separated_points(self):
         field = self.store.save_field({"name": "F", "datum_lat": 48.0, "datum_lon": 11.0})

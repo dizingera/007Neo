@@ -596,6 +596,12 @@ el('btnSaveProfile').onclick = async () => {
 el('autoSections').onchange = (event) =>
   api('POST', '/api/sections/auto', { enabled: event.target.checked });
 
+el('btnCentre').onclick = async () => {
+  if (!confirm('Stehen die Räder gerade? Diese Stellung wird als Mitte gemerkt.')) return;
+  const result = await api('POST', '/api/steering/centre');
+  if (result) toast('Mitte gelernt');
+};
+
 el('btnLevel').onclick = async () => {
   const result = await api('POST', '/api/imu/level');
   if (result) toast('Neigungssensor genullt');
@@ -719,6 +725,16 @@ function renderSystem() {
   if (imu) el('compensation').checked = !!imu.compensation;
 
   const steering = state.live.steering;
+  const output = system.steering_output;
+  // Die Mitte lässt sich nur lernen, wo ein Drehgeber zählt.
+  el('steerRow').hidden = !(output && output.mitte_gelernt !== undefined);
+  if (!el('steerRow').hidden) {
+    el('steerInfo').textContent =
+      `${output.zaehlwerte_je_grad} Zählwerte je Grad · ` +
+      (output.mitte_gelernt ? `Ist ${(output.radwinkel || 0).toFixed(1)}° · ` +
+        `Soll ${(output.soll_grad || 0).toFixed(1)}°` : 'Mitte noch nicht gelernt');
+  }
+
   const rows = [
     ['Rolle', system.role === 'master' ? 'Master' : 'Client', true],
     ['Version', system.version, true],

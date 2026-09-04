@@ -434,6 +434,22 @@ class Engine:
             self.store.add_track_points(self.job["id"], self._track_buffer)
             self._track_buffer = []
 
+    def tick(self, now: Optional[float] = None) -> None:
+        """Regelmäßiger Herzschlag, unabhängig von eintreffenden Positionen.
+
+        Die ganze Kette hängt sonst daran, dass Positionen kommen: bleibt der
+        Empfänger stehen, wird auch nie neu entschieden, ob noch gelenkt werden
+        darf. Die Hardware fängt das über ihren Failsafe ab, aber die Anzeige
+        stünde weiter auf "lenkt". Deshalb wird hier von außen nachgesehen.
+        """
+        if self.steering is None or not self.steering.armed:
+            return
+        now = now or time.time()
+        age = now - self.fix.received_at if (self.fix and self.fix.received_at) else 99.0
+        if age > 2.0:
+            self.steering.disarm("keine GPS-Daten mehr")
+            self.note("Lenkung abgeschaltet: keine GPS-Daten")
+
     # -- output -----------------------------------------------------------
 
     def note(self, message: str) -> None:

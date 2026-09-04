@@ -125,6 +125,11 @@ Nur verfügbar, wenn sie bei der Installation freigegeben wurde.
 | näher als 1,5 m an der Spur | „zu weit von der Spur (… m)" |
 | Positionsdaten frisch | „GPS-Daten veraltet (… s)" |
 
+Sitzt ein Drehgeber am Lenkmotor, lernt das System beim Scharfschalten die
+Geradeausstellung – **beim Scharfschalten müssen die Räder also gerade stehen.**
+Neu setzen lässt sie sich über **Menü → System → Lenkung: Mitte lernen**, etwa
+nachdem von Hand nachgelenkt wurde.
+
 **Ins Lenkrad greifen schaltet sofort ab** und die Lenkung bleibt aus, bis sie
 neu scharf geschaltet wird. Am Vorgewende wird von Hand gewendet – eine
 automatische Wende gibt es bewusst nicht.

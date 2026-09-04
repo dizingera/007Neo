@@ -109,8 +109,31 @@ class PhidgetConfig:
 
     serial_number: int = -1      # -1 = erstes gefundenes Gerät
     motor_channel: int = 0
-    feedback: str = "yaw_rate"   # was | yaw_rate | encoder
     invert_motor: bool = False
+
+    # Regelungsart:
+    #   "position" - Positionsregler der Phidget-Steuerung. Der Sollwinkel geht
+    #                in Grad direkt an die Platine, der PID läuft dort in der
+    #                Firmware. Braucht einen Drehgeber und counts_per_deg.
+    #   "velocity" - eigener Regelkreis auf Drehzahl, mit der unten
+    #                eingestellten Rückmeldung.
+    control: str = "position"
+    feedback: str = "yaw_rate"   # nur bei control=velocity: was | yaw_rate | encoder
+
+    # -- Positionsregler ------------------------------------------------
+    # Zählwerte des Drehgebers je Grad Einschlag der Räder AM BODEN. Aus diesem
+    # Wert wird der RescaleFactor der Phidget-Steuerung gebildet, damit
+    # Sollwinkel und Istwinkel dort direkt in Grad geführt werden.
+    counts_per_deg: float = 40.0
+    max_wheel_angle_deg: float = 35.0   # mechanischer Anschlag, harte Grenze
+    dead_band_deg: float = 0.3          # darunter wird nicht nachgeregelt
+    velocity_limit: float = 0.55        # 0..1, Anteil der vollen Leistung
+    stall_velocity: float = 0.0         # 0 = Blockiererkennung der Platine aus
+    position_kp: float = 12000.0
+    position_ki: float = 40.0
+    position_kd: float = 300000.0
+    normalize_pid: bool = True          # PID in vergleichbaren Einheiten
+    override_deg: float = 4.0           # ab dieser Dauerabweichung: Fahrer/Blockade
 
     # Grenzen für den Motor
     current_limit_a: float = 2.0     # niedrig halten: das Rad muss von Hand zu übersteuern sein

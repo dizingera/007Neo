@@ -470,6 +470,195 @@ class PhidgetOutput(SteerOutput):
         return data
 
 
+class PhidgetPositionOutput(SteerOutput):
+    """Lenkmotor über den Positionsregler der Phidget-Steuerung.
+
+    Der bessere Weg, wenn ein Drehgeber am Motor sitzt und bekannt ist, wie
+    viele Zählwerte einem Grad Radeinschlag entsprechen. Dann bekommt die
+    Platine über ``RescaleFactor`` ihre Einheit in Grad gesetzt, und der
+    Sollwinkel geht direkt als Zahl in Grad hinüber - der PID läuft in der
+    Firmware mit ihrer eigenen, schnellen Taktung statt hier in Python.
+
+    Das ist nicht nur bequemer, es ist auch ruhiger: der Regelkreis hängt nicht
+    mehr an den zehn Positionen pro Sekunde vom Empfänger und nicht an der
+    Laufzeit des Programms.
+
+    Der Drehgeber zählt relativ, kennt also keine Geradeausstellung. Sie wird
+    beim Scharfschalten gelernt: die aktuelle Stellung wird per
+    ``addPositionOffset`` auf glatt null geschoben. Deshalb gilt unverändert -
+    beim Scharfschalten stehen die Räder gerade.
+    """
+
+    name = "phidget-position"
+
+    def __init__(self, config) -> None:
+        super().__init__()
+        self.config = config
+        self.controller = None
+        self.centred = False
+        self.target_deg = 0.0
+        self.last_error_text = ""
+        self._error_since: Optional[float] = None
+
+    # -- Aufbau -----------------------------------------------------------
+
+    async def start(self) -> None:
+        usable, problem = phidget_available()
+        if not usable:
+            self.status = problem
+            self.last_error_text = problem
+            return
+        from Phidget22.Devices.MotorPositionController import MotorPositionController
+        cfg = self.config
+        try:
+            controller = MotorPositionController()
+            if cfg.serial_number >= 0:
+                controller.setDeviceSerialNumber(cfg.serial_number)
+            controller.setChannel(cfg.motor_channel)
+            controller.openWaitForAttachment(5000)
+
+            # Ab hier rechnet die Platine in Grad Radeinschlag statt in
+            # Zählwerten - das ist der Kern dieser Betriebsart.
+            controller.setRescaleFactor(
+                (-1.0 if cfg.invert_motor else 1.0) / max(1e-6, cfg.counts_per_deg)
+            )
+            controller.setCurrentLimit(
+                _clamp(cfg.current_limit_a,
+                       controller.getMinCurrentLimit(), controller.getMaxCurrentLimit()))
+            controller.setVelocityLimit(
+                _clamp(cfg.velocity_limit,
+                       controller.getMinVelocityLimit(), controller.getMaxVelocityLimit()))
+            controller.setDeadBand(cfg.dead_band_deg)
+            controller.setNormalizePID(bool(cfg.normalize_pid))
+            controller.setKp(cfg.position_kp)
+            controller.setKi(cfg.position_ki)
+            controller.setKd(cfg.position_kd)
+            if cfg.stall_velocity > 0:
+                controller.setStallVelocity(cfg.stall_velocity)
+            controller.setEngaged(False)
+            try:
+                controller.enableFailsafe(int(cfg.failsafe_ms))
+            except Exception:  # noqa: BLE001
+                self.last_error_text = (
+                    "Diese Steuerung kennt keinen Failsafe - Not-Aus ist Pflicht")
+            self.controller = controller
+            self.ready = True
+            self.status = (f"Positionsregler {controller.getDeviceSerialNumber()}"
+                           f"/{cfg.motor_channel}, {cfg.counts_per_deg:g} Zählwerte je Grad")
+        except OSError as exc:
+            self.status = f"{_TREIBER_FEHLT} ({exc})"
+            self.last_error_text = _TREIBER_FEHLT
+            await self._release()
+        except Exception as exc:  # noqa: BLE001
+            self.status = f"Fehler beim Öffnen: {exc}"
+            self.last_error_text = str(exc)
+            await self._release()
+
+    async def stop(self) -> None:
+        await self._release()
+        self.ready = False
+
+    async def _release(self) -> None:
+        if self.controller is not None:
+            try:
+                self.controller.setEngaged(False)
+                self.controller.close()
+            except Exception:  # noqa: BLE001
+                pass
+        self.controller = None
+        self.centred = False
+
+    # -- Betrieb ----------------------------------------------------------
+
+    def on_arm(self) -> None:
+        self.learn_centre()
+
+    def learn_centre(self) -> dict:
+        """Aktuelle Stellung als Geradeaus merken.
+
+        ``addPositionOffset`` verschiebt die Zählung der Platine, sodass hier
+        anschließend wirklich null steht - besser als ein Nullpunkt, den nur
+        dieses Programm kennt und der bei jedem Fehler mitwandert.
+        """
+        if self.controller is None:
+            raise RuntimeError("Kein Lenkmotor verbunden")
+        try:
+            self.controller.addPositionOffset(-self.controller.getPosition())
+            self.controller.setTargetPosition(0.0)
+            self.centred = True
+            self._error_since = None
+            return {"centre_deg": self.controller.getPosition()}
+        except Exception as exc:  # noqa: BLE001
+            self.last_error_text = str(exc)
+            raise RuntimeError(f"Mitte konnte nicht gelernt werden: {exc}") from exc
+
+    def command(self, engaged: bool, angle_deg: float, context: SteerContext) -> None:
+        if self.controller is None:
+            return
+        limit = self.config.max_wheel_angle_deg
+        self.target_deg = _clamp(angle_deg, -limit, limit)
+        try:
+            if engaged and self.centred:
+                self.controller.setTargetPosition(self.target_deg)
+                self.controller.setEngaged(True)
+            else:
+                # Nicht scharf: Motor stromlos, damit von Hand gelenkt werden
+                # kann - ein gehaltener Sollwert wäre hier das Falsche.
+                self.controller.setEngaged(False)
+                self._error_since = None
+            self.controller.resetFailsafe()
+        except Exception as exc:  # noqa: BLE001
+            self.last_error_text = str(exc)
+            return
+        self._read_back(engaged)
+
+    def _read_back(self, engaged: bool) -> None:
+        try:
+            measured = self.controller.getPosition()
+            duty = self.controller.getDutyCycle()
+        except Exception:  # noqa: BLE001
+            return
+        self.feedback = OutputFeedback(
+            wheel_angle_deg=measured,
+            driver_override=self._detect_override(measured, duty, engaged),
+            duty=duty,
+            received_at=time.time(),
+        )
+
+    def _detect_override(self, measured: float, duty: float, engaged: bool) -> bool:
+        """Der Motor drückt, das Rad folgt nicht.
+
+        Mit einem Positionsregler ist das erkennbar, ohne einen weiteren Sensor:
+        bleibt die Abweichung groß, während die Platine schon nahe an ihrer
+        Leistungsgrenze arbeitet, hält entweder der Fahrer dagegen oder die
+        Mechanik klemmt. Beides sind Gründe abzugeben, deshalb wird nicht
+        zwischen ihnen unterschieden.
+        """
+        if not engaged:
+            self._error_since = None
+            return False
+        error = abs(self.target_deg - measured)
+        pushing = abs(duty) > self.config.velocity_limit * 0.8
+        if error < self.config.override_deg or not pushing:
+            self._error_since = None
+            return False
+        now = time.time()
+        if self._error_since is None:
+            self._error_since = now
+        return (now - self._error_since) > 0.5
+
+    def status_dict(self) -> dict:
+        data = super().status_dict()
+        data.update({
+            "rueckmeldung": "Drehgeber am Positionsregler",
+            "zaehlwerte_je_grad": self.config.counts_per_deg,
+            "mitte_gelernt": self.centred,
+            "soll_grad": self.target_deg,
+            "hinweis": self.last_error_text,
+        })
+        return data
+
+
 def _clamp(value: float, low: float, high: float) -> float:
     return max(low, min(high, value))
 
@@ -478,6 +667,10 @@ def build_output(config, imu=None) -> SteerOutput:
     """Ausgang aus der Konfiguration wählen."""
     kind = (config.steering.output or "none").lower()
     if kind == "phidget":
+        # Mit Drehgeber und bekanntem Zählwert je Grad regelt die Platine
+        # selbst - das ist der ruhigere Weg und deshalb die Voreinstellung.
+        if (config.phidget.control or "position").lower() == "position":
+            return PhidgetPositionOutput(config.phidget)
         return PhidgetOutput(config.phidget, imu)
     if kind == "udp":
         return UdpOutput(config.steering.host, config.steering.port)
