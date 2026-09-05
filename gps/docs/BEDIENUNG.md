@@ -155,6 +155,22 @@ der Traktor kippelt. Die angezeigte Abweichung darf dabei fast ruhig bleiben.
 Wird sie beim Kippeln größer, arbeitet der Ausgleich verkehrt herum – dann
 gehört in die Konfiguration `roll_sign: -1.0`.
 
+## Einbau-Checkliste (Menü → Einbau)
+
+Für die Inbetriebnahme, nicht für den Alltag. Die acht Schritte in der
+Reihenfolge, in der sie sich gegenseitig absichern; abgehakt wird von oben nach
+unten, der nächste offene Schritt ist blau umrandet.
+
+Grün heißt: **das Programm hat es gemessen**. Grau heißt: das Programm kann es
+nicht wissen, hier steht deine Aussage dafür gerade – etwa dass der Not-Aus in
+der Motorleitung sitzt. Rot heißt: die Anlage widerspricht gerade, und dann
+lässt sich der Schritt auch nicht abhaken.
+
+Schritte ohne Bestätigungstext haben keinen Knopf: sie erledigen sich selbst,
+sobald die Messung trägt.
+
+*Zurücksetzen* löscht alle Bestätigungen – sinnvoll nach einem Umbau, sonst nie.
+
 ## Kleine Regeln, die viel sparen
 
 * **Vor dem ersten Zug prüfen, ob „RTK fix" steht.** Mit „RTK float" wandert die

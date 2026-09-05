@@ -316,6 +316,14 @@ entstehen:
 Wer Schritt 5 überspringt, sucht später Lenkfehler, die in Wahrheit Mess- oder
 Maßfehler sind.
 
+Diese Reihenfolge steht auch in der Oberfläche: **Menü → Einbau**. Dort hakt man
+die Schritte ab, und was das Programm selbst messen kann, misst es mit – ob
+Sätze hereinkommen, ob der GST-Satz eingeschaltet ist, ob „RTK fix" dauerhaft
+steht statt nur gerade eben, ob der Sensor schon einmal eine Schräglage gesehen
+hat, wie lange bereits als reine Lenkhilfe gefahren wurde. Ein Schritt mit
+rotem Befund lässt sich nicht abhaken. Der Stand steht in der Datenbank und
+übersteht den Neustart – der Einbau zieht sich über Tage.
+
 ## Wenn etwas nicht geht
 
 | Bild | Ursache | Abhilfe |

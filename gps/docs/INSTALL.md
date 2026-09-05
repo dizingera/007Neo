@@ -32,6 +32,13 @@ Einmal durchspielen:
 
 Damit ist klar, wie sich das System verhält, bevor es im Traktor hängt.
 
+**Menü → Einbau** führt anschließend durch die Inbetriebnahme: dieselben
+Schritte wie auf dieser Seite, aber mitlesend. Was messbar ist, prüft das
+Programm laufend selbst und lässt einen Schritt erst durchgehen, wenn die
+Prüfung trägt; was es nicht wissen kann – Not-Aus eingebaut, Maße mit dem
+Maßband genommen, Basis im Fixed Mode – fragt es ausdrücklich nach. Nach einem
+Umbau setzt *Zurücksetzen* die Liste wieder auf Anfang.
+
 ## 2. Master aufsetzen
 
 Der Master ist ein Pi im Hof, der immer läuft. Er kann auch in einem Traktor

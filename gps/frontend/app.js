@@ -625,6 +625,7 @@ async function refreshLists() {
   if (active === 'jobs') renderJobs(await (await fetch('/api/jobs')).json());
   if (active === 'machine') fillProfile();
   if (active === 'system') renderSystem();
+  if (active === 'setup') renderSetup(await (await fetch('/api/checklist')).json());
 }
 
 function renderFields(fields) {
@@ -780,6 +781,92 @@ function renderSystem() {
   });
   el('simRow').hidden = system.gnss.source !== 'simulator';
 }
+
+function renderSetup(stand) {
+  const host = el('setupList');
+  el('setupBar').style.width =
+    `${stand.gesamt ? (100 * stand.fertig) / stand.gesamt : 0}%`;
+  el('setupCount').textContent = stand.abgeschlossen
+    ? 'Alle Schritte erledigt'
+    : `${stand.fertig} von ${stand.gesamt} · als Nächstes: ${stand.naechster}`;
+
+  host.innerHTML = '';
+  stand.schritte.forEach((schritt) => {
+    const row = document.createElement('div');
+    row.className = 'item step' + (schritt.fertig ? ' done' : '')
+                  + (schritt.dran ? ' now' : '');
+
+    const head = document.createElement('div');
+    head.className = 'head';
+    head.innerHTML = '<div class="nr"></div><div class="main">'
+                   + '<div class="title"></div></div>';
+    head.querySelector('.nr').textContent = schritt.fertig ? '✓' : schritt.nummer;
+    head.querySelector('.title').textContent = schritt.titel;
+    row.appendChild(head);
+
+    const why = document.createElement('div');
+    why.className = 'why';
+    why.textContent = schritt.warum;
+    row.appendChild(why);
+
+    if (schritt.pruefung) {
+      const check = document.createElement('div');
+      // Grün nur, wo wirklich gemessen wurde. Wo das Programm nichts wissen
+      // kann, bleibt es grau - eine grüne Zeile, die nichts geprüft hat,
+      // wäre die gefährlichste Anzeige auf diesem Bildschirm.
+      check.className = 'check ' + (schritt.erfuellt === true ? 'good'
+                                  : schritt.erfuellt === false ? 'bad' : 'unknown');
+      check.textContent = (schritt.erfuellt === true ? '✓ ' :
+                           schritt.erfuellt === false ? '✗ ' : '· ') + schritt.pruefung;
+      row.appendChild(check);
+    }
+
+    const foot = document.createElement('div');
+    foot.className = 'foot';
+    const text = document.createElement('div');
+    text.className = 'quittung';
+    if (schritt.fertig && schritt.bestaetigt_am) {
+      const wann = new Date(schritt.bestaetigt_am * 1000);
+      text.textContent = `abgehakt am ${wann.toLocaleDateString('de-DE')} `
+        + `${wann.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })}`
+        + (schritt.bestaetigt_von ? ` · ${schritt.bestaetigt_von}` : '');
+    } else {
+      text.textContent = schritt.quittung || '';
+    }
+    foot.appendChild(text);
+
+    // Schritte ohne Bestätigungstext hängen allein an der Messung. Dort einen
+    // Knopf anzubieten wäre eine Einladung, an der Anlage vorbei abzuhaken.
+    if (!schritt.quittung) {
+      if (!schritt.fertig) text.textContent = 'erledigt sich, sobald die Prüfung trägt';
+      row.appendChild(foot);
+      host.appendChild(row);
+      return;
+    }
+
+    const button = document.createElement('button');
+    button.textContent = schritt.fertig ? 'Zurücknehmen' : 'Abhaken';
+    if (!schritt.fertig) button.className = 'primary';
+    button.onclick = async () => {
+      const neu = !schritt.fertig;
+      if (neu && !confirm(`${schritt.quittung}?`)) return;
+      const antwort = await api('POST', `/api/checklist/${schritt.id}`, { erledigt: neu });
+      if (antwort) {
+        toast(neu ? 'Schritt abgehakt' : 'Bestätigung zurückgenommen');
+        renderSetup(antwort.data);
+      }
+    };
+    foot.appendChild(button);
+    row.appendChild(foot);
+    host.appendChild(row);
+  });
+}
+
+el('btnSetupReset').onclick = async () => {
+  if (!confirm('Alle Bestätigungen löschen? Nur nach einem Umbau sinnvoll.')) return;
+  const antwort = await api('DELETE', '/api/checklist');
+  if (antwort) { toast('Inbetriebnahme zurückgesetzt'); renderSetup(antwort.data); }
+};
 
 function item({ active, title, sub, actions }) {
   const row = document.createElement('div');

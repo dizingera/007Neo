@@ -85,6 +85,7 @@
       <button data-tab="jobs" class="tab">Aufträge</button>
       <button data-tab="machine" class="tab">Maschine</button>
       <button data-tab="system" class="tab">System</button>
+      <button data-tab="setup" class="tab">Einbau</button>
     </div>
     <button class="close" id="sheetClose">✕</button>
   </div>
@@ -137,6 +138,20 @@
     </div>
     <p class="note">Die Antennenwerte sind entscheidend: gemessen wird ab Mitte
       Hinterachse. Stimmen sie nicht, liegt jede Spur um genau diesen Betrag daneben.</p>
+  </section>
+
+  <section class="tab-panel" data-panel="setup" hidden>
+    <div class="row">
+      <div class="progress" aria-hidden="true"><div class="progress-bar" id="setupBar"></div></div>
+      <!-- Eine Statusmeldung, nicht zwei: der Balken zeigt dasselbe wie der
+           Text daneben und bleibt deshalb für Vorlesehilfen stumm. -->
+      <span class="note" id="setupCount" role="status" aria-atomic="true"></span>
+      <button id="btnSetupReset">Zurücksetzen</button>
+    </div>
+    <p class="note">Die Reihenfolge ist keine Förmlichkeit: so findet man einen
+      Fehler dort, wo er entsteht. Was das Programm selbst prüfen kann, prüft es
+      laufend mit – ein Schritt mit rotem Befund lässt sich nicht abhaken.</p>
+    <div class="list" id="setupList"></div>
   </section>
 
   <section class="tab-panel" data-panel="system" hidden>

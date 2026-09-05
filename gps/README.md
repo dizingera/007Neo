@@ -116,6 +116,8 @@ gps/
 │   ├── storage.py    SQLite: Felder, Spuren, Aufträge, Fahrspuren
 │   ├── sync.py       Master/Client-Abgleich, Zusammenführen der Flächen
 │   ├── export.py     GPX, GeoJSON, CSV
+│   ├── checklist.py  Inbetriebnahme: die acht Schritte, mitlesend geprüft
+│   ├── yamlfile.py   Konfigurationsdatei lesen und schreiben, auch ohne PyYAML
 │   └── server.py     Weboberfläche, Live-Verbindung, Schnittstelle
 ├── frontend/         Kabinenanzeige (kein Bauschritt nötig)
 ├── scripts/          Installation (Pi und Windows), Dienst, Gerätesuche,

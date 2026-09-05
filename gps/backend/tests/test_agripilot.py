@@ -438,9 +438,12 @@ class CorrectionsTest(unittest.IsolatedAsyncioTestCase):
         from agripilot.ntrip import TcpRtcmSource
 
         empfangen = []
-        server = await asyncio.start_server(
-            lambda reader, writer: writer.write(b"\xd3\x00\x13RTCM"),
-            "127.0.0.1", 0)
+        async def basis(reader, writer):
+            writer.write(b"\xd3\x00\x13RTCM")
+            await writer.drain()
+            writer.close()
+
+        server = await asyncio.start_server(basis, "127.0.0.1", 0)
         port = server.sockets[0].getsockname()[1]
         quelle = TcpRtcmSource("127.0.0.1", port, empfangen.append)
         aufgabe = asyncio.create_task(quelle.run())
@@ -454,6 +457,16 @@ class CorrectionsTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(empfangen, [b"\xd3\x00\x13RTCM"])
         self.assertGreater(quelle.bytes_received, 0)
         self.assertIn(str(port), quelle.status)
+
+    async def test_error_status_still_names_the_source(self):
+        """Bricht die Verbindung ab, muss dranstehen, welche Quelle schweigt."""
+        from agripilot.ntrip import TcpRtcmSource
+
+        quelle = TcpRtcmSource("127.0.0.1", 1, lambda _chunk: None, "Hofbasis")
+        quelle._stoerung(ConnectionError("Gegenstelle hat beendet"))
+        self.assertIn("Hofbasis", quelle.status)
+        self.assertIn("127.0.0.1:1", quelle.status)
+        self.assertIn("Gegenstelle hat beendet", quelle.status)
 
     async def test_relay_passes_the_stream_to_the_other_tractors(self):
         from agripilot.ntrip import RtcmRelay, RtcmRelayClient
@@ -477,6 +490,99 @@ class CorrectionsTest(unittest.IsolatedAsyncioTestCase):
         await traktor.stop()
         aufgabe.cancel()
         await verteiler.stop()
+
+
+class ConfigFileTest(unittest.TestCase):
+    """Die Konfigurationsdatei - die einzige Datei, die von Hand geschrieben wird.
+
+    Geprüft wird der eigene Leser aus ``yamlfile``, denn genau der springt ein,
+    wenn PyYAML fehlt: auf einem frisch aufgesetzten Rechner, beim Start mit dem
+    System-Python statt aus dem venv, oder nach einem Update, das das venv
+    ersetzt hat.
+    """
+
+    def test_sections_and_values_come_back_as_written(self):
+        from agripilot import yamlfile
+        gelesen = yamlfile.loads(
+            "gnss:\n"
+            "  source: serial      # Empfänger am USB-Anschluss\n"
+            "  port: COM3\n"
+            "  baudrate: 115200\n"
+            "\n"
+            "# Korrekturdaten von der eigenen Basis\n"
+            "corrections:\n"
+            "  source: ntrip\n"
+            "  host: 192.168.10.5\n"
+            "  send_gga: false\n"
+            "imu:\n"
+            "  uid: ''\n"
+            "  roll_sign: -1.0\n"
+            "  terrain_compensation: true\n")
+        self.assertEqual(gelesen["gnss"], {"source": "serial", "port": "COM3",
+                                           "baudrate": 115200})
+        self.assertEqual(gelesen["corrections"]["host"], "192.168.10.5")
+        self.assertIs(gelesen["corrections"]["send_gga"], False)
+        self.assertEqual(gelesen["imu"], {"uid": "", "roll_sign": -1.0,
+                                          "terrain_compensation": True})
+
+    def test_quoted_values_stay_text(self):
+        """Ein Mountpoint "1234" ist ein Name, keine Zahl - und ein Passwort auch."""
+        from agripilot import yamlfile
+        gelesen = yamlfile.loads(
+            'corrections:\n'
+            '  mountpoint: "1234"\n'
+            '  password: "geheim # kein Kommentar"\n'
+            "  username: 'true'\n")
+        self.assertEqual(gelesen["corrections"]["mountpoint"], "1234")
+        self.assertEqual(gelesen["corrections"]["password"], "geheim # kein Kommentar")
+        self.assertEqual(gelesen["corrections"]["username"], "true")
+
+    def test_written_file_reads_back_unchanged(self):
+        from agripilot import yamlfile
+        original = {
+            "gnss": {"source": "serial", "port": "COM3", "baudrate": 115200},
+            "corrections": {"mountpoint": "1234", "password": "ge:heim",
+                            "send_gga": False, "port": 2101},
+            "imu": {"uid": "", "roll_sign": -1.0},
+            "server": {"data_dir": r"C:\ProgramData\AgriPilot"},
+        }
+        self.assertEqual(yamlfile.loads(yamlfile.dumps(original)), original)
+
+    def test_a_broken_file_says_where_it_hurts(self):
+        """Lieber eine Zeilennummer als eine halb verstandene Konfiguration."""
+        from agripilot import yamlfile
+        with self.assertRaises(yamlfile.ConfigSyntaxError) as gefangen:
+            yamlfile.loads("gnss:\n  source serial\n")
+        self.assertIn("Zeile 2", str(gefangen.exception))
+
+    def test_the_config_loads_without_pyyaml(self):
+        """Ohne PyYAML muss dieselbe Datei gelesen werden - nicht als JSON."""
+        from agripilot import config as config_module
+        with tempfile.TemporaryDirectory() as ordner:
+            pfad = os.path.join(ordner, "config.yaml")
+            with open(pfad, "w", encoding="utf-8") as datei:
+                datei.write("gnss:\n  source: serial\n  port: COM3\n"
+                            "steering:\n  enabled: true\n")
+            ohne_yaml = {name: modul for name, modul in sys.modules.items()}
+            sys.modules["yaml"] = None  # importiert wie ein fehlendes Paket
+            try:
+                config = config_module.load(pfad)
+            finally:
+                sys.modules.clear()
+                sys.modules.update(ohne_yaml)
+            self.assertEqual(config.gnss.source, "serial")
+            self.assertEqual(config.gnss.port, "COM3")
+            self.assertTrue(config.steering.enabled)
+
+    def test_a_broken_config_names_the_file(self):
+        from agripilot import config as config_module
+        with tempfile.TemporaryDirectory() as ordner:
+            pfad = os.path.join(ordner, "config.yaml")
+            with open(pfad, "w", encoding="utf-8") as datei:
+                datei.write("gnss:\n\tport: COM3\n")
+            with self.assertRaises(ValueError) as gefangen:
+                config_module.load(pfad)
+            self.assertIn("config.yaml", str(gefangen.exception))
 
 
 class SteeringTest(unittest.TestCase):
@@ -975,6 +1081,143 @@ class EngineTest(unittest.TestCase):
             moment += 20.0
         result = self.engine.stop_recording()
         self.assertAlmostEqual(result["area_ha"], 0.5, places=2)
+
+
+class ChecklistTest(unittest.TestCase):
+    """Inbetriebnahme - die Liste, die mitliest.
+
+    Wichtig ist hier weniger, dass Haken gesetzt werden, als dass sie sich
+    *nicht* setzen lassen, solange die Anlage etwas anderes sagt.
+    """
+
+    def setUp(self):
+        from agripilot.checklist import Checkliste
+        self.ordner = tempfile.TemporaryDirectory()
+        self.addCleanup(self.ordner.cleanup)
+        self.store = Storage(os.path.join(self.ordner.name, "test.sqlite"))
+        self.addCleanup(self.store.close)
+        self.liste = Checkliste(self.store)
+
+    def _live(self, **werte):
+        """Ein Zustandsbild wie es die Anzeige bekommt - alles gesund."""
+        live = {
+            "fix": {"fix_quality": 4, "fix_label": "RTK fix", "satellites": 24,
+                    "accuracy_m": 0.02, "age_of_corrections": 1.0},
+            "profile": {"width_m": 6.0, "antenna_forward_m": 1.2,
+                        "antenna_right_m": 0.0, "antenna_height_m": 3.0},
+            "imu": {"healthy": True, "roll_deg": 0.5, "terrain_offset_cm": [3.0, 0.0]},
+            "fahrzeit_s": 0.0,
+            "system": {
+                "gnss": {"status": "COM3", "healthy": True, "lines": 4200},
+                "imu": {"source": "tinkerforge", "status": "IMU", "healthy": True},
+                "steering_output": {"typ": "phidget", "status": "bereit",
+                                    "bereit": True, "mitte_gelernt": True,
+                                    "zaehlwerte_je_grad": 40.0},
+            },
+        }
+        live.update(werte)
+        return live
+
+    def _schritt(self, live, schritt_id):
+        return next(s for s in self.liste.schritte(live) if s["id"] == schritt_id)
+
+    def test_the_first_open_step_is_the_one_on_deck(self):
+        schritte = self.liste.schritte(self._live())
+        dran = [s for s in schritte if s["dran"]]
+        self.assertEqual(len(dran), 1)
+        self.assertEqual(dran[0]["id"], "simulator")
+
+    def test_a_receiver_without_gst_is_not_ready(self):
+        """Ohne GST-Satz gibt es keine Genauigkeitsangabe - und keinen Beleg."""
+        live = self._live()
+        live["fix"] = {**live["fix"], "accuracy_m": None}
+        self.assertIs(self._schritt(live, "empfaenger")["erfuellt"], False)
+        self.assertIn("GST", self._schritt(live, "empfaenger")["pruefung"])
+
+    def test_rtk_must_stand_for_a_while_not_just_now(self):
+        """Ein Fix, der gerade eben eingerastet ist, ist kein dauerhafter Fix."""
+        from agripilot import checklist
+        live = self._live()
+        self.liste.beobachten(live)          # ab jetzt steht RTK fix
+        self.assertIs(self._schritt(live, "korrekturen")["erfuellt"], False)
+
+        self.liste.beobachtung.rtk_seit = time.time() - checklist.RTK_DAUER_S - 1
+        self.assertIs(self._schritt(live, "korrekturen")["erfuellt"], True)
+
+    def test_a_lost_fix_starts_the_clock_again(self):
+        from agripilot import checklist
+        live = self._live()
+        self.liste.beobachten(live)
+        self.liste.beobachtung.rtk_seit = time.time() - checklist.RTK_DAUER_S - 1
+
+        verloren = self._live()
+        verloren["fix"] = {**verloren["fix"], "fix_quality": 5, "fix_label": "RTK float"}
+        self.liste.beobachten(verloren)
+        self.assertEqual(self.liste.beobachtung.rtk_verloren, 1)
+
+        self.liste.beobachten(live)          # rastet wieder ein
+        self.assertIs(self._schritt(live, "korrekturen")["erfuellt"], False)
+
+    def test_a_step_the_machine_contradicts_cannot_be_ticked(self):
+        live = self._live()
+        live["fix"] = {**live["fix"], "fix_quality": 5, "fix_label": "RTK float"}
+        with self.assertRaises(ValueError) as gefangen:
+            self.liste.abhaken("korrekturen", live)
+        self.assertIn("RTK float", str(gefangen.exception))
+        self.assertFalse(self._schritt(live, "korrekturen")["fertig"])
+
+    def test_a_tick_survives_a_restart(self):
+        from agripilot.checklist import Checkliste
+        self.liste.abhaken("simulator", self._live(), geraet="Werkstatt-Tablet")
+        spaeter = Checkliste(self.store)
+        schritt = next(s for s in spaeter.schritte(self._live()) if s["id"] == "simulator")
+        self.assertTrue(schritt["fertig"])
+        self.assertEqual(schritt["bestaetigt_von"], "Werkstatt-Tablet")
+
+    def test_the_sign_test_needs_a_slope_to_prove_anything(self):
+        """Auf ebenem Boden sieht auch ein verkehrtes Vorzeichen sauber aus."""
+        live = self._live()
+        self.liste.beobachten(live)          # 0,5° - viel zu wenig
+        self.assertIs(self._schritt(live, "neigungssensor")["erfuellt"], False)
+
+        gekippt = self._live()
+        gekippt["imu"] = {**gekippt["imu"], "roll_deg": -4.2}
+        self.liste.beobachten(gekippt)
+        self.assertIsNone(self._schritt(live, "neigungssensor")["erfuellt"])
+
+    def test_the_motor_step_is_absent_without_a_steering_output(self):
+        live = self._live()
+        live["system"] = {**live["system"],
+                          "steering_output": {"typ": "none", "status": "nur Anzeige",
+                                              "bereit": True}}
+        self.assertNotIn("lenkmotor", [s["id"] for s in self.liste.schritte(live)])
+
+    def test_hours_as_a_guide_come_from_the_recorded_jobs(self):
+        from agripilot import checklist
+        live = self._live(fahrzeit_s=checklist.LENKHILFE_S - 60)
+        self.assertIs(self._schritt(live, "lenkhilfe")["erfuellt"], False)
+        live = self._live(fahrzeit_s=checklist.LENKHILFE_S + 60)
+        self.assertIs(self._schritt(live, "lenkhilfe")["erfuellt"], True)
+        # Ohne Bestätigungstext gilt die Messung selbst als Erledigung.
+        self.assertTrue(self._schritt(live, "lenkhilfe")["fertig"])
+
+    def test_recorded_working_time_adds_up(self):
+        from agripilot.checklist import fahrzeit_s
+        feld = self.store.save_field({"name": "Testfeld", "datum_lat": 48.1,
+                                      "datum_lon": 11.5})
+        for sekunden in (1800.0, 2400.0):
+            job = self.store.start_job(feld["id"], "pi", "Traktor", "Grubbern")
+            self.store.update_job(job["id"], working_time_s=sekunden)
+        self.assertAlmostEqual(fahrzeit_s(self.store), 4200.0)
+
+    def test_reset_clears_every_tick(self):
+        live = self._live()
+        self.liste.abhaken("simulator", live)
+        self.assertTrue(self._schritt(live, "simulator")["fertig"])
+        self.liste.zuruecksetzen(live)
+        # Was gemessen wird, bleibt gemessen; nur die Bestätigungen sind weg.
+        self.assertFalse(self._schritt(live, "simulator")["fertig"])
+        self.assertTrue(self._schritt(live, "empfaenger")["fertig"])
 
 
 class ServerTest(unittest.TestCase):

@@ -23,6 +23,7 @@ from fastapi.responses import JSONResponse, PlainTextResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from . import config as config_module
+from . import checklist as checklist_module
 from . import export, imu as imu_module, sync
 from .actuators import build_output
 from .coverage import CoverageMap
@@ -55,6 +56,9 @@ class Application:
             config.steering, build_output(config, self.imu)
         )
         self.engine.steering = self.steering
+        # Führt Buch über den Einbau und liest dabei mit, was sich erst
+        # über die Zeit zeigt - etwa ob "RTK fix" dauerhaft steht.
+        self.checklist = checklist_module.Checkliste(self.store)
         self.relay: Optional[RtcmRelay] = None
         self.corrections: Optional[CorrectionSource] = None
         self.rtcm_client: Optional[RtcmRelayClient] = None
@@ -135,6 +139,9 @@ class Application:
             await asyncio.sleep(interval)
             # Auch ohne Zuschauer: die Lenkung muss überwacht bleiben.
             self.engine.tick()
+            # Und die Inbetriebnahme liest mit, auch wenn niemand hinsieht:
+            # ein Fix, der nur beim Hinschauen steht, ist keiner.
+            self.checklist.beobachten(self.checklist_input())
             if not self.clients:
                 # Nobody is looking: drop the delta so a later viewer gets a
                 # full map instead of a half one.
@@ -151,6 +158,29 @@ class Application:
                     await websocket.send_text(message)
                 except Exception:  # noqa: BLE001
                     self.clients.discard(websocket)
+
+    def checklist_input(self) -> dict:
+        """Das Wenige, das die Beobachtung braucht - zehnmal je Sekunde.
+
+        Bewusst nicht der volle Zustand: der kostet einen Datenbankzugriff für
+        die Geräteliste, und das zehnmal je Sekunde für zwei Zahlen wäre
+        Verschwendung.
+        """
+        fix = self.engine.fix
+        return {
+            "fix": fix.to_dict() if fix else None,
+            "imu": ({"healthy": self.imu.healthy,
+                     "roll_deg": self.imu.attitude.roll_deg}
+                    if self.imu is not None else None),
+        }
+
+    def checklist_state(self) -> dict:
+        """Vollbild für die Liste selbst - hier darf es etwas kosten."""
+        return {
+            **self.engine.state(),
+            "system": self.system_status(),
+            "fahrzeit_s": checklist_module.fahrzeit_s(self.store),
+        }
 
     def system_status(self) -> dict[str, Any]:
         return {
@@ -457,6 +487,30 @@ def create_app(config=None) -> FastAPI:
     @api.get("/api/system")
     async def system_status() -> dict:
         return application.system_status()
+
+    # -- Inbetriebnahme ---------------------------------------------------
+
+    @api.get("/api/checklist")
+    async def checklist() -> dict:
+        return application.checklist.zusammenfassung(application.checklist_state())
+
+    @api.post("/api/checklist/{schritt_id}")
+    async def tick_checklist(schritt_id: str, payload: dict = Body(default={})):
+        """Einen Schritt abhaken - oder die Bestätigung zurücknehmen.
+
+        Abgelehnt wird, was die laufende Anlage gerade widerlegt: ein Schritt,
+        dessen Prüfung nicht trägt, lässt sich nicht wegklicken.
+        """
+        return guard(application.checklist.abhaken, schritt_id,
+                     application.checklist_state(),
+                     bool(payload.get("erledigt", True)),
+                     config.network.device_name or config.network.device_id)
+
+    @api.delete("/api/checklist")
+    async def reset_checklist():
+        """Nach einem Umbau fängt die Inbetriebnahme von vorn an."""
+        engine.note("Inbetriebnahme zurückgesetzt")
+        return ok(application.checklist.zuruecksetzen(application.checklist_state()))
 
     @api.get("/api/config")
     async def get_config() -> dict:

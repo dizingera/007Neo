@@ -25,6 +25,19 @@ from .nmea import build_gga
 RtcmSink = Callable[[bytes], None]
 
 
+async def _schliessen(writer: asyncio.StreamWriter) -> None:
+    """Verbindung zumachen und das Ende abwarten.
+
+    Ohne das Abwarten meldet Python beim Aufräumen einen offenen Datenstrom -
+    harmlos, aber es steht im Protokoll neben den echten Fehlern.
+    """
+    writer.close()
+    try:
+        await writer.wait_closed()
+    except Exception:  # noqa: BLE001 - beim Zumachen ist alles schon vorbei
+        pass
+
+
 class CorrectionSource:
     """Gemeinsames Verhalten aller Quellen: laufen, melden, sich erholen."""
 
@@ -44,6 +57,20 @@ class CorrectionSource:
         self.last_data_at = time.time()
         self.sink(chunk)
 
+    @property
+    def adresse(self) -> str:
+        """Woher die Korrekturen kommen sollen - eine Zeile für die Anzeige."""
+        return ""
+
+    def _stoerung(self, exc: BaseException) -> None:
+        """Fehler melden, ohne zu verschweigen, welche Quelle gemeint ist.
+
+        Ein nacktes "Fehler: Gegenstelle hat beendet" hilft in der Kabine
+        niemandem: bei Basis, Funkmodem und Caster steht dieselbe Zeile, und wer
+        zwei Wege eingerichtet hat, weiß nicht, welcher davon schweigt.
+        """
+        self.status = f"{self.adresse} - Fehler: {exc}" if self.adresse else f"Fehler: {exc}"
+
     async def run(self) -> None:  # pragma: no cover - in Unterklassen
         raise NotImplementedError
 
@@ -61,6 +88,11 @@ class NtripClient(CorrectionSource):
         self.position = position
         self._writer: Optional[asyncio.StreamWriter] = None
 
+    @property
+    def adresse(self) -> str:
+        cfg = self.config
+        return f"{cfg.host}/{cfg.mountpoint}" if cfg.mountpoint else str(cfg.host)
+
     async def run(self) -> None:
         if not self.config.host:
             self.status = "kein Caster eingetragen"
@@ -72,7 +104,7 @@ class NtripClient(CorrectionSource):
                 await self._session()
                 backoff = 2.0
             except Exception as exc:  # noqa: BLE001 - never take the cab display down
-                self.status = f"Fehler: {exc}"
+                self._stoerung(exc)
                 await asyncio.sleep(backoff)
                 backoff = min(30.0, backoff * 2)
 
@@ -103,7 +135,7 @@ class NtripClient(CorrectionSource):
             if line in (b"\r\n", b"\n", b""):
                 break
 
-        self.status = f"verbunden {cfg.host}/{cfg.mountpoint}"
+        self.status = f"verbunden {self.adresse}"
         gga_task = asyncio.create_task(self._send_gga_loop(writer))
         try:
             while self.running:
@@ -113,7 +145,7 @@ class NtripClient(CorrectionSource):
                 self._received(chunk)
         finally:
             gga_task.cancel()
-            writer.close()
+            await _schliessen(writer)
             self._writer = None
 
     async def _send_gga_loop(self, writer: asyncio.StreamWriter) -> None:
@@ -156,6 +188,10 @@ class TcpRtcmSource(CorrectionSource):
         self.port = port
         self.beschreibung = beschreibung
 
+    @property
+    def adresse(self) -> str:
+        return f"{self.beschreibung} {self.host}:{self.port}"
+
     async def run(self) -> None:
         if not self.host:
             self.status = "keine Adresse eingetragen"
@@ -165,7 +201,7 @@ class TcpRtcmSource(CorrectionSource):
         while self.running:
             try:
                 reader, writer = await asyncio.open_connection(self.host, self.port)
-                self.status = f"{self.beschreibung} {self.host}:{self.port}"
+                self.status = self.adresse
                 backoff = 2.0
                 try:
                     while self.running:
@@ -174,9 +210,9 @@ class TcpRtcmSource(CorrectionSource):
                             raise ConnectionError("Gegenstelle hat beendet")
                         self._received(chunk)
                 finally:
-                    writer.close()
+                    await _schliessen(writer)
             except Exception as exc:  # noqa: BLE001
-                self.status = f"Fehler: {exc}"
+                self._stoerung(exc)
                 await asyncio.sleep(backoff)
                 backoff = min(30.0, backoff * 2)
 
@@ -195,6 +231,10 @@ class SerialRtcmSource(CorrectionSource):
         self.port = port
         self.baudrate = baudrate
 
+    @property
+    def adresse(self) -> str:
+        return f"Funkmodem {self.port} @ {self.baudrate}"
+
     async def run(self) -> None:
         if not self.port:
             self.status = "kein Anschluss eingetragen"
@@ -207,7 +247,7 @@ class SerialRtcmSource(CorrectionSource):
             try:
                 import serial
                 link = serial.Serial(self.port, self.baudrate, timeout=1)
-                self.status = f"Funkmodem {self.port} @ {self.baudrate}"
+                self.status = self.adresse
                 backoff = 1.0
                 while self.running:
                     chunk = await loop.run_in_executor(None, link.read, 512)
@@ -217,7 +257,7 @@ class SerialRtcmSource(CorrectionSource):
                 self.status = "pyserial fehlt (pip install pyserial)"
                 await asyncio.sleep(10)
             except Exception as exc:  # noqa: BLE001
-                self.status = f"Fehler: {exc}"
+                self._stoerung(exc)
                 await asyncio.sleep(backoff)
                 backoff = min(15.0, backoff * 2)
             finally:

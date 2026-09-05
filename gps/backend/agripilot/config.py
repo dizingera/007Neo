@@ -249,17 +249,27 @@ def _dump(payload: dict) -> str:
         import yaml
         return yaml.safe_dump(payload, sort_keys=False, allow_unicode=True)
     except ImportError:
-        import json
-        return json.dumps(payload, indent=2, ensure_ascii=False)
+        from . import yamlfile
+        return yamlfile.dumps(payload)
 
 
 def _load_text(text: str) -> dict:
+    """Den Text der Konfigurationsdatei zu einem Wörterbuch.
+
+    Fehlt PyYAML, liest der eigene Leser aus ``yamlfile`` - die Datei bleibt
+    dieselbe. Auf JSON auszuweichen wäre falsch gewesen: eine ganz normale
+    YAML-Datei scheitert dann in Zeile 1 mit einer Meldung über JSON, und von
+    dort kommt niemand auf das fehlende Paket.
+    """
     try:
         import yaml
-        return yaml.safe_load(text) or {}
     except ImportError:
-        import json
-        return json.loads(text or "{}")
+        from . import yamlfile
+        return yamlfile.loads(text)
+    geladen = yaml.safe_load(text) or {}
+    if not isinstance(geladen, dict):
+        raise ValueError("erwartet werden Abschnitte wie 'gnss:', kein einzelner Wert")
+    return geladen
 
 
 def load(path: str | Path | None = None) -> Config:
@@ -272,7 +282,13 @@ def load(path: str | Path | None = None) -> Config:
     target = Path(path or DEFAULT_PATH)
     data: dict[str, Any] = {}
     if target.exists():
-        data = _load_text(target.read_text(encoding="utf-8"))
+        try:
+            data = _load_text(target.read_text(encoding="utf-8"))
+        except Exception as exc:  # noqa: BLE001 - die Datei ist handgeschrieben
+            # Nicht stillschweigend auf Standardwerte zurückfallen: das System
+            # liefe dann im Simulator, während der Fahrer auf den Empfänger
+            # wartet. Lieber laut sein und die Datei nennen.
+            raise ValueError(f"{target}: {exc}") from exc
 
     config = Config(
         gnss=GnssConfig(**_subset(GnssConfig, data.get("gnss"))),
