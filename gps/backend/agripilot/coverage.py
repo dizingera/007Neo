@@ -159,26 +159,57 @@ class CoverageMap:
                              sections: Sequence[Section],
                              look_ahead_m: float = 1.0,
                              speed_ms: float = 0.0,
-                             boundary: Optional[Sequence[Point]] = None) -> None:
+                             boundary: Optional[Sequence[Point]] = None,
+                             pcc: float = 0.9) -> None:
         """Switch sections off over worked ground and outside the boundary.
 
         The check is done a little ahead of the machine, scaled with speed,
         because a sprayer valve needs time to close.  Only sections flagged
         `auto` are touched, so the driver can always override.
+
+        Abgetastet wird die **Breite** des Teilstücks, nicht ein einzelner Punkt
+        in seiner Mitte. Ein Punkt kennt nur an oder aus und lässt die Teilbreite
+        am Rand einer Fahrspur flackern, sobald der Traktor ein paar Zentimeter
+        pendelt. ``pcc`` ist die Schwelle aus dem Cerea-Handbuch: ein offenes
+        Teilstück schließt erst, wenn dieser Anteil überdeckt ist (Standard 0,9);
+        auf neuem Boden geht es sofort wieder auf.
+
+        Die Feldgrenze bleibt davon unberührt: was hinausragt, schaltet ab,
+        unabhängig von der Überdeckung. Draußen zu arbeiten wäre kein
+        Schönheitsfehler.
         """
         h = math.radians(heading)
         forward = (math.sin(h), math.cos(h))
         right = (math.cos(h), -math.sin(h))
         ahead = look_ahead_m + speed_ms * 0.5
+        schwelle = max(0.05, min(1.0, pcc))
         for section in sections:
             if not section.auto or section.forced_off:
                 continue
-            probe = (
-                tool_centre[0] + forward[0] * ahead + right[0] * section.centre,
-                tool_centre[1] + forward[1] * ahead + right[1] * section.centre,
-            )
-            outside = boundary is not None and not point_in_polygon(probe, boundary)
-            section.enabled = not (self.is_covered(probe) or outside)
+            proben = self._section_proben(tool_centre, forward, right, section, ahead)
+            if boundary is not None and any(
+                    not point_in_polygon(punkt, boundary) for punkt in proben):
+                section.enabled = False
+                continue
+            anteil = sum(1 for punkt in proben if self.is_covered(punkt)) / len(proben)
+            section.enabled = anteil < schwelle
+
+    @staticmethod
+    def _section_proben(tool_centre: Point, forward: Point, right: Point,
+                        section: Section, ahead: float,
+                        anzahl: int = 5) -> list[Point]:
+        """Punkte quer über die Breite eines Teilstücks, ein Stück voraus."""
+        punkte = []
+        for i in range(anzahl):
+            # Ränder mitnehmen, aber nicht genau auf der Kante: dort entscheidet
+            # ein Zentimeter über das Ergebnis.
+            anteil = (i + 0.5) / anzahl
+            quer = section.left_m + section.width * anteil
+            punkte.append((
+                tool_centre[0] + forward[0] * ahead + right[0] * quer,
+                tool_centre[1] + forward[1] * ahead + right[1] * quer,
+            ))
+        return punkte
 
     # -- transfer ---------------------------------------------------------
 

@@ -369,8 +369,20 @@ class Engine:
         if self.line is None or self.tool_position is None or self.heading is None:
             self.guidance = GuidanceState(message="Keine Spur aktiv")
             return
+        # Zwischen der Position vom Empfänger und der tatsächlichen Radbewegung
+        # liegt Zeit: Empfänger, Programm, Platine, Motor, Lenkgestänge. Wer sie
+        # nicht ausgleicht, lenkt immer auf die Stelle, an der die Maschine vor
+        # einem Augenblick war - in schnellen Kurven läuft sie deshalb hinterher.
+        # Geführt wird deshalb auf den Punkt, an dem sie sein wird; markiert
+        # wird weiterhin dort, wo sie wirklich war.
+        fuehrungspunkt = self.tool_position
+        vorhalt_m = self.profile.actuator_latency_ms / 1000.0 * max(0.0, fix.speed_ms)
+        if vorhalt_m > 0.01:
+            h = math.radians(self.heading)
+            fuehrungspunkt = (self.tool_position[0] + math.sin(h) * vorhalt_m,
+                              self.tool_position[1] + math.cos(h) * vorhalt_m)
         self.guidance = self.line.solve(
-            self.tool_position, self.heading, fix.speed_ms, self.profile
+            fuehrungspunkt, self.heading, fix.speed_ms, self.profile
         )
 
     def _update_coverage(self, previous_tool: Optional[geo.Point]) -> None:
@@ -390,6 +402,7 @@ class Engine:
                 self.tool_position, self.heading, self.sections,
                 speed_ms=self.fix.speed_ms if self.fix else 0.0,
                 boundary=boundary,
+                pcc=self.profile.section_pcc,
             )
         if previous_tool is not None:
             self.coverage.add_swath(

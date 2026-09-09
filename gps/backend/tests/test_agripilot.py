@@ -26,6 +26,14 @@ from agripilot.guidance import GuidanceLine, HeadingFilter, VehicleProfile, ligh
 from agripilot.storage import Storage
 
 
+def _fix(**werte):
+    """Ein Fix mit dem Nötigsten für die Führung."""
+    from agripilot.nmea import Fix
+    grund = {"lat": 48.0, "lon": 11.0, "fix_quality": 4, "speed_ms": 0.0}
+    grund.update(werte)
+    return Fix(**grund)
+
+
 def sentence(body: str) -> str:
     crc = 0
     for ch in body:
@@ -224,6 +232,148 @@ class GuidanceTest(unittest.TestCase):
         heading.value = 359.0
         heading.update(1.0, None, 3.0)
         self.assertAlmostEqual(heading.value, 0.0, places=6)
+
+
+class SpeedGainTest(unittest.TestCase):
+    """Absenkung der Lenkaggressivität bei Tempo (Cerea RWFVLIMIT)."""
+
+    def _profil(self, **werte):
+        from agripilot.guidance import VehicleProfile
+        return VehicleProfile(**werte)
+
+    def test_off_by_default(self):
+        from agripilot.guidance import speed_gain_factor
+        profil = self._profil()
+        for kmh in (0.0, 5.0, 12.0, 25.0):
+            self.assertEqual(speed_gain_factor(kmh / 3.6, profil), 1.0)
+
+    def test_below_the_threshold_nothing_changes(self):
+        from agripilot.guidance import speed_gain_factor
+        profil = self._profil(speed_gain_limit_kmh=8.0, speed_gain_rest=0.5)
+        self.assertEqual(speed_gain_factor(7.9 / 3.6, profil), 1.0)
+
+    def test_linear_between_threshold_and_double(self):
+        from agripilot.guidance import speed_gain_factor
+        profil = self._profil(speed_gain_limit_kmh=8.0, speed_gain_rest=0.5)
+        # Bei 12 km/h ist die Hälfte des Wegs von 8 auf 16 zurückgelegt.
+        self.assertAlmostEqual(speed_gain_factor(12.0 / 3.6, profil), 0.75, places=6)
+        self.assertAlmostEqual(speed_gain_factor(16.0 / 3.6, profil), 0.5, places=6)
+
+    def test_it_does_not_keep_falling_above_double(self):
+        """Sonst stünde die Lenkung bei hohem Tempo praktisch still."""
+        from agripilot.guidance import speed_gain_factor
+        profil = self._profil(speed_gain_limit_kmh=8.0, speed_gain_rest=0.5)
+        self.assertAlmostEqual(speed_gain_factor(40.0 / 3.6, profil), 0.5, places=6)
+
+    def test_a_fast_machine_steers_more_gently(self):
+        """Der eigentliche Zweck: gleicher Fehler, weniger Ausschlag."""
+        from agripilot.guidance import GuidanceLine
+        profil = self._profil(speed_gain_limit_kmh=6.0, speed_gain_rest=0.4)
+        linie = GuidanceLine("ab", [(0.0, 0.0), (0.0, 100.0)], profil.spacing_m)
+        langsam = linie.solve((0.5, 10.0), 0.0, 4.0 / 3.6, profil).steer_angle_deg
+        schnell = linie.solve((0.5, 10.0), 0.0, 14.0 / 3.6, profil).steer_angle_deg
+        self.assertLess(abs(schnell), abs(langsam))
+
+
+class SectionPccTest(unittest.TestCase):
+    """Abschaltschwelle nach Überdeckungsanteil (Cerea pcc)."""
+
+    def setUp(self):
+        from agripilot.coverage import CoverageMap, build_sections
+        self.karte = CoverageMap(cell_size=0.5)
+        self.sektionen = build_sections(6.0, 3)   # je 2 m breit
+
+    def _bedecke(self, x0, x1, y0=0.0, y1=40.0):
+        """Einen Streifen als bearbeitet markieren."""
+        self.karte._rasterise([(x0, y0), (x1, y0), (x1, y1), (x0, y1)])
+
+    def test_a_section_barely_touching_worked_ground_stays_on(self):
+        """Ein Punkt in der Mitte hätte hier schon abgeschaltet - zu früh."""
+        # Nur der linke Rand des linken Teilstücks liegt auf bearbeitetem Boden.
+        self._bedecke(-3.0, -2.6)
+        self.karte.update_auto_sections((0.0, 10.0), 0.0, self.sektionen,
+                                        look_ahead_m=1.0, pcc=0.9)
+        self.assertTrue(self.sektionen[0].enabled)
+
+    def test_a_fully_covered_section_closes(self):
+        self._bedecke(-3.0, -1.0)
+        self.karte.update_auto_sections((0.0, 10.0), 0.0, self.sektionen,
+                                        look_ahead_m=1.0, pcc=0.9)
+        self.assertFalse(self.sektionen[0].enabled)
+        self.assertTrue(self.sektionen[1].enabled)
+
+    def test_a_lower_threshold_closes_earlier(self):
+        self._bedecke(-3.0, -2.0)     # die Hälfte des linken Teilstücks
+        self.karte.update_auto_sections((0.0, 10.0), 0.0, self.sektionen,
+                                        look_ahead_m=1.0, pcc=0.9)
+        self.assertTrue(self.sektionen[0].enabled)
+        self.karte.update_auto_sections((0.0, 10.0), 0.0, self.sektionen,
+                                        look_ahead_m=1.0, pcc=0.4)
+        self.assertFalse(self.sektionen[0].enabled)
+
+    def test_the_boundary_does_not_wait_for_the_threshold(self):
+        """Draußen zu arbeiten ist kein Schönheitsfehler - das schaltet sofort ab."""
+        grenze = [(-2.5, 0.0), (2.5, 0.0), (2.5, 40.0), (-2.5, 40.0)]
+        self.karte.update_auto_sections((0.0, 10.0), 0.0, self.sektionen,
+                                        look_ahead_m=1.0, boundary=grenze, pcc=0.9)
+        self.assertFalse(self.sektionen[0].enabled)   # ragt links hinaus
+        self.assertTrue(self.sektionen[1].enabled)    # liegt ganz drin
+        self.assertFalse(self.sektionen[2].enabled)   # ragt rechts hinaus
+
+    def test_the_driver_keeps_the_last_word(self):
+        self._bedecke(-3.0, 3.0)
+        for sektion in self.sektionen:
+            sektion.auto = False
+            sektion.enabled = True
+        self.karte.update_auto_sections((0.0, 10.0), 0.0, self.sektionen, pcc=0.9)
+        self.assertTrue(all(s.enabled for s in self.sektionen))
+
+
+class LatencyTest(unittest.TestCase):
+    """Aktor-/GNSS-Latenz: geführt wird auf den Punkt, an dem die Maschine sein wird."""
+
+    def _engine(self, latenz_ms):
+        import tempfile as tf
+        from agripilot import config as config_module
+        from agripilot.engine import Engine
+        from agripilot.storage import Storage
+        ordner = tf.TemporaryDirectory()
+        self.addCleanup(ordner.cleanup)
+        store = Storage(os.path.join(ordner.name, "e.db"))
+        self.addCleanup(store.close)
+        config = config_module.load("/kein-solcher-pfad.yaml")
+        motor = Engine(config, store)
+        motor.update_profile({"actuator_latency_ms": latenz_ms,
+                              "antenna_forward_m": 0.0, "tool_trailing_m": 0.0})
+        return motor
+
+    def test_zero_latency_guides_on_the_tool(self):
+        from agripilot.guidance import GuidanceLine
+        motor = self._engine(0)
+        motor.line = GuidanceLine("ab", [(0.0, 0.0), (0.0, 100.0)], motor.profile.spacing_m)
+        motor.tool_position = (0.4, 10.0)
+        motor.heading = 0.0
+        motor._update_guidance(_fix(speed_ms=3.0))
+        self.assertAlmostEqual(motor.guidance.distance_along_m, 10.0, places=3)
+
+    def test_latency_moves_the_guidance_point_ahead(self):
+        """240 ms bei 3 m/s sind gut 70 cm - in einer Kurve genau der Nachlauf."""
+        from agripilot.guidance import GuidanceLine
+        motor = self._engine(240)
+        motor.line = GuidanceLine("ab", [(0.0, 0.0), (0.0, 100.0)], motor.profile.spacing_m)
+        motor.tool_position = (0.4, 10.0)
+        motor.heading = 0.0
+        motor._update_guidance(_fix(speed_ms=3.0))
+        self.assertAlmostEqual(motor.guidance.distance_along_m, 10.72, places=2)
+
+    def test_standing_still_nothing_is_projected(self):
+        from agripilot.guidance import GuidanceLine
+        motor = self._engine(240)
+        motor.line = GuidanceLine("ab", [(0.0, 0.0), (0.0, 100.0)], motor.profile.spacing_m)
+        motor.tool_position = (0.4, 10.0)
+        motor.heading = 0.0
+        motor._update_guidance(_fix(speed_ms=0.0))
+        self.assertAlmostEqual(motor.guidance.distance_along_m, 10.0, places=3)
 
 
 class CoverageTest(unittest.TestCase):

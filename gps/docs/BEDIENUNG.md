@@ -155,6 +155,37 @@ der Traktor kippelt. Die angezeigte Abweichung darf dabei fast ruhig bleiben.
 Wird sie beim Kippeln größer, arbeitet der Ausgleich verkehrt herum – dann
 gehört in die Konfiguration `roll_sign: -1.0`.
 
+## Abstimmung bei Tempo, Latenz und Teilbreiten (Menü → Maschine)
+
+Drei Werte, die aus dem Cerea-Handbuch übernommen sind und erst zählen, wenn die
+Grundlage stimmt – Antennenmaße gemessen, Vorzeichen geprüft, RTK-Fix dauerhaft.
+
+**Absenkung ab (km/h) und Restfaktor.** Dieselbe Einstellung, die im Schritttempo
+sauber nachführt, schaukelt bei zwölf km/h auf: der Fehler wird schneller
+eingefahren, als die Lenkung ihn abbauen kann. Ab der Schwelle wird die Lenkung
+linear weicher, bei doppelter Schwelle bleibt der Restfaktor stehen und fällt
+nicht weiter – sonst stünde die Lenkung bei hohem Tempo praktisch still.
+0 schaltet die Absenkung aus. Richtwert zum Anfangen: Schwelle bei der
+Geschwindigkeit, ab der es unruhig wird, Restfaktor 0,5.
+
+**Aktor-/GNSS-Latenz (ms).** Zwischen der Position vom Empfänger und der
+wirklichen Radbewegung liegt Zeit: Empfänger, Programm, Platine, Motor,
+Lenkgestänge. Ohne Ausgleich lenkt das System immer auf die Stelle, an der die
+Maschine vor einem Augenblick war – in schnell gefahrenen Kurven läuft sie
+deshalb hinterher. Geführt wird dann auf den Punkt, an dem sie sein *wird*;
+markiert wird weiterhin dort, wo sie wirklich war. Bei 240 ms und 3 m/s sind das
+gut 70 cm Vorhalt. Voreinstellung 0, in 50-ms-Schritten erhöhen und im Stand
+gegenprüfen.
+
+**Teilbreiten: Abschalten ab.** Ein offenes Teilstück schließt erst, wenn dieser
+Anteil seiner Breite überdeckt ist (Voreinstellung 0,9). Vorher entschied ein
+einzelner Punkt in der Mitte – dann flackert die Teilbreite am Fahrspurrand,
+sobald der Traktor ein paar Zentimeter pendelt. Auf neuem Boden geht sie sofort
+wieder auf.
+
+Die **Feldgrenze** bleibt davon unberührt: was hinausragt, schaltet ab,
+unabhängig von der Überdeckung. Draußen zu arbeiten wäre kein Schönheitsfehler.
+
 ## Einbau-Checkliste (Menü → Einbau)
 
 Für die Inbetriebnahme, nicht für den Alltag. Die acht Schritte in der

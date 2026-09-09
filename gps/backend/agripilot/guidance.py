@@ -56,6 +56,22 @@ class VehicleProfile:
     max_steer_rate_deg_s: float = 25.0  # how fast the steering actuator may move
     sections: int = 1               # number of switchable sections across the width
 
+    # -- Abstimmung bei Tempo (aus dem Cerea-Handbuch, RWFVLIMIT/RWFVLFACTOR) --
+    # "The autoguiding can go into resonance ... with increasing speed ... it is
+    # necessary to lower the guiding aggressiveness." Dieselbe Einstellung, die
+    # im Schritttempo sauber nachführt, schaukelt bei zwölf km/h auf: der Fehler
+    # wird schneller eingefahren, als die Lenkung ihn abbauen kann.
+    speed_gain_limit_kmh: float = 0.0   # 0 = aus; darüber beginnt die Absenkung
+    speed_gain_rest: float = 0.55       # Restanteil bei doppelter Schwelle
+
+    # Zeit zwischen der Position vom Empfänger und der tatsächlichen
+    # Radbewegung (Cerea führt das als Aktordelay in seiner MPC-Methode).
+    # Ohne Ausgleich läuft die Maschine in schnellen Kurven hinterher.
+    actuator_latency_ms: int = 0
+
+    # Anteil der Überdeckung, ab dem ein offenes Teilstück schließt (Cerea: pcc).
+    section_pcc: float = 0.9
+
     @property
     def spacing_m(self) -> float:
         """Distance between passes: working width minus intentional overlap."""
@@ -208,11 +224,12 @@ class GuidanceLine:
         gentle when fast and firm when crawling; the softening constant stops it
         from exploding as speed approaches zero.
         """
+        faktor = speed_gain_factor(speed_ms, profile)
         approach = math.degrees(
-            math.atan2(profile.steer_gain * cross_track,
+            math.atan2(profile.steer_gain * faktor * cross_track,
                        abs(speed_ms) + profile.steer_softening)
         )
-        steer = heading_error - approach
+        steer = heading_error * faktor - approach
         limit = profile.max_steer_deg
         return max(-limit, min(limit, steer))
 
@@ -264,6 +281,24 @@ class GuidanceLine:
             "spacing_m": self.spacing,
             "nudge_m": self.nudge_m,
         }
+
+
+def speed_gain_factor(speed_ms: float, profile: VehicleProfile) -> float:
+    """Wie stark bei Tempo abgesenkt wird - 1.0 heißt: unverändert.
+
+    Linear zwischen Schwelle und doppelter Schwelle, danach bleibt es beim
+    Restanteil. Absichtlich keine Kurve: ein Wert, den man im Feld nachvollziehen
+    kann, ist mehr wert als einer, der sich besser liest.
+    """
+    grenze = profile.speed_gain_limit_kmh
+    if grenze <= 0.0:
+        return 1.0
+    kmh = abs(speed_ms) * 3.6
+    if kmh <= grenze:
+        return 1.0
+    anteil = min(1.0, (kmh - grenze) / grenze)
+    rest = max(0.05, min(1.0, profile.speed_gain_rest))
+    return 1.0 - anteil * (1.0 - rest)
 
 
 def lightbar_offset(cross_track_m: float, led_cm: float = 5.0,
