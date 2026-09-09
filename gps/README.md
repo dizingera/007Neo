@@ -117,12 +117,14 @@ gps/
 │   ├── sync.py       Master/Client-Abgleich, Zusammenführen der Flächen
 │   ├── export.py     GPX, GeoJSON, CSV
 │   ├── checklist.py  Inbetriebnahme: die acht Schritte, mitlesend geprüft
+│   ├── settings.py   Alle Einstellungen: Bereiche, Erklärung, Wirkzeitpunkt
 │   ├── yamlfile.py   Konfigurationsdatei lesen und schreiben, auch ohne PyYAML
 │   └── server.py     Weboberfläche, Live-Verbindung, Schnittstelle
 ├── frontend/         Kabinenanzeige (kein Bauschritt nötig)
 ├── scripts/          Installation (Pi und Windows), Dienst, Gerätesuche,
 │                     Empfänger- und Lenkung einmessen
-└── docs/             Hardware, Installation, Bedienung, deine Anlage
+└── docs/             Hardware, Installation, Bedienung, deine Anlage,
+                      Android-Tablet als Kabinenanzeige
 ```
 
 ## Tests

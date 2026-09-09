@@ -1083,6 +1083,112 @@ class EngineTest(unittest.TestCase):
         self.assertAlmostEqual(result["area_ha"], 0.5, places=2)
 
 
+class SettingsTest(unittest.TestCase):
+    """Die Einstellungen - alles, was bisher nur in der Datei stand.
+
+    Geprüft wird vor allem, was ein Formular gefährlich macht: dass ein
+    unsinniger Wert nicht durchgeht, dass ein halb übernommener Satz gar nicht
+    erst entsteht, und dass die eine Einstellung, die eine Maschine bewegt,
+    nicht nebenbei umgelegt werden kann.
+    """
+
+    def setUp(self):
+        from agripilot import config as config_module
+        self.ordner = tempfile.TemporaryDirectory()
+        self.addCleanup(self.ordner.cleanup)
+        self.pfad = os.path.join(self.ordner.name, "config.yaml")
+        self.config = config_module.load(self.pfad)
+
+    def test_every_field_matches_the_data_model(self):
+        """Ein Tippfehler im Schema wäre eine Einstellung, die ins Leere greift."""
+        from agripilot import settings
+        for schluessel, feld in settings.ALLE_FELDER.items():
+            abschnitt = getattr(self.config, feld.abschnitt, None)
+            self.assertIsNotNone(abschnitt, f"{schluessel}: Abschnitt fehlt")
+            self.assertTrue(hasattr(abschnitt, feld.name), f"{schluessel}: Feld fehlt")
+
+    def test_values_and_choices_line_up(self):
+        """Was die Oberfläche anzeigt, muss unter den Auswahlmöglichkeiten sein."""
+        from agripilot import settings
+        werte = settings.werte(self.config)
+        for schluessel, feld in settings.ALLE_FELDER.items():
+            if feld.typ == "auswahl":
+                erlaubt = [wert for wert, _ in feld.auswahl]
+                self.assertIn(werte[schluessel], erlaubt, schluessel)
+
+    def test_a_value_out_of_range_is_refused(self):
+        from agripilot import settings
+        with self.assertRaises(settings.EinstellungsFehler) as gefangen:
+            settings.uebernehmen(self.config, {"phidget.current_limit_a": 40.0})
+        self.assertIn("Stromgrenze", str(gefangen.exception))
+        self.assertEqual(self.config.phidget.current_limit_a, 2.0)
+
+    def test_nothing_is_applied_when_one_value_is_wrong(self):
+        """Erst prüfen, dann setzen - halb übernommen wäre schlimmer als abgelehnt."""
+        from agripilot import settings
+        with self.assertRaises(settings.EinstellungsFehler):
+            settings.uebernehmen(self.config, {
+                "gnss.port": "COM7",                    # gültig
+                "phidget.max_wheel_angle_deg": 900.0,   # weit über dem Anschlag
+            })
+        self.assertEqual(self.config.gnss.port, "/dev/ttyACM0")
+
+    def test_an_unknown_setting_is_refused(self):
+        from agripilot import settings
+        with self.assertRaises(settings.EinstellungsFehler):
+            settings.uebernehmen(self.config, {"gnss.gibtsnicht": 1})
+
+    def test_saving_writes_the_file_and_reads_back(self):
+        from agripilot import config as config_module, settings
+        ergebnis = settings.uebernehmen(self.config, {
+            "gnss.source": "serial", "gnss.port": "COM3", "gnss.baudrate": 115200,
+            "imu.roll_sign": "-1.0",
+        })
+        self.assertEqual(ergebnis["gespeichert"], 4)
+        wieder = config_module.load(self.pfad)
+        self.assertEqual(wieder.gnss.port, "COM3")
+        self.assertEqual(wieder.imu.roll_sign, -1.0)
+
+    def test_the_password_never_leaves_and_survives_a_save(self):
+        from agripilot import settings
+        self.config.corrections.password = "geheim"
+        self.assertEqual(settings.werte(self.config)["corrections.password"],
+                         settings.PASSWORT_PLATZHALTER)
+        # Die Oberfläche schickt den Platzhalter zurück: das Passwort bleibt stehen.
+        settings.uebernehmen(self.config, {
+            "corrections.password": settings.PASSWORT_PLATZHALTER,
+            "corrections.mountpoint": "BASIS1"})
+        self.assertEqual(self.config.corrections.password, "geheim")
+
+    def test_restart_is_named_only_where_it_is_needed(self):
+        from agripilot import settings
+        sofort = settings.uebernehmen(self.config, {"steering.max_cross_track_m": 1.2})
+        self.assertEqual(sofort["neustart_noetig"], [])
+        spaeter = settings.uebernehmen(self.config, {"gnss.baudrate": 57600})
+        self.assertIn("Baudrate", spaeter["neustart_noetig"])
+
+    def test_steering_cannot_be_enabled_before_the_motor_step_is_done(self):
+        """Die eine Einstellung, die eine Maschine in Bewegung setzt."""
+        from agripilot import settings
+        with self.assertRaises(settings.EinstellungsFehler) as gefangen:
+            settings.uebernehmen(self.config, {"steering.enabled": True},
+                                 lenkung_freigabe_erlaubt=False)
+        self.assertIn("Einbau", str(gefangen.exception))
+        self.assertFalse(self.config.steering.enabled)
+
+        settings.uebernehmen(self.config, {"steering.enabled": True},
+                             lenkung_freigabe_erlaubt=True)
+        self.assertTrue(self.config.steering.enabled)
+
+    def test_switching_steering_off_is_never_blocked(self):
+        """Abschalten muss immer gehen, auch mit unfertigem Einbau."""
+        from agripilot import settings
+        self.config.steering.enabled = True
+        settings.uebernehmen(self.config, {"steering.enabled": False},
+                             lenkung_freigabe_erlaubt=False)
+        self.assertFalse(self.config.steering.enabled)
+
+
 class ChecklistTest(unittest.TestCase):
     """Inbetriebnahme - die Liste, die mitliest.
 

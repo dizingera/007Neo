@@ -24,6 +24,7 @@ from fastapi.staticfiles import StaticFiles
 
 from . import config as config_module
 from . import checklist as checklist_module
+from . import settings as settings_module
 from . import export, imu as imu_module, sync
 from .actuators import build_output
 from .coverage import CoverageMap
@@ -516,6 +517,40 @@ def create_app(config=None) -> FastAPI:
     async def get_config() -> dict:
         return config.to_dict()
 
+    # -- Einstellungen ----------------------------------------------------
+
+    @api.get("/api/settings")
+    async def get_settings() -> dict:
+        """Beschreibung aller Einstellungen und ihr aktueller Stand."""
+        return {
+            "gruppen": settings_module.schema(),
+            "werte": settings_module.werte(config),
+            "datei": str(config.path or ""),
+        }
+
+    @api.post("/api/settings")
+    async def post_settings(payload: dict = Body(...)):
+        """Geänderte Werte prüfen, setzen und in die Konfigurationsdatei schreiben.
+
+        Erst prüfen, dann setzen: eine halb übernommene Konfiguration wäre
+        schlimmer als eine abgelehnte.
+        """
+        aenderungen = payload.get("aenderungen")
+        if not isinstance(aenderungen, dict):
+            raise HTTPException(400, "Keine Änderungen übergeben")
+        # Die Freigabe der Lenkung hängt an der Inbetriebnahme - der Schritt
+        # mit dem Not-Aus muss abgehakt sein, bevor sich hier etwas bewegt.
+        stand = application.checklist.zusammenfassung(application.checklist_state())
+        motor_fertig = next(
+            (s["fertig"] for s in stand["schritte"] if s["id"] == "lenkmotor"), True)
+        try:
+            ergebnis = settings_module.uebernehmen(config, aenderungen, motor_fertig)
+        except settings_module.EinstellungsFehler as exc:
+            raise HTTPException(400, str(exc)) from exc
+        if ergebnis["gespeichert"]:
+            engine.note(f"Einstellungen geändert ({ergebnis['gespeichert']})")
+        return ok({**ergebnis, "werte": settings_module.werte(config)})
+
     @api.post("/api/simulator")
     async def simulator(payload: dict = Body(...)):
         simulator_source = engine.simulator
@@ -554,6 +589,23 @@ def create_app(config=None) -> FastAPI:
             "changes": sync.collect_changes(store, since),
         }
 
+    @api.get("/ca.crt")
+    async def ca_zertifikat():
+        """Das CA-Zertifikat zum Einrichten eines Tablets.
+
+        Henne und Ei: das Tablet braucht die Papiere, bevor es der
+        verschlüsselten Verbindung trauen kann - also liegen sie hier offen.
+        Das ist unbedenklich, es ist der öffentliche Teil. Der Schlüssel
+        (ca.key) wird nie ausgeliefert.
+        """
+        pfad = Path(config.server.tls_cert).parent / "ca.crt" if config.server.tls_cert \
+            else Path("/etc/agripilot/tls/ca.crt")
+        if not pfad.exists():
+            raise HTTPException(404, "Kein CA-Zertifikat vorhanden "
+                                     "(scripts/make_cert.sh auf dem Pi ausführen)")
+        return Response(pfad.read_bytes(), media_type="application/x-x509-ca-cert",
+                        headers={"Content-Disposition": 'attachment; filename="agripilot-ca.crt"'})
+
     # -- static frontend --------------------------------------------------
 
     # Mounted last so every /api route above wins; everything else is the
@@ -568,11 +620,18 @@ def main() -> None:  # pragma: no cover - entry point
     import uvicorn
     config = config_module.load()
     Path(config.server.data_dir).mkdir(parents=True, exist_ok=True)
+    tls = {}
+    if config.server.tls_aktiv:
+        # Ohne HTTPS bleibt ein Android-Tablet eine Webseite; mit HTTPS wird es
+        # eine Kachel, die den Bildschirm wachhält.
+        tls = {"ssl_certfile": config.server.tls_cert,
+               "ssl_keyfile": config.server.tls_key}
     uvicorn.run(
         create_app(config),
         host=config.server.host,
         port=config.server.port,
         log_level="info",
+        **tls,
     )
 
 

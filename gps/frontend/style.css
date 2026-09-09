@@ -194,6 +194,32 @@ button.danger { background: #3a1416; border-color: var(--red); color: #ff7b72; }
 .item .actions { display: flex; gap: 6px; }
 .item .actions button, .item .actions a { padding: 9px 12px; font-size: 13px; }
 
+/* --- Einstellungen --- */
+.sticky-save {
+  position: sticky; top: 0; z-index: 2; margin: -14px -14px 12px; padding: 12px 14px;
+  background: var(--bg); border-bottom: 1px solid var(--line);
+}
+.setting-group {
+  border: 1px solid var(--line); border-radius: 10px; background: var(--panel);
+  margin-bottom: 12px; overflow: hidden;
+}
+.setting-group > summary {
+  padding: 14px; font-size: 16px; font-weight: 600; cursor: pointer;
+  min-height: 44px; display: flex; align-items: center; gap: 10px;
+}
+.setting-group > summary::marker { color: var(--muted); }
+.setting-group .group-note { color: var(--muted); font-size: 13px; line-height: 1.5;
+  padding: 0 14px 10px; }
+.setting-field { padding: 10px 14px; border-top: 1px solid var(--line); }
+.setting-field > label { display: block; font-size: 13px; color: var(--muted);
+  margin-bottom: 6px; }
+.setting-field .unit { color: var(--muted); font-size: 12px; margin-left: 6px; }
+.setting-field .help { color: var(--muted); font-size: 12px; line-height: 1.5; margin-top: 6px; }
+.setting-field .warn { color: #ff7b72; font-size: 12px; line-height: 1.5; margin-top: 6px; }
+.setting-field .restart { color: #e3b341; font-size: 12px; margin-top: 6px; }
+.setting-field.changed { background: #10243d; }
+.setting-field.changed > label { color: #79c0ff; }
+
 /* --- Inbetriebnahme --- */
 .progress {
   flex: 1; min-width: 160px; height: 10px; border-radius: 5px;

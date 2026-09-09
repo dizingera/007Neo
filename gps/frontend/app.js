@@ -626,6 +626,7 @@ async function refreshLists() {
   if (active === 'machine') fillProfile();
   if (active === 'system') renderSystem();
   if (active === 'setup') renderSetup(await (await fetch('/api/checklist')).json());
+  if (active === 'settings' && !settings.geladen) loadSettings();
 }
 
 function renderFields(fields) {
@@ -782,6 +783,144 @@ function renderSystem() {
   el('simRow').hidden = system.gnss.source !== 'simulator';
 }
 
+/* Einstellungen: die Oberfläche baut sich aus dem Schema des Servers auf, damit
+   sie nicht davon abdriften kann. Gespeichert wird nur, was wirklich geändert
+   wurde - so überschreibt ein Tablet nicht die Eingaben eines anderen. */
+const settings = { geladen: false, werte: {}, gruppen: [] };
+
+async function loadSettings() {
+  const daten = await (await fetch('/api/settings')).json();
+  settings.gruppen = daten.gruppen;
+  settings.werte = daten.werte;
+  settings.geladen = true;
+  const host = el('settingsGroups');
+  host.innerHTML = '';
+  daten.gruppen.forEach((gruppe, index) => {
+    const box = document.createElement('details');
+    box.className = 'setting-group';
+    box.open = index === 0;
+    const kopf = document.createElement('summary');
+    kopf.textContent = gruppe.titel;
+    box.appendChild(kopf);
+    if (gruppe.hinweis) {
+      const note = document.createElement('div');
+      note.className = 'group-note';
+      note.textContent = gruppe.hinweis;
+      box.appendChild(note);
+    }
+    gruppe.felder.forEach((feld) => box.appendChild(settingField(feld)));
+    host.appendChild(box);
+  });
+  el('settingsInfo').textContent = daten.datei
+    ? `Datei: ${daten.datei}` : 'Noch keine Konfigurationsdatei – beim Übernehmen wird eine angelegt.';
+}
+
+function settingField(feld) {
+  const box = document.createElement('div');
+  box.className = 'setting-field';
+  const label = document.createElement('label');
+  label.textContent = feld.label;
+  if (feld.einheit) {
+    const unit = document.createElement('span');
+    unit.className = 'unit';
+    unit.textContent = feld.einheit;
+    label.appendChild(unit);
+  }
+  box.appendChild(label);
+
+  let input;
+  if (feld.typ === 'auswahl') {
+    input = document.createElement('select');
+    feld.auswahl.forEach((option) => {
+      const eintrag = document.createElement('option');
+      eintrag.value = option.wert;
+      eintrag.textContent = option.label;
+      input.appendChild(eintrag);
+    });
+    input.value = String(settings.werte[feld.schluessel]);
+  } else if (feld.typ === 'schalter') {
+    input = document.createElement('input');
+    input.type = 'checkbox';
+    input.checked = !!settings.werte[feld.schluessel];
+    input.style.width = '28px';
+    input.style.height = '28px';
+  } else if (feld.typ === 'zahl' || feld.typ === 'ganzzahl') {
+    input = document.createElement('input');
+    input.type = 'number';
+    input.step = feld.typ === 'ganzzahl' ? '1' : 'any';
+    if (feld.minimum !== null) input.min = feld.minimum;
+    if (feld.maximum !== null) input.max = feld.maximum;
+    input.value = settings.werte[feld.schluessel];
+  } else {
+    input = document.createElement('input');
+    input.type = feld.typ === 'passwort' ? 'password' : 'text';
+    input.value = settings.werte[feld.schluessel] ?? '';
+  }
+  input.dataset.key = feld.schluessel;
+  label.setAttribute('for', `set-${feld.schluessel}`);
+  input.id = `set-${feld.schluessel}`;
+  const markieren = () => box.classList.toggle('changed', feldGeaendert(feld, input));
+  input.onchange = markieren;
+  input.oninput = markieren;
+  box.appendChild(input);
+
+  if (feld.warnung) {
+    const warn = document.createElement('div');
+    warn.className = 'warn';
+    warn.textContent = feld.warnung;
+    box.appendChild(warn);
+  }
+  if (feld.hilfe) {
+    const help = document.createElement('div');
+    help.className = 'help';
+    help.textContent = feld.hilfe;
+    box.appendChild(help);
+  }
+  if (!feld.sofort) {
+    // Ehrlich dranschreiben, was erst nach einem Neustart greift - sonst sucht
+    // man den Fehler beim Empfänger statt beim Programm.
+    const hint = document.createElement('div');
+    hint.className = 'restart';
+    hint.textContent = 'wirkt nach einem Neustart';
+    box.appendChild(hint);
+  }
+  return box;
+}
+
+function feldWert(feld, input) {
+  if (feld.typ === 'schalter') return input.checked;
+  if (feld.typ === 'zahl' || feld.typ === 'ganzzahl') return parseFloat(input.value);
+  return input.value;
+}
+
+function feldGeaendert(feld, input) {
+  const jetzt = feldWert(feld, input);
+  const vorher = settings.werte[feld.schluessel];
+  if (feld.typ === 'auswahl') return String(jetzt) !== String(vorher);
+  return jetzt !== vorher;
+}
+
+el('btnSaveSettings').onclick = async () => {
+  const aenderungen = {};
+  settings.gruppen.forEach((gruppe) => gruppe.felder.forEach((feld) => {
+    const input = document.getElementById(`set-${feld.schluessel}`);
+    if (input && feldGeaendert(feld, input)) aenderungen[feld.schluessel] = feldWert(feld, input);
+  }));
+  if (!Object.keys(aenderungen).length) { toast('Nichts geändert'); return; }
+  const antwort = await api('POST', '/api/settings', { aenderungen });
+  if (!antwort) return;
+  settings.werte = antwort.data.werte;
+  document.querySelectorAll('.setting-field.changed').forEach((box) =>
+    box.classList.remove('changed'));
+  const neustart = antwort.data.neustart_noetig || [];
+  toast(neustart.length
+    ? `Gespeichert – Neustart nötig für: ${neustart.join(', ')}`
+    : 'Gespeichert und sofort wirksam');
+  el('settingsInfo').textContent = neustart.length
+    ? `Gespeichert in ${antwort.data.datei} · Neustart nötig für: ${neustart.join(', ')}`
+    : `Gespeichert in ${antwort.data.datei} · sofort wirksam`;
+};
+
 function renderSetup(stand) {
   const host = el('setupList');
   el('setupBar').style.width =
@@ -888,9 +1027,34 @@ function item({ active, title, sub, actions }) {
   return row;
 }
 
+/* --------------------------------------------------- Bildschirm wachhalten */
+
+/* Eine Kabinenanzeige, die nach zwei Minuten dunkel wird, ist keine Anzeige.
+   Der Browser gibt die Sperre nur in sicherem Kontext her (HTTPS oder
+   localhost) - über http://192.168.x.x passiert hier nichts, und das ist der
+   Grund, warum auf dem Pi Zertifikate erzeugt werden (scripts/make_cert.sh).
+   Android nimmt die Sperre beim Wegschalten zurück; deshalb wird sie beim
+   Zurückkommen neu geholt. */
+let wachSperre = null;
+
+async function bildschirmWachhalten() {
+  if (!('wakeLock' in navigator) || !window.isSecureContext) return;
+  try {
+    wachSperre = await navigator.wakeLock.request('screen');
+    wachSperre.addEventListener('release', () => { wachSperre = null; });
+  } catch (error) {
+    wachSperre = null;   // z.B. wenn der Akku fast leer ist - kein Grund zu lärmen
+  }
+}
+
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && wachSperre === null) bildschirmWachhalten();
+});
+
 /* ------------------------------------------------------------------ Start */
 
 resize();
 connect();
+bildschirmWachhalten();
 requestAnimationFrame(render);
 setInterval(() => { if (!el('sheet').hidden) refreshLists(); }, 5000);
