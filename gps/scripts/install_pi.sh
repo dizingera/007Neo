@@ -27,7 +27,10 @@ fi
 
 echo "== Pakete =="
 apt-get update -qq
-apt-get install -y -qq python3 python3-venv python3-pip git
+# avahi: der Pi ist danach als <hostname>.local erreichbar - ein Tablet in der
+# Kabine soll keine IP-Adresse hinterherjagen, die der Router neu vergibt.
+# openssl: Papiere für die verschlüsselte Verbindung (scripts/make_cert.sh).
+apt-get install -y -qq python3 python3-venv python3-pip git avahi-daemon openssl
 
 echo "== Benutzer und Verzeichnisse =="
 id -u agripilot >/dev/null 2>&1 || useradd --system --home "$DATEN" --shell /usr/sbin/nologin agripilot
@@ -93,6 +96,11 @@ server:
   host: 0.0.0.0
   port: 8080
   data_dir: $DATEN
+  # Verschlüsselte Verbindung für ein Android-Tablet als Kabinenanzeige.
+  # Erst 'sudo bash scripts/make_cert.sh' laufen lassen, dann diese zwei
+  # Zeilen einkommentieren und den Dienst neu starten.
+  # tls_cert: /etc/agripilot/tls/server.crt
+  # tls_key: /etc/agripilot/tls/server.key
 YAML
   else
     cat > "$KONFIG" <<YAML
@@ -138,7 +146,9 @@ systemctl restart agripilot
 sleep 2
 
 echo
-echo "Fertig. Anzeige öffnen unter:  http://$(hostname -I | awk '{print $1}'):8080"
+echo "Fertig. Anzeige öffnen unter:"
+echo "   http://$(hostname).local:8080          (Name, überlebt einen Adresswechsel)"
+echo "   http://$(hostname -I | awk '{print $1}'):8080"
 echo "Status:   systemctl status agripilot"
 echo "Protokoll: journalctl -u agripilot -f"
 echo
@@ -146,3 +156,7 @@ if [[ "$ROLLE" == "master" ]]; then
   echo "Nächster Schritt: Korrekturquelle in $KONFIG eintragen"
   echo "(corrections.source), dann 'systemctl restart agripilot'."
 fi
+echo
+echo "Android-Tablet als Kabinenanzeige: 'sudo bash scripts/make_cert.sh'."
+echo "Ohne HTTPS bleibt die Anzeige eine Webseite - mit HTTPS wird sie eine"
+echo "Kachel, die den Bildschirm wachhält."

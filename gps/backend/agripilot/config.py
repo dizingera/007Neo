@@ -208,6 +208,17 @@ class ServerConfig:
     data_dir: str = DEFAULT_DATA_DIR
     update_hz: float = 10.0
 
+    # Verschlüsselte Verbindung zur Kabinenanzeige. Beide Pfade gesetzt = HTTPS.
+    # Nötig für ein Android-Tablet als Anzeige: Kachel auf dem Startbildschirm,
+    # Zwischenspeicher der Oberfläche und Wachhalten des Bildschirms gibt es im
+    # Browser nur über HTTPS. Papiere erzeugt scripts/make_cert.sh.
+    tls_cert: str = ""
+    tls_key: str = ""
+
+    @property
+    def tls_aktiv(self) -> bool:
+        return bool(self.tls_cert and self.tls_key)
+
 
 @dataclass
 class Config:
