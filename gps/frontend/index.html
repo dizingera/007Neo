@@ -56,42 +56,45 @@
     </button>
   </div>
 
-  <!-- Fahrt: die Zahlen, die man beim Fahren braucht -->
-  <div class="glas cluster">
-    <div class="kmh"><b id="speed">--</b><span>km/h</span></div>
-    <div><b id="pass">--</b><span id="passLabel">Spur</span></div>
-    <div><b id="area">--</b><span>ha bearbeitet</span></div>
-    <div id="tiltBox" hidden><b id="tilt">--</b><span id="tiltLabel">° Hang</span></div>
-    <div class="spark" aria-hidden="true"><svg viewBox="0 0 200 40" preserveAspectRatio="none"><line class="null" x1="0" y1="20" x2="200" y2="20"/><path class="band" d="M0 17 H200 V23 H0 Z"/><path id="spark" d=""/></svg></div>
-    <div class="sections" id="sections" hidden></div>
-  </div>
-
-  <!-- Bis zum Vorgewende, nicht bis zur Grenze: dort endet die Arbeit. -->
-  <div class="glas vg" id="restBox" hidden>
-    <div class="zeile"><span id="restLabel">bis Vorgewende</span><b id="rest">--</b></div>
-    <div class="bar"><i id="restBar"></i></div>
-  </div>
+  <!-- Die untere Reihe: Fahrt links, Vorgewende in der Mitte, Handlung rechts.
+       Eine Reihe, die sich den Platz teilt - nichts liegt absolut, nichts
+       kann sich überlappen, egal wie breit eine Zahl wird. -->
   <div class="ruf" id="ruf"></div>
-
-  <!-- Handlungsspalte: nach Wichtigkeit von unten nach oben -->
-  <div class="spalte">
-    <div class="reihe">
-      <button class="taste" id="btnNudgeLeft"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg>10 cm</button>
-      <button class="taste" id="btnNudgeRight">10 cm<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5l7 7-7 7"/></svg></button>
+  <div class="unten">
+    <!-- Fahrt: die Zahlen, die man beim Fahren braucht -->
+    <div class="glas cluster">
+      <div class="kmh"><b id="speed">--</b><span>km/h</span></div>
+      <div><b id="pass">--</b><span id="passLabel">Spur</span></div>
+      <div><b id="area">--</b><span>ha bearbeitet</span></div>
+      <div id="tiltBox" hidden><b id="tilt">--</b><span id="tiltLabel">° Hang</span></div>
+      <div class="spark" aria-hidden="true"><svg viewBox="0 0 200 40" preserveAspectRatio="none"><line class="null" x1="0" y1="20" x2="200" y2="20"/><path class="band" d="M0 17 H200 V23 H0 Z"/><path id="spark" d=""/></svg></div>
+      <div class="sections" id="sections" hidden></div>
     </div>
-    <div class="reihe">
-      <button class="taste" id="btnAB"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 19V5M19 19V5M5 12h14"/></svg><span>A setzen</span></button>
-      <button class="taste" id="btnAPlus"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 19V5M5 12h9M17 9v6M14 12h6"/></svg>A+</button>
-      <button class="taste" id="btnContour"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l9 6.5-3.5 10.5h-11L3 9.5z"/><path d="M12 8l5 3.5-2 6H9l-2-6z"/></svg>Kontur</button>
+    <!-- Bis zum Vorgewende, nicht bis zur Grenze: dort endet die Arbeit. -->
+    <div class="glas vg" id="restBox" hidden>
+      <div class="zeile"><span id="restLabel">bis Vorgewende</span><b id="rest">--</b></div>
+      <div class="bar"><i id="restBar"></i></div>
     </div>
-    <div class="reihe klein">
-      <button class="taste turn" id="btnTurn"><span class="fuellung" id="turnFill"></span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12a8 8 0 1 1 3 6.3M4 18v-6h6"/></svg><span>Wende</span></button>
-      <button class="taste" id="btnCurve"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 15c3-8 6-8 9 0s6 8 9 0"/></svg><span>Kurve</span></button>
-      <button class="taste" id="btnBoundary"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l9 6.5-3.5 10.5h-11L3 9.5z"/></svg><span>Grenze</span></button>
-      <button class="taste" id="btnMenu"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg><span>Menü</span></button>
+    <!-- Handlungsspalte: nach Wichtigkeit von unten nach oben -->
+    <div class="spalte">
+      <div class="reihe">
+        <button class="taste" id="btnNudgeLeft"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg>10 cm</button>
+        <button class="taste" id="btnNudgeRight">10 cm<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5l7 7-7 7"/></svg></button>
+      </div>
+      <div class="reihe">
+        <button class="taste" id="btnAB"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 19V5M19 19V5M5 12h14"/></svg><span>A setzen</span></button>
+        <button class="taste" id="btnAPlus"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 19V5M5 12h9M17 9v6M14 12h6"/></svg>A+</button>
+        <button class="taste" id="btnContour"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l9 6.5-3.5 10.5h-11L3 9.5z"/><path d="M12 8l5 3.5-2 6H9l-2-6z"/></svg>Kontur</button>
+      </div>
+      <div class="reihe klein">
+        <button class="taste turn" id="btnTurn"><span class="fuellung" id="turnFill"></span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12a8 8 0 1 1 3 6.3M4 18v-6h6"/></svg><span>Wende</span></button>
+        <button class="taste" id="btnCurve"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 15c3-8 6-8 9 0s6 8 9 0"/></svg><span>Kurve</span></button>
+        <button class="taste" id="btnBoundary"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l9 6.5-3.5 10.5h-11L3 9.5z"/></svg><span>Grenze</span></button>
+        <button class="taste" id="btnMenu"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg><span>Menü</span></button>
+      </div>
+      <button class="taste mark" id="btnJob" role="switch" aria-checked="false"><i></i><span>Markieren<small id="jobText">aus</small></span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h16M6 20V9l6-5 6 5v11M10 20v-6h4v6"/></svg></button>
+      <button class="taste lenk" id="btnSteer" role="switch" aria-checked="false"><i></i><span>Lenkung<small id="steerText">aus</small></span><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3"/><path d="M3 12h6M15 12h6M12 15v6"/></svg></button>
     </div>
-    <button class="taste mark" id="btnJob" role="switch" aria-checked="false"><i></i><span>Markieren<small id="jobText">aus</small></span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h16M6 20V9l6-5 6 5v11M10 20v-6h4v6"/></svg></button>
-    <button class="taste lenk" id="btnSteer" role="switch" aria-checked="false"><i></i><span>Lenkung<small id="steerText">aus</small></span><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3"/><path d="M3 12h6M15 12h6M12 15v6"/></svg></button>
   </div>
 </main>
 
@@ -118,6 +121,19 @@
     </div>
     <p class="note">Das Feld wird an der aktuellen Position verankert. Danach die
       Grenze einmal umfahren – daraus kommt die Hektarzahl.</p>
+    <div class="row">
+      <label class="button" for="shpDateien">Shapefile einlesen (.shp, .dbf, .prj)</label>
+      <input type="file" id="shpDateien" accept=".shp,.dbf,.prj,.shx,.cpg" multiple hidden>
+      <span class="note" id="shpInfo" role="status" aria-atomic="true"></span>
+    </div>
+    <p class="note">Aus dem Flächenantrag oder einem anderen Lenksystem: alle drei
+      Dateien zusammen auswählen. Je Fläche entsteht ein Feld, der Name kommt aus
+      der Tabelle. ETRS89/UTM (32N, 33N) und WGS84 werden verstanden; ein Feld
+      gleichen Namens bekommt die neue Grenze, seine Spuren bleiben.</p>
+    <p class="note">Zu jedem Feld gehören seine <b>Spuren</b>. Eine davon kann die
+      <b>Saisonspur</b> sein: mit Fahrgassenabstand gespeichert, wird sie beim Laden
+      des Feldes das ganze Jahr automatisch aktiv – die Fahrgassen vom Säen liegen
+      beim Düngen und Spritzen wieder unter den Rädern.</p>
     <div class="list" id="fieldList"></div>
   </section>
 
@@ -202,6 +218,14 @@
   </section>
 
   <section class="tab-panel" data-panel="machine" hidden>
+    <div class="row">
+      <label>Maschine <select id="profileSelect"></select></label>
+      <button id="btnNewProfile">Neue Maschine</button>
+      <button id="btnDeleteProfile" class="danger">Löschen</button>
+    </div>
+    <p class="note">Jede Maschine ein eigener Satz Maße – Schlepper mit Grubber,
+      Schlepper mit Spritze, der zweite Schlepper. Die Auswahl gilt sofort; die
+      Werte darunter gehören zur gewählten Maschine.</p>
     <div class="grid" id="profileForm">
       <label>Arbeitsbreite (m)<input type="number" step="0.01" name="width_m"></label>
       <label>Überlappung (m)<input type="number" step="0.01" name="overlap_m"></label>
@@ -273,6 +297,22 @@
   </section>
 
   <section class="tab-panel" data-panel="system" hidden>
+    <h3 class="abschnitt">Angeschlossene Geräte</h3>
+    <div class="row">
+      <button id="btnGeraete" class="primary">Geräte suchen</button>
+      <span class="note" id="geraeteInfo" role="status" aria-atomic="true"></span>
+    </div>
+    <p class="note">Sucht den Empfänger (F9P an USB), den Neigungssensor (Tinkerforge
+      über den Brick Daemon) und die Lenksteuerung (Phidget). Was gefunden wird,
+      lässt sich mit einem Druck in die Einstellungen übernehmen – Empfänger und
+      Sensor werden dann sofort neu verbunden, ohne Neustart.</p>
+    <div class="list" id="geraeteList"></div>
+    <div class="row" id="geraeteRow" hidden>
+      <button id="btnGeraeteUebernehmen" class="primary">Gefundene Geräte übernehmen</button>
+      <span class="note" id="geraeteVorschlag"></span>
+    </div>
+
+    <h3 class="abschnitt">Sensoren und Lenkung</h3>
     <div class="row" id="steerRow" hidden>
       <button id="btnCentre">Lenkung: Mitte lernen</button>
       <span class="note" id="steerInfo"></span>

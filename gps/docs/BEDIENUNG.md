@@ -78,6 +78,28 @@ gerade spürbar.
 Die Grenze ist nicht nur Buchhaltung: die Sektionen schalten außerhalb der
 Grenze automatisch ab.
 
+### Felder aus dem Flächenantrag (Shapefile)
+
+Wer die Flächen schon als Shapefile hat – aus dem Flächenantrag, aus dem
+Kataster, aus einem anderen Lenksystem –, muss sie nicht abfahren:
+**Menü → Felder → Shapefile einlesen** und die drei Dateien `.shp`, `.dbf`
+und `.prj` zusammen auswählen (auf dem Tablet aus dem Dateimanager, vom
+USB-Stick oder aus dem Download-Ordner). Je Fläche entsteht ein Feld; der Name
+kommt aus der Tabelle (`SCHLAGNAME`, `NAME`, `FLIK` …), die Hektarzahl aus
+der Grenze, der Bezugspunkt liegt mitten im Feld.
+
+Verstanden werden ETRS89/UTM (Zone 32N und 33N, mit oder ohne die Zone im
+Ostwert) und WGS84-Grad – das ist, was die Antragsportale und QGIS ausgeben.
+Gauß-Krüger auf dem alten DHDN-Datum wird abgelehnt, mit Begründung: die
+Umrechnung dahinter ist ohne Tabellen nur auf Meter genau, und eine Grenze,
+die still zwei Meter daneben liegt, ist schlimmer als keine. Dann in QGIS oder
+im Portal als EPSG:25832 exportieren.
+
+Kommt dieselbe Datei später noch einmal – der Antrag hat sich geändert –,
+bekommt ein Feld gleichen Namens die neue Grenze, seine Spuren und Arbeiten
+bleiben. Löcher in einer Fläche (ein Teich) werden weggelassen; eine Fläche
+aus mehreren Teilen wird zu mehreren Feldern „Name (1)", „Name (2)".
+
 ## Eine Spur anlegen
 
 **Gerade Spuren (AB-Linie)** – der Normalfall:
@@ -109,6 +131,34 @@ sähe es erst abends an den Streifen im Feld.
 
 Angelegte Spuren stehen unter **Menü → Spuren** und lassen sich jederzeit wieder
 laden. Die Kontur steht nicht in dieser Liste; sie wird über den Knopf geholt.
+
+Jede Spur gehört zu ihrem Feld. Unter **Menü → Felder → Spuren ▾** stehen sie
+beim Feld, mit *Laden*, *Umbenennen* und *Löschen* – und mit dem Knopf, der
+eine Spur zur Saisonspur macht.
+
+### Saisonspur und Fahrgassen
+
+Beim Säen entscheidet sich, wo das ganze Jahr gefahren wird: die Fahrgassen.
+Düngen und Spritzen sollen später genau diese Spuren treffen, sonst liegt die
+Spritze neben der Fahrgasse und fährt durch den Bestand. Deshalb wird die
+Spur vom Säen als **Saisonspur** gespeichert: **Menü → Felder → Spuren ▾ →
+Als Saisonspur**, Fahrgassenabstand in Metern eingeben (bei 6 m Sämaschine
+und 24 m Spritze: 24). Von da an
+
+* wird diese Spur beim Laden des Feldes **automatisch aktiv** – dieses Jahr,
+  bei jeder Arbeit, ohne dass jemand daran denken muss;
+* ist jede vierte Spur (24 m / 6 m) auf dem Bildschirm **rot gestrichelt** –
+  das sind die Fahrgassen. Die aktive Spur leuchtet rot statt grün, wenn sie
+  eine Fahrgasse ist;
+* steht im Spur-Chip oben links „Fahrgassen 24 m".
+
+Wird mit der Spritze gearbeitet (Maschine mit 24 m wählen), ist der Spurabstand
+24 m und jede Spur eine Fahrgasse – die Führung läuft auf denselben Linien.
+
+Im nächsten Jahr zählt die Saisonspur nicht mehr; beim Laden kommt dann wieder
+die zuletzt benutzte Spur, bis die neue Saat ihre Saisonspur bekommt. Alte
+Saisonspuren bleiben mit Jahreszahl in der Liste stehen. Fahrgassenabstand 0
+nimmt einer Spur die Saison wieder weg.
 
 ## Arbeiten
 
@@ -268,6 +318,17 @@ der Traktor kippelt. Die angezeigte Abweichung darf dabei fast ruhig bleiben.
 Wird sie beim Kippeln größer, arbeitet der Ausgleich verkehrt herum – dann
 gehört in die Konfiguration `roll_sign: -1.0`.
 
+## Mehrere Maschinen (Menü → Maschine)
+
+Der Schlepper mit dem Grubber ist eine andere Maschine als derselbe Schlepper
+mit der Spritze: andere Arbeitsbreite, anderes Gerät hinter der Achse, gezogen
+oder angebaut. Deshalb gibt es oben im Reiter eine **Auswahl aller Maschinen**.
+*Neue Maschine* legt eine weitere an – mit den aktuellen Werten als Vorlage,
+unter neuem Namen; danach nur ändern, was anders ist. Die Auswahl gilt sofort:
+Spurabstand, Sektionen und Werkzeugpunkt springen um, die Spur bleibt. Die
+gewählte Maschine steht auch im Chip oben rechts und in jeder aufgezeichneten
+Arbeit. Die letzte Maschine lässt sich nicht löschen – eine muss es geben.
+
 ## Abstimmung bei Tempo, Latenz und Teilbreiten (Menü → Maschine)
 
 Drei Werte, die aus dem Cerea-Handbuch übernommen sind und erst zählen, wenn die
@@ -314,6 +375,36 @@ Erfahrung.
 Geführt wird weiterhin das **Fahrzeug**. Auf ein nachlaufendes Gerät zu führen
 klingt genauer, macht die Lenkung aber unruhig: das Gerät zieht erst dorthin,
 wo das Fahrzeug vorhin war.
+
+## Angeschlossene Geräte finden (Menü → System)
+
+Nach dem Einbau, nach dem Umstecken, nach dem Tausch eines Kabels: **Menü →
+System → Geräte suchen**. Gesucht werden
+
+* der **Empfänger** an den seriellen Anschlüssen – ein u-blox-Gerät (F9P) wird
+  als solches erkannt;
+* die **Lenksteuerung** (Phidget) mit Seriennummer und Kanälen – Motor,
+  Radwinkelsensor oder Drehgeber;
+* der **Neigungssensor** (Tinkerforge IMU Brick oder Bricklet) über den Brick
+  Daemon.
+
+Was gefunden wird, steht in der Liste; daraus wird ein Vorschlag für die
+Einstellungen gebaut (Quelle, Anschluss, Seriennummer, Rückmeldung, UID).
+**Gefundene Geräte übernehmen** schreibt ihn in die Konfigurationsdatei –
+derselbe Weg wie beim Tippen unter *Einstellungen*, mit derselben Prüfung.
+Empfänger und Sensor werden sofort neu verbunden; nur die Lenksteuerung braucht
+einen Neustart, das sagt die Meldung. Die Suche ändert nichts von selbst und
+dauert einige Sekunden (Phidget und Brick Daemon wollen warten). Fehlt ein
+Treiber oder läuft der Brick Daemon nicht, steht das als Satz in der Liste,
+nicht als Fehlercode.
+
+## Aufträge je Feld (Menü → Aufträge)
+
+Die aufgezeichneten Arbeiten stehen **nach Feld gruppiert**: je Feld eine
+Überschrift mit Anzahl, Hektar und Stunden, darunter die einzelnen Arbeiten mit
+GPX/GeoJSON/CSV. Die Bezeichnung der nächsten Arbeit (Grubbern, Säen, Spritzen)
+wird oben eingetragen und gemerkt; gestartet wird mit **Markieren** in der
+Kabine.
 
 ## Rohdaten aufzeichnen und abspielen (Menü → System)
 

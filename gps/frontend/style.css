@@ -18,6 +18,7 @@
   --f-boden: #0a1216; --f-raster: rgba(255,255,255,.035); --f-grenze: #ffb020;
   --f-vg: rgba(255,77,77,.85); --f-pass: rgba(255,255,255,.16); --f-aktiv: #5dff8e;
   --f-flaeche: rgba(93,255,142,.22); --f-wende: #6cb8ff; --f-spur: rgba(108,184,255,.5); --f-traktor: #eef3f0;
+  --f-fahrgasse: rgba(255,92,92,.75);
   /* Menü */
   --bg: #0c1116; --panel: #131a20; --panel-2: #1a232b; --line: #263038;
   --green: #1f8a4b; --green-bright: #5dff8e; --red: #ff4d4d; --blue: #6cb8ff; --blue-solid: #2563eb;
@@ -32,6 +33,7 @@ body.tag {
   --f-boden: #cfd9c9; --f-raster: rgba(20,32,26,.05); --f-grenze: #b57c0e;
   --f-vg: rgba(216,54,47,.8); --f-pass: rgba(20,32,26,.16); --f-aktiv: #15a350;
   --f-flaeche: rgba(21,163,80,.28); --f-wende: #1f63d6; --f-spur: rgba(31,99,214,.45); --f-traktor: #14201a;
+  --f-fahrgasse: rgba(216,54,47,.75);
   --bg: #eef1ec; --panel: #ffffff; --panel-2: #f1f4ee; --line: #d3d9d1;
   --green: #15a350; --green-bright: #0f7a3c; --red: #d8362f; --blue: #1f63d6; --blue-solid: #1f63d6;
 }
@@ -97,7 +99,7 @@ body.tag .vignette { background: radial-gradient(120% 90% at 50% 70%, transparen
 .glas { position: absolute; background: var(--glas); backdrop-filter: blur(16px) saturate(1.2); -webkit-backdrop-filter: blur(16px) saturate(1.2);
   border: 1px solid var(--haar); border-radius: calc(1.6 * var(--u)); z-index: 3; }
 .chips { position: absolute; top: calc(2.2 * var(--u)); display: flex; flex-direction: column; gap: calc(.7 * var(--u)); z-index: 3; pointer-events: none; }
-.chips.l { left: calc(2.2 * var(--u)); align-items: flex-start; } .chips.r { right: calc(2.2 * var(--u)); align-items: flex-end; }
+.chips.l { left: calc(2.2 * var(--u)); align-items: flex-start; max-width: calc(50% - 26.4 * var(--u)); } .chips.r { right: calc(2.2 * var(--u)); align-items: flex-end; }
 .chip { display: inline-flex; align-items: center; gap: calc(.6 * var(--u)); padding: calc(.55 * var(--u)) calc(1.1 * var(--u)); border-radius: 999px;
   background: var(--glas); border: 1px solid var(--haar); font-size: calc(1.25 * var(--u)); font-weight: 600; white-space: nowrap; backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); }
 .chip i { width: calc(.8 * var(--u)); height: calc(.8 * var(--u)); border-radius: 50%; background: var(--muted); flex: none; }
@@ -117,8 +119,14 @@ body.tag .hint { text-shadow: none; }
 .rund svg { width: calc(2.4 * var(--u)); height: calc(2.4 * var(--u)); min-width: 22px; min-height: 22px; stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 .rund.an { color: var(--leucht); border-color: color-mix(in srgb, var(--leucht) 40%, transparent); }
 
+/* --- Die untere Reihe --- */
+.unten { position: absolute; left: calc(2.2 * var(--u)); right: calc(2.2 * var(--u)); bottom: calc(2.2 * var(--u));
+  display: flex; align-items: flex-end; gap: calc(1.2 * var(--u)); z-index: 3; pointer-events: none; }
+.unten > * { pointer-events: auto; }
+.unten > .glas { position: static; }
+
 /* --- Fahrt-Cluster --- */
-.cluster { left: calc(2.2 * var(--u)); bottom: calc(2.2 * var(--u)); padding: calc(1.3 * var(--u)) calc(1.6 * var(--u)) calc(1.1 * var(--u));
+.cluster { padding: calc(1.3 * var(--u)) calc(1.6 * var(--u)) calc(1.1 * var(--u)); flex: none;
   display: grid; grid-template-columns: auto auto auto; gap: calc(.9 * var(--u)) calc(2.2 * var(--u)); font-variant-numeric: tabular-nums; }
 .cluster .kmh { grid-column: 1 / -1; display: flex; align-items: baseline; gap: calc(.8 * var(--u)); }
 .cluster .kmh b { font-family: "Rajdhani", "Bahnschrift", sans-serif; font-weight: 700; font-size: calc(6.2 * var(--u)); line-height: .9; }
@@ -137,21 +145,22 @@ body.tag .hint { text-shadow: none; }
 .sections .sec.forced { background: color-mix(in srgb, var(--rot) 25%, transparent); color: var(--rot); border-color: var(--rot); }
 
 /* --- Vorgewende --- */
-.vg { left: 44%; transform: translateX(-50%); bottom: calc(2.2 * var(--u)); width: calc(28 * var(--u)); padding: calc(1 * var(--u)) calc(1.4 * var(--u)) calc(.9 * var(--u)); }
-.vg .zeile { display: flex; justify-content: space-between; align-items: baseline; font-size: calc(1.1 * var(--u)); font-weight: 600; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); }
-.vg .zeile b { font-family: "Rajdhani", "Bahnschrift", sans-serif; font-weight: 700; font-size: calc(2.8 * var(--u)); letter-spacing: 0; color: var(--text); font-variant-numeric: tabular-nums; }
+.vg { flex: 1 1 auto; min-width: 0; max-width: calc(30 * var(--u)); padding: calc(1 * var(--u)) calc(1.4 * var(--u)) calc(.9 * var(--u)); }
+.vg .zeile { display: flex; justify-content: space-between; align-items: baseline; gap: calc(1 * var(--u)); font-size: calc(1.1 * var(--u)); font-weight: 600; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); }
+.vg .zeile span { min-width: 0; }
+.vg .zeile b { flex: none; white-space: nowrap; font-family: "Rajdhani", "Bahnschrift", sans-serif; font-weight: 700; font-size: calc(2.8 * var(--u)); letter-spacing: 0; color: var(--text); font-variant-numeric: tabular-nums; }
 .vg .zeile b.warn { color: var(--amber); } .vg .zeile b.turn { color: var(--blau); }
 .vg .bar { height: calc(.7 * var(--u)); border-radius: 999px; background: var(--led-aus); margin-top: calc(.7 * var(--u)); overflow: hidden; }
 .vg .bar i { display: block; height: 100%; width: 100%; background: var(--leucht); border-radius: 999px; transform-origin: left; transition: background .3s; }
 .vg .bar i.warn { background: var(--amber); } .vg .bar i.turn { background: var(--blau); }
-.ruf { position: absolute; left: 44%; transform: translateX(-50%); bottom: calc(10 * var(--u)); z-index: 3; pointer-events: none;
+.ruf { position: absolute; left: 50%; transform: translateX(-50%); bottom: calc(24 * var(--u)); z-index: 3; pointer-events: none;
   font-family: "Rajdhani", "Bahnschrift", sans-serif; font-weight: 700; font-size: calc(2 * var(--u)); letter-spacing: .06em; text-transform: uppercase;
   color: var(--amber); text-shadow: 0 0 calc(2 * var(--u)) color-mix(in srgb, var(--amber) 60%, transparent); opacity: 0; transition: opacity .3s; }
 .ruf.an { opacity: 1; }
 
 /* --- Handlungsspalte --- */
-.spalte { position: absolute; right: calc(2.2 * var(--u)); bottom: calc(2.2 * var(--u)); width: calc(28 * var(--u)); min-width: 270px;
-  display: flex; flex-direction: column; gap: calc(.8 * var(--u)); z-index: 3; }
+.spalte { flex: none; width: calc(28 * var(--u)); min-width: 270px; margin-left: auto;
+  display: flex; flex-direction: column; gap: calc(.8 * var(--u)); }
 .reihe { display: flex; gap: calc(.8 * var(--u)); }
 .reihe .taste { flex: 1; justify-content: center; padding: 0 calc(.6 * var(--u)); }
 .taste { display: flex; align-items: center; gap: calc(.6 * var(--u)); padding: 0 calc(1.2 * var(--u)); height: calc(5 * var(--u)); min-height: 48px;
@@ -194,20 +203,23 @@ body.tag .hint { text-shadow: none; }
    Leiste. Entschieden nach Ausrichtung, nicht nach Breite - ein Tablet
    hochkant ist 768 px breit und damit kein "schmaler Bildschirm". */
 @media (orientation: portrait) {
-  .cluster { bottom: auto; top: calc(14 * var(--u)); grid-template-columns: auto auto auto; }
-  .spalte { left: calc(2.2 * var(--u)); right: calc(2.2 * var(--u)); width: auto; min-width: 0;
-    flex-direction: row; flex-wrap: wrap; }
+  /* Hochkant stapelt sich die Reihe: Zahlen als Streifen, darunter Vorgewende,
+     darunter die Tasten in zwei Spalten. Alles im Fluss, nichts überlappt. */
+  .unten { flex-wrap: wrap; }
+  .unten > .cluster { flex: 1 1 100%; grid-template-columns: auto auto auto auto; column-gap: calc(3 * var(--u)); }
+  .cluster .kmh { grid-column: auto; }
+  .unten > .vg { flex: 1 1 100%; max-width: none; }
+  .unten > .spalte { flex: 1 1 100%; width: auto; min-width: 0; margin-left: 0; flex-direction: row; flex-wrap: wrap; }
   .reihe:not(.klein) { flex: 1 1 40%; }
   .reihe.klein { flex: 1 1 100%; }
   .taste.mark { flex: 1 1 40%; height: calc(9 * var(--u)); }
   .taste.lenk { flex: 1 1 50%; }
-  .vg { left: 50%; width: calc(60 * var(--u)); bottom: calc(24 * var(--u)); }
-  .ruf { left: 50%; bottom: calc(32 * var(--u)); }
+  .ruf { bottom: calc(50 * var(--u)); }
   .balken { width: calc(60 * var(--u)); }
   /* Die Chips rücken unter den Balken - nebeneinander ist hochkant kein Platz. */
   .chips { top: calc(13 * var(--u)); }
-  .cluster { top: calc(25 * var(--u)); }   /* unter den Chips samt Hinweiszeile */
-  .ansicht { top: calc(19 * var(--u)); }
+  .chips.l { max-width: 60%; }
+  .ansicht { top: calc(25 * var(--u)); }
 }
 
 /* --- Menü --- */
@@ -269,6 +281,19 @@ button.danger { background: #3a1416; border-color: var(--red); color: #ff7b72; }
 .item .sub { font-size: 12px; color: var(--muted); margin-top: 2px; }
 .item .actions { display: flex; gap: 6px; }
 .item .actions button, .item .actions a { padding: 9px 12px; font-size: 13px; }
+.item .actions button.an { border-color: var(--green); color: var(--green); }
+/* Die Spuren eines Feldes: eingerückt unter dem Feld, gleiche Zeilen, kleiner. */
+.unterliste { display: flex; flex-direction: column; gap: 6px; margin: -2px 0 6px 22px;
+  padding-left: 12px; border-left: 2px solid var(--line); }
+.unterliste .item { padding: 8px 10px; }
+.unterliste .item .title { font-size: 14px; }
+.unterliste:empty { display: none; }
+.gruppe { display: flex; align-items: baseline; justify-content: space-between; gap: 10px;
+  margin: 18px 0 6px; font-size: 15px; color: var(--muted); }
+.gruppe b { color: var(--text); font-size: 16px; }
+.gruppe:first-child { margin-top: 0; }
+.row select { padding: 10px 12px; }
+label.button { display: inline-flex; align-items: center; cursor: pointer; }
 
 /* --- Einstellungen --- */
 .sticky-save {

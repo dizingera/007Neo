@@ -36,6 +36,8 @@ CREATE TABLE IF NOT EXISTS lines (
     points TEXT NOT NULL,
     spacing_m REAL NOT NULL,
     nudge_m REAL NOT NULL DEFAULT 0,
+    saison INTEGER NOT NULL DEFAULT 0,      -- Jahr der Fahrgassen, 0 = keine Saisonspur
+    fahrgasse_m REAL NOT NULL DEFAULT 0,    -- Fahrgassenabstand, 0 = keine Fahrgassen
     updated_at REAL NOT NULL,
     deleted INTEGER NOT NULL DEFAULT 0
 );
@@ -106,7 +108,22 @@ class Storage:
         self.db.execute("PRAGMA journal_mode=WAL")
         self.db.execute("PRAGMA synchronous=NORMAL")
         self.db.executescript(SCHEMA)
+        self._nachruesten()
         self.db.commit()
+
+    def _nachruesten(self) -> None:
+        """Spalten, die es in älteren Datenbanken noch nicht gibt, anfügen.
+
+        CREATE TABLE IF NOT EXISTS lässt eine vorhandene Tabelle unangetastet -
+        eine Datenbank vom Frühjahr kennt die Saisonspalten nicht. Anfügen mit
+        Vorgabewert ist verlustfrei, und sync.apply_remote filtert ohnehin auf
+        die Spalten, die es jeweils gibt.
+        """
+        vorhanden = {c[1] for c in self.db.execute("PRAGMA table_info(lines)")}
+        for spalte, definition in (("saison", "INTEGER NOT NULL DEFAULT 0"),
+                                   ("fahrgasse_m", "REAL NOT NULL DEFAULT 0")):
+            if spalte not in vorhanden:
+                self.db.execute(f"ALTER TABLE lines ADD COLUMN {spalte} {definition}")
 
     def close(self) -> None:
         self.db.close()
@@ -154,15 +171,18 @@ class Storage:
         record = dict(record)
         record.setdefault("id", new_id())
         record.setdefault("nudge_m", 0.0)
+        record.setdefault("saison", 0)
+        record.setdefault("fahrgasse_m", 0.0)
         record["updated_at"] = time.time()
         self.db.execute(
             """INSERT INTO lines (id, field_id, name, mode, points, spacing_m,
-                                  nudge_m, updated_at, deleted)
+                                  nudge_m, saison, fahrgasse_m, updated_at, deleted)
                VALUES (:id, :field_id, :name, :mode, :points, :spacing_m,
-                       :nudge_m, :updated_at, 0)
+                       :nudge_m, :saison, :fahrgasse_m, :updated_at, 0)
                ON CONFLICT(id) DO UPDATE SET
                    name=excluded.name, mode=excluded.mode, points=excluded.points,
                    spacing_m=excluded.spacing_m, nudge_m=excluded.nudge_m,
+                   saison=excluded.saison, fahrgasse_m=excluded.fahrgasse_m,
                    updated_at=excluded.updated_at, deleted=0""",
             {**record, "points": json.dumps(record["points"])},
         )
@@ -174,16 +194,40 @@ class Storage:
         return _line_row(row) if row else None
 
     def list_lines(self, field_id: Optional[str] = None) -> list[dict]:
+        # Saisonspuren zuerst, die neuesten oben: was man gerade braucht, steht oben.
         if field_id:
             rows = self.db.execute(
-                "SELECT * FROM lines WHERE deleted=0 AND field_id=? ORDER BY name",
+                "SELECT * FROM lines WHERE deleted=0 AND field_id=? "
+                "ORDER BY saison DESC, updated_at DESC",
                 (field_id,),
             ).fetchall()
         else:
             rows = self.db.execute(
-                "SELECT * FROM lines WHERE deleted=0 ORDER BY name"
+                "SELECT * FROM lines WHERE deleted=0 ORDER BY field_id, saison DESC, updated_at DESC"
             ).fetchall()
         return [_line_row(r) for r in rows]
+
+    def update_line(self, line_id: str, **values: Any) -> Optional[dict]:
+        """Name, Saison oder Fahrgassenabstand einer Spur ändern - die Punkte nie."""
+        erlaubt = {k: v for k, v in values.items() if k in ("name", "saison", "fahrgasse_m")}
+        if not erlaubt:
+            return self.get_line(line_id)
+        setzer = ", ".join(f"{k}=:{k}" for k in erlaubt)
+        self.db.execute(
+            f"UPDATE lines SET {setzer}, updated_at=:updated_at WHERE id=:id",
+            {**erlaubt, "updated_at": time.time(), "id": line_id},
+        )
+        self.db.commit()
+        return self.get_line(line_id)
+
+    def season_line(self, field_id: str, saison: int) -> Optional[dict]:
+        """Die Fahrgassenspur des Feldes für dieses Jahr - die zuletzt gesetzte."""
+        row = self.db.execute(
+            "SELECT * FROM lines WHERE deleted=0 AND field_id=? AND saison=? "
+            "AND fahrgasse_m > 0 ORDER BY updated_at DESC LIMIT 1",
+            (field_id, int(saison)),
+        ).fetchone()
+        return _line_row(row) if row else None
 
     def delete_line(self, line_id: str) -> None:
         self._soft_delete("lines", line_id)

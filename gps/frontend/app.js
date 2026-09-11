@@ -34,7 +34,7 @@ const stage = el('stage');
 let F = {};
 function farbenLesen() {
   const cs = getComputedStyle(document.body);
-  F = Object.fromEntries(['boden', 'raster', 'grenze', 'vg', 'pass', 'aktiv', 'flaeche', 'wende', 'spur', 'traktor']
+  F = Object.fromEntries(['boden', 'raster', 'grenze', 'vg', 'pass', 'aktiv', 'flaeche', 'wende', 'spur', 'traktor', 'fahrgasse']
     .map((k) => [k, cs.getPropertyValue('--f-' + k).trim()]));
   coverCtx.fillStyle = F.flaeche;
 }
@@ -226,7 +226,8 @@ function updateHud(s) {
   chip('fieldLabel', s.field ? s.field.name : 'Kein Feld', '');
   chip('lineLabel', s.line
     ? `${s.line.name} · ${s.line.spacing_m.toFixed(2).replace('.', ',')} m` +
-      (s.line.nudge_m ? ` · Versatz ${(s.line.nudge_m * 100).toFixed(0)} cm` : '')
+      (s.line.nudge_m ? ` · Versatz ${(s.line.nudge_m * 100).toFixed(0)} cm` : '') +
+      (s.line.fahrgasse_m ? ` · Fahrgassen ${s.line.fahrgasse_m.toFixed(0)} m` : '')
     : 'Keine Spur – A und B setzen', s.line ? 'good' : '');
 
   const hint = [];
@@ -522,11 +523,19 @@ function drawPasses() {
     if (!points.length) continue;
     polyline(points, ring);
     const active = offset === current;
+    // Fahrgassen: jede n-te Spur, rot – dort wird nicht gesät, dort fährt man später.
+    const fahrgasse = line.fahrgasse_jede > 0 && offset % line.fahrgasse_jede === 0;
     if (active) {
       // Die aktive Spur leuchtet: ein breiter, blasser Schein und die Linie darin.
-      ctx.strokeStyle = F.aktiv;
+      ctx.strokeStyle = fahrgasse ? F.fahrgasse : F.aktiv;
       ctx.globalAlpha = 0.22; ctx.lineWidth = 9 / state.view.scale; ctx.stroke();
       ctx.globalAlpha = 1; ctx.lineWidth = 2.8 / state.view.scale; ctx.stroke();
+    } else if (fahrgasse) {
+      ctx.strokeStyle = F.fahrgasse;
+      ctx.setLineDash([6 / state.view.scale, 4 / state.view.scale]);
+      ctx.lineWidth = 2 / state.view.scale;
+      ctx.stroke();
+      ctx.setLineDash([]);
     } else {
       ctx.strokeStyle = F.pass;
       ctx.lineWidth = 1.4 / state.view.scale;
@@ -846,6 +855,7 @@ function menueAusAdresse() {
   el('sheet').hidden = false;
   tab.onclick();
 }
+window.addEventListener('hashchange', menueAusAdresse);
 el('sheetClose').onclick = () => { el('sheet').hidden = true; };
 document.querySelectorAll('.tab').forEach((tab) => {
   tab.onclick = () => {
@@ -864,6 +874,43 @@ el('btnNewField').onclick = async () => {
   if (result) { el('newFieldName').value = ''; toast(`Feld "${name}" angelegt`); refreshLists(); }
 };
 
+/* Shapefile: drei Dateien, als Text verpackt. Der Server bekommt sie
+ * base64-kodiert im JSON - kein Multipart, kein weiteres Paket auf dem Pi. */
+el('shpDateien').onchange = async (event) => {
+  const dateien = [...event.target.files];
+  event.target.value = '';
+  const finde = (endung) => dateien.find((d) => d.name.toLowerCase().endsWith(endung));
+  const shp = finde('.shp');
+  if (!shp) { toast('Die .shp-Datei fehlt in der Auswahl', true); return; }
+  const info = el('shpInfo');
+  info.textContent = `${shp.name} wird gelesen …`;
+  const b64 = async (datei) => {
+    const puffer = await datei.arrayBuffer();
+    let text = '';
+    const bytes = new Uint8Array(puffer);
+    for (let i = 0; i < bytes.length; i += 0x8000) {
+      text += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+    }
+    return btoa(text);
+  };
+  const dbf = finde('.dbf'), prj = finde('.prj');
+  const payload = {
+    name: shp.name,
+    shp: await b64(shp),
+    dbf: dbf ? await b64(dbf) : null,
+    prj: prj ? await prj.text() : null,
+  };
+  const antwort = await api('POST', '/api/fields/import', payload);
+  if (!antwort) { info.textContent = ''; return; }
+  const felder = antwort.data.felder;
+  const ha = felder.reduce((summe, feld) => summe + feld.area_ha, 0);
+  info.textContent = `${felder.length} Felder · ${ha.toFixed(2)} ha` +
+    (prj ? '' : ' · ohne .prj, Koordinatensystem geraten') +
+    (dbf ? '' : ' · ohne .dbf, Namen durchnummeriert');
+  toast(`${felder.length} Felder aus ${shp.name} übernommen`);
+  refreshLists();
+};
+
 el('btnAPlus').onclick = async () => {
   const result = await api('POST', '/api/guidance/a-plus', {});
   if (result) { toast(`Spur "${result.data.name}" angelegt`); refreshLists(); }
@@ -874,6 +921,56 @@ el('arbeitName').onchange = (event) => {
   const name = event.target.value.trim() || 'Arbeit';
   merken('agripilot.arbeit', name);
   toast(`Nächste Arbeit: ${name}`);
+};
+
+/* Mehrere Maschinen: die Liste oben wählt, das Formular darunter gehört zur
+ * gewählten. "Neue Maschine" kopiert die aktuellen Werte unter neuem Namen. */
+function renderProfiles(profile) {
+  const select = el('profileSelect');
+  select.innerHTML = '';
+  profile.forEach((p) => {
+    const option = document.createElement('option');
+    option.value = p.id;
+    option.textContent = `${p.name} · ${p.width_m.toFixed(2)} m`;
+    option.selected = !!p.aktiv;
+    select.appendChild(option);
+  });
+  el('btnDeleteProfile').disabled = profile.length <= 1;
+}
+
+function fillProfileFrom(profile) {
+  document.querySelectorAll('#profileForm input').forEach((input) => {
+    if (profile[input.name] === undefined) return;
+    if (input.type === 'checkbox') input.checked = !!profile[input.name];
+    else input.value = profile[input.name];
+  });
+}
+
+el('profileSelect').onchange = async (event) => {
+  const antwort = await api('POST', `/api/profiles/${event.target.value}/select`);
+  if (antwort) { fillProfileFrom(antwort.data); toast(`Maschine: ${antwort.data.name}`); }
+};
+
+el('btnNewProfile').onclick = async () => {
+  const name = prompt('Bezeichnung der neuen Maschine (die aktuellen Werte werden übernommen)', '');
+  if (name === null || !name.trim()) return;
+  const antwort = await api('POST', '/api/profiles', { name: name.trim() });
+  if (antwort) {
+    fillProfileFrom(antwort.data);
+    renderProfiles(await (await fetch('/api/profiles')).json());
+    toast(`Maschine "${antwort.data.name}" angelegt und gewählt`);
+  }
+};
+
+el('btnDeleteProfile').onclick = async () => {
+  const select = el('profileSelect');
+  const option = select.options[select.selectedIndex];
+  if (!option || !confirm(`Maschine "${option.textContent}" löschen?`)) return;
+  if (await api('DELETE', `/api/profiles/${option.value}`)) {
+    renderProfiles(await (await fetch('/api/profiles')).json());
+    setTimeout(fillProfile, 300);
+    toast('Maschine gelöscht');
+  }
 };
 
 el('btnSaveProfile').onclick = async () => {
@@ -917,6 +1014,68 @@ el('btnSaveHeadland').onclick = async () => {
 el('autoSections').onchange = (event) =>
   api('POST', '/api/sections/auto', { enabled: event.target.checked });
 
+/* Gerätesuche: was steckt dran? Ergebnis ist eine Liste und ein Vorschlag für
+ * die Einstellungen - derselbe Weg wie beim Tippen von Hand. */
+let geraeteVorschlag = null;
+el('btnGeraete').onclick = async () => {
+  const knopf = el('btnGeraete');
+  knopf.disabled = true;
+  el('geraeteInfo').textContent = 'Suche läuft – einige Sekunden …';
+  el('geraeteList').innerHTML = '';
+  el('geraeteRow').hidden = true;
+  try {
+    const antwort = await fetch('/api/geraete/suchen');
+    const daten = await antwort.json();
+    if (!antwort.ok) { toast(daten.detail || `Fehler ${antwort.status}`, true); return; }
+    renderGeraete(daten);
+  } catch (error) {
+    toast('Gerät nicht erreichbar', true);
+  } finally {
+    knopf.disabled = false;
+  }
+};
+
+function renderGeraete(daten) {
+  const host = el('geraeteList');
+  host.innerHTML = '';
+  const art = { gnss: 'Empfänger', phidget: 'Lenksteuerung', imu: 'Neigungssensor' };
+  daten.funde.forEach((fund) => {
+    host.appendChild(item({
+      active: !!fund.hinweis,
+      title: `${art[fund.art] || fund.art} · ${fund.kennung}`,
+      sub: fund.name + (fund.hinweis ? ` – ${fund.hinweis}` : ''),
+      actions: [],
+    }));
+  });
+  daten.probleme.forEach((problem) => {
+    const zeile = document.createElement('p');
+    zeile.className = 'note';
+    zeile.textContent = problem;
+    host.appendChild(zeile);
+  });
+  el('geraeteInfo').textContent = daten.funde.length
+    ? `${daten.funde.length} gefunden in ${daten.dauer_s} s`
+    : `Nichts gefunden (${daten.dauer_s} s) – steckt alles, läuft der Brick Daemon?`;
+  geraeteVorschlag = Object.keys(daten.vorschlag).length ? daten.vorschlag : null;
+  el('geraeteRow').hidden = !geraeteVorschlag;
+  if (geraeteVorschlag) {
+    el('geraeteVorschlag').textContent = Object.entries(geraeteVorschlag)
+      .map(([k, v]) => `${k} = ${v}`).join(' · ');
+  }
+}
+
+el('btnGeraeteUebernehmen').onclick = async () => {
+  if (!geraeteVorschlag) return;
+  const antwort = await api('POST', '/api/settings', { aenderungen: geraeteVorschlag });
+  if (!antwort) return;
+  settings.geladen = false;   // die Einstellungsseite zeigt sonst alte Werte
+  const neustart = antwort.data.neustart_noetig || [];
+  toast(neustart.length
+    ? `Übernommen – Neustart nötig für: ${neustart.join(', ')}`
+    : 'Übernommen – Empfänger und Sensor werden neu verbunden');
+  el('geraeteRow').hidden = true;
+};
+
 el('btnCentre').onclick = async () => {
   if (!confirm('Stehen die Räder gerade? Diese Stellung wird als Mitte gemerkt.')) return;
   const result = await api('POST', '/api/steering/centre');
@@ -938,34 +1097,56 @@ el('simSteer').oninput = (event) =>
 async function refreshLists() {
   if (el('sheet').hidden) return;
   const active = document.querySelector('.tab.active').dataset.tab;
-  if (active === 'fields') renderFields(await (await fetch('/api/fields')).json());
+  if (active === 'fields') {
+    const [fields, lines] = await Promise.all([
+      fetch('/api/fields').then((r) => r.json()), fetch('/api/lines').then((r) => r.json())]);
+    renderFields(fields, lines);
+  }
   if (active === 'lines') {
     const fieldId = state.live && state.live.field ? state.live.field.id : '';
     renderLines(await (await fetch(`/api/lines?field_id=${fieldId}`)).json());
   }
-  if (active === 'jobs') renderJobs(await (await fetch('/api/jobs')).json());
-  if (active === 'machine') fillProfile();
+  if (active === 'jobs') {
+    const [jobs, fields] = await Promise.all([
+      fetch('/api/jobs').then((r) => r.json()), fetch('/api/fields').then((r) => r.json())]);
+    renderJobs(jobs, fields);
+  }
+  if (active === 'machine') { fillProfile(); renderProfiles(await (await fetch('/api/profiles')).json()); }
   if (active === 'headland') fillHeadland();
   if (active === 'system') { renderSystem(); renderRohdaten(); }
   if (active === 'setup') renderSetup(await (await fetch('/api/checklist')).json());
   if (active === 'settings' && !settings.geladen) loadSettings();
 }
 
-function renderFields(fields) {
+const aufgeklappt = new Set();   // Felder, deren Spuren gerade offen sind
+
+function renderFields(fields, lines) {
   const host = el('fieldList');
   const currentId = state.live && state.live.field ? state.live.field.id : null;
+  const jahr = new Date().getFullYear();
+  const jeFeld = {};
+  (lines || []).forEach((line) => { (jeFeld[line.field_id] = jeFeld[line.field_id] || []).push(line); });
   host.innerHTML = '';
   fields.forEach((field) => {
-    host.appendChild(item({
+    const spuren = jeFeld[field.id] || [];
+    const saison = spuren.find((l) => l.saison === jahr && l.fahrgasse_m > 0);
+    const offen = aufgeklappt.has(field.id);
+    const row = item({
       active: field.id === currentId,
       title: field.name,
       sub: `${field.area_ha.toFixed(2)} ha` +
-           (field.boundary.length ? ` · ${field.boundary.length} Grenzpunkte` : ' · keine Grenze'),
+           (field.boundary.length ? ` · ${field.boundary.length} Grenzpunkte` : ' · keine Grenze') +
+           ` · ${spuren.length} ${spuren.length === 1 ? 'Spur' : 'Spuren'}` +
+           (saison ? ` · Fahrgassen ${jahr}: alle ${saison.fahrgasse_m.toFixed(0)} m` : ''),
       actions: [
         ['Laden', async () => {
           if (await api('POST', `/api/fields/${field.id}/load`)) {
             toast(`${field.name} geladen`); el('sheet').hidden = true;
           }
+        }],
+        [offen ? 'Spuren ▴' : 'Spuren ▾', () => {
+          if (offen) aufgeklappt.delete(field.id); else aufgeklappt.add(field.id);
+          refreshLists();
         }],
         ['Löschen', async () => {
           if (confirm(`Feld "${field.name}" löschen?`)) {
@@ -973,9 +1154,67 @@ function renderFields(fields) {
           }
         }],
       ],
-    }));
+    });
+    host.appendChild(row);
+    if (offen) host.appendChild(spurenListe(field, spuren, jahr));
   });
   if (!fields.length) host.innerHTML = '<p class="note">Noch keine Felder angelegt.</p>';
+}
+
+/* Die Spuren eines Feldes, unter dem Feld. Eine davon darf die Saisonspur
+ * sein - die mit den Fahrgassen. Sie wird beim Laden des Feldes automatisch
+ * aktiv, das ganze Jahr. */
+function spurenListe(field, spuren, jahr) {
+  const box = document.createElement('div');
+  box.className = 'unterliste';
+  const currentId = state.live && state.live.line ? state.live.line.id : null;
+  const feldGeladen = state.live && state.live.field && state.live.field.id === field.id;
+  spuren.forEach((line) => {
+    const saison = line.saison === jahr && line.fahrgasse_m > 0;
+    const row = item({
+      active: line.id === currentId,
+      title: line.name,
+      sub: `${line.mode === 'ab' ? 'AB-Linie' : 'Kurve'} · Abstand ${line.spacing_m.toFixed(2)} m` +
+           (line.fahrgasse_m > 0 ? ` · Fahrgassen alle ${line.fahrgasse_m.toFixed(0)} m` +
+             (line.saison ? ` (Saison ${line.saison})` : '') : '') +
+           (saison ? ' · Saisonspur' : ''),
+      actions: [
+        ['Laden', async () => {
+          // Die Spur gehört zu ihrem Feld: erst das Feld, dann die Spur.
+          if (!feldGeladen && !(await api('POST', `/api/fields/${field.id}/load`))) return;
+          if (await api('POST', `/api/lines/${line.id}/load`)) {
+            toast(`Spur "${line.name}" aktiv`); el('sheet').hidden = true;
+          }
+        }],
+        [saison ? 'Saisonspur ✓' : 'Als Saisonspur', async () => {
+          const vorgabe = line.fahrgasse_m > 0 ? line.fahrgasse_m : Math.max(line.spacing_m, 12);
+          const eingabe = prompt(
+            `Fahrgassenabstand in Metern für "${line.name}" (Saison ${jahr}).\n` +
+            `0 = keine Fahrgassen, Spur ist dann keine Saisonspur mehr.`, vorgabe.toFixed(0));
+          if (eingabe === null) return;
+          const abstand = parseFloat(eingabe.replace(',', '.'));
+          if (Number.isNaN(abstand) || abstand < 0) { toast('Bitte eine Zahl ab 0 eingeben', true); return; }
+          if (await api('POST', `/api/lines/${line.id}`, { fahrgasse_m: abstand, saison: jahr })) {
+            toast(abstand > 0 ? `Saisonspur ${jahr}: Fahrgassen alle ${abstand} m` : 'Keine Fahrgassen mehr');
+            refreshLists();
+          }
+        }],
+        ['Umbenennen', async () => {
+          const name = prompt('Neuer Name der Spur', line.name);
+          if (name === null || !name.trim()) return;
+          if (await api('POST', `/api/lines/${line.id}`, { name: name.trim() })) refreshLists();
+        }],
+        ['Löschen', async () => {
+          if (!confirm(`Spur "${line.name}" löschen?`)) return;
+          await api('DELETE', `/api/lines/${line.id}`); refreshLists();
+        }],
+      ],
+    });
+    if (saison) row.querySelectorAll('.actions button')[1].classList.add('an');
+    box.appendChild(row);
+  });
+  if (!spuren.length) box.innerHTML = '<p class="note">Noch keine Spur für dieses Feld – A/B, A+ oder Kurve in der Kabine anlegen.</p>';
+  return box;
 }
 
 function renderLines(lines) {
@@ -1003,31 +1242,52 @@ function renderLines(lines) {
     '<p class="note">Für dieses Feld gibt es noch keine Spur.</p>';
 }
 
-function renderJobs(jobs) {
+function renderJobs(jobs, fields) {
   const host = el('jobList');
   host.innerHTML = '';
+  const namen = Object.fromEntries((fields || []).map((f) => [f.id, f.name]));
+  // Je Feld ein Abschnitt, die zuletzt bearbeiteten Felder zuerst.
+  const gruppen = new Map();
   jobs.forEach((job) => {
-    const started = new Date(job.started_at * 1000);
-    const minutes = job.ended_at ? (job.ended_at - job.started_at) / 60 : null;
-    const row = item({
-      title: `${job.operation || 'Arbeit'} · ${job.area_ha.toFixed(2)} ha`,
-      sub: `${started.toLocaleString('de-DE')} · ${job.vehicle || 'Traktor'}` +
-           (minutes ? ` · ${minutes.toFixed(0)} min` : ' · läuft') +
-           ` · ${(job.distance_m / 1000).toFixed(1)} km` +
-           (job.overlap_ha ? ` · ${job.overlap_ha.toFixed(2)} ha doppelt` : ''),
-      actions: [],
-    });
-    const actions = row.querySelector('.actions');
-    ['gpx', 'geojson', 'csv'].forEach((format) => {
-      const link = document.createElement('a');
-      link.className = 'button';
-      link.href = `/api/jobs/${job.id}/${format}`;
-      link.textContent = format.toUpperCase();
-      actions.appendChild(link);
-    });
-    host.appendChild(row);
+    if (!gruppen.has(job.field_id)) gruppen.set(job.field_id, []);
+    gruppen.get(job.field_id).push(job);
+  });
+  gruppen.forEach((liste, fieldId) => {
+    const ha = liste.reduce((summe, job) => summe + job.area_ha, 0);
+    const minuten = liste.reduce((summe, job) =>
+      summe + (job.ended_at ? (job.ended_at - job.started_at) / 60 : 0), 0);
+    const kopf = document.createElement('div');
+    kopf.className = 'gruppe';
+    kopf.innerHTML = '<b></b><span></span>';
+    kopf.querySelector('b').textContent = namen[fieldId] || 'Unbekanntes Feld';
+    kopf.querySelector('span').textContent =
+      `${liste.length} ${liste.length === 1 ? 'Arbeit' : 'Arbeiten'} · ${ha.toFixed(2)} ha · ${(minuten / 60).toFixed(1)} h`;
+    host.appendChild(kopf);
+    liste.forEach((job) => host.appendChild(jobZeile(job)));
   });
   if (!jobs.length) host.innerHTML = '<p class="note">Noch keine Arbeiten aufgezeichnet.</p>';
+}
+
+function jobZeile(job) {
+  const started = new Date(job.started_at * 1000);
+  const minutes = job.ended_at ? (job.ended_at - job.started_at) / 60 : null;
+  const row = item({
+    title: `${job.operation || 'Arbeit'} · ${job.area_ha.toFixed(2)} ha`,
+    sub: `${started.toLocaleString('de-DE')} · ${job.vehicle || 'Traktor'}` +
+         (minutes ? ` · ${minutes.toFixed(0)} min` : ' · läuft') +
+         ` · ${(job.distance_m / 1000).toFixed(1)} km` +
+         (job.overlap_ha ? ` · ${job.overlap_ha.toFixed(2)} ha doppelt` : ''),
+    actions: [],
+  });
+  const actions = row.querySelector('.actions');
+  ['gpx', 'geojson', 'csv'].forEach((format) => {
+    const link = document.createElement('a');
+    link.className = 'button';
+    link.href = `/api/jobs/${job.id}/${format}`;
+    link.textContent = format.toUpperCase();
+    actions.appendChild(link);
+  });
+  return row;
 }
 
 function fillProfile() {

@@ -203,6 +203,10 @@ class GuidanceLine:
         self.derived = derived or mode == "contour"
         self.spacing = max(0.1, spacing)
         self.nudge_m = 0.0  # manual sideways trim of the whole pattern
+        # Fahrgassen: alle fahrgasse_m Meter eine Spur, die frei bleibt und auf
+        # der später gedüngt und gespritzt wird. Gehört zu einer Saison.
+        self.fahrgasse_m = 0.0
+        self.saison = 0
         if mode == "ab":
             self.points = [tuple(points[0]), tuple(points[-1])]
         else:
@@ -423,7 +427,21 @@ class GuidanceLine:
             "spacing_m": self.spacing,
             "nudge_m": self.nudge_m,
             "derived": self.derived,
+            "fahrgasse_m": self.fahrgasse_m,
+            "saison": self.saison,
+            # Jede wievielte Spur eine Fahrgasse ist - 0 heißt keine.
+            "fahrgasse_jede": self.fahrgasse_jede(),
         }
+
+    def fahrgasse_jede(self) -> int:
+        """Jede wievielte Spur eine Fahrgasse ist (0 = keine Fahrgassen)."""
+        if self.fahrgasse_m <= 0 or self.spacing <= 0:
+            return 0
+        return max(1, round(self.fahrgasse_m / self.spacing))
+
+    def ist_fahrgasse(self, pass_number: int) -> bool:
+        jede = self.fahrgasse_jede()
+        return jede > 0 and pass_number % jede == 0
 
 
 def speed_gain_factor(speed_ms: float, profile: VehicleProfile) -> float:

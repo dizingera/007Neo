@@ -27,6 +27,10 @@ gleichen Netz.
 | **Gezogene Geräte** | Anhängerkinematik statt starrem Versatz: die Ausrichtung des Geräts läuft dem Fahrzeug nach, abhängig von Tempo und Deichsellänge. In der Kurve wird dort markiert, wo das Gerät wirklich ist. |
 | **Flächenvermessung** | Feld einmal umfahren – Grenze und Hektar sind gespeichert. |
 | **Fahrtenaufzeichnung** | Jede Arbeit mit Datum, Dauer, Strecke, Fläche und Überlappung. Export als GPX, GeoJSON und CSV. |
+| **Felder aus Shapefiles** | `.shp`/`.dbf`/`.prj` aus dem Flächenantrag einlesen – selbst gelesen, ohne Zusatzpakete. ETRS89/UTM 32N/33N und WGS84; Gauß-Krüger/DHDN wird mit Begründung abgelehnt. Ein Feld je Fläche, Name aus der Tabelle, Wiederimport behält Kennung und Spuren. |
+| **Saisonspur und Fahrgassen** | Die Spur vom Säen wird mit Fahrgassenabstand je Feld und Jahr gespeichert, beim Laden des Feldes das ganze Jahr automatisch aktiv; Fahrgassen rot gestrichelt auf dem Bildschirm. |
+| **Mehrere Maschinen** | Liste aller Maschinen im Reiter Maschine, Auswahl gilt sofort; jede mit eigenem Satz Maße. |
+| **Gerätesuche** | Menü → System findet Empfänger (F9P), Lenksteuerung (Phidget) und Neigungssensor (Tinkerforge) und übernimmt sie mit einem Druck in die Einstellungen. |
 | **Rohdaten und Abspielmodus** | Zeichnet auf Wunsch auf, was *hereinkommt* – rohe NMEA-Sätze und Lagemeldungen mit Zeitstempel – und spielt dieselbe Datei wieder ein. Ein Fehler vom Feld lässt sich damit am Schreibtisch nachstellen, statt ihn zu erraten. |
 | **Mehrere Traktoren** | Der Master verteilt Felder und Spuren und gibt die RTK-Korrekturen weiter. Beide sehen, was der andere schon bearbeitet hat. |
 | **Hangausgleich** | Neigungssensor (Tinkerforge IMU Brick) rechnet die Schräglage heraus. Bei 3 m Antennenhöhe sind 6° Hang sonst 31 cm Versatz. |
@@ -92,7 +96,8 @@ powershell -ExecutionPolicy Bypass -File scripts\install_windows.ps1
 ```
 
 Welche Geräte angeschlossen sind – und welche Zeilen dafür in die
-Konfiguration gehören – sagt `scripts/scan_devices.py`.
+Konfiguration gehören – sagt `scripts/scan_devices.py`; dasselbe mit einem
+Druck im Menü unter **System → Geräte suchen → Übernehmen**.
 
 Der ganze Weg – vom leeren Pi bis zur ersten Spur – steht Schritt für Schritt in
 [docs/INSTALL.md](docs/INSTALL.md). Die Bedienung im Feld erklärt
@@ -126,6 +131,8 @@ gps/
 │                     Lenkwinkel, Nachlauf gezogener Geräte
 │   ├── headland.py   Vorgewende: Restdistanz, Alarm, Ω- und U-Wende, Route
 │   ├── recorder.py   Rohdaten mitschreiben und wieder abspielen
+│   ├── shapefile.py  Feldgrenzen aus .shp/.dbf/.prj, UTM-Umkehrung ohne Pakete
+│   ├── geraete.py    Angeschlossene Geräte finden und als Einstellung vorschlagen
 │   ├── coverage.py   Bearbeitete Fläche als Raster, Überlappung, Sektionen
 │   ├── steering.py   Lenkbefehl mit allen Sicherheitsbedingungen
 │   ├── actuators.py  Ausgänge: Phidget-Motor, externe Lenkplatine, nur Anzeige
@@ -152,7 +159,7 @@ gps/
 cd gps/backend && python3 -m unittest discover -s tests -v
 ```
 
-213 Tests, ohne Zusatzpakete lauffähig. Geprüft wird vor allem, was im Feld Geld
+236 Tests, ohne Zusatzpakete lauffähig. Geprüft wird vor allem, was im Feld Geld
 kostet, wenn es falsch ist: Flächen, das Vorzeichen der Abweichung, der
 Hangausgleich und die Bedingungen, unter denen die Lenkautomatik einschalten
 darf.

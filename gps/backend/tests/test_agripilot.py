@@ -2684,5 +2684,475 @@ class HeadlandApiTest(unittest.TestCase):
                 self.assertNotEqual(feld_id, "")
 
 
+# ---------------------------------------------------------------- Shapefile
+
+
+def _tm_vorwaerts(lat_deg, lon_deg, lon0_deg=9.0, k0=0.9996, false_e=500_000.0,
+                  a=6_378_137.0, f_inv=298.257222101):
+    """Transversale Mercator-Abbildung vorwärts (Snyder 8-9 bis 8-13) - unabhängig
+    vom Programm geschrieben, damit die Umkehrung dort gegen etwas geprüft wird."""
+    f = 1.0 / f_inv
+    e2 = 2 * f - f * f
+    ep2 = e2 / (1 - e2)
+    phi, lam = math.radians(lat_deg), math.radians(lon_deg - lon0_deg)
+    n = a / math.sqrt(1 - e2 * math.sin(phi) ** 2)
+    t_ = math.tan(phi) ** 2
+    c = ep2 * math.cos(phi) ** 2
+    a_ = lam * math.cos(phi)
+    m = a * ((1 - e2 / 4 - 3 * e2 ** 2 / 64 - 5 * e2 ** 3 / 256) * phi
+             - (3 * e2 / 8 + 3 * e2 ** 2 / 32 + 45 * e2 ** 3 / 1024) * math.sin(2 * phi)
+             + (15 * e2 ** 2 / 256 + 45 * e2 ** 3 / 1024) * math.sin(4 * phi)
+             - (35 * e2 ** 3 / 3072) * math.sin(6 * phi))
+    x = k0 * n * (a_ + (1 - t_ + c) * a_ ** 3 / 6
+                  + (5 - 18 * t_ + t_ ** 2 + 72 * c - 58 * ep2) * a_ ** 5 / 120)
+    y = k0 * (m + n * math.tan(phi) * (a_ ** 2 / 2 + (5 - t_ + 9 * c + 4 * c ** 2) * a_ ** 4 / 24
+                                        + (61 - 58 * t_ + t_ ** 2 + 600 * c - 330 * ep2) * a_ ** 6 / 720))
+    return x + false_e, y
+
+
+UTM32_PRJ = ('PROJCS["ETRS_1989_UTM_Zone_32N",GEOGCS["GCS_ETRS_1989",DATUM["D_ETRS_1989",'
+             'SPHEROID["GRS_1980",6378137.0,298.257222101]],PRIMEM["Greenwich",0.0],'
+             'UNIT["Degree",0.0174532925199433]],PROJECTION["Transverse_Mercator"],'
+             'PARAMETER["False_Easting",500000.0],PARAMETER["False_Northing",0.0],'
+             'PARAMETER["Central_Meridian",9.0],PARAMETER["Scale_Factor",0.9996],'
+             'PARAMETER["Latitude_Of_Origin",0.0],UNIT["Meter",1.0]]')
+WGS84_PRJ = ('GEOGCS["GCS_WGS_1984",DATUM["D_WGS_1984",SPHEROID["WGS_1984",6378137.0,'
+             '298.257223563]],PRIMEM["Greenwich",0.0],UNIT["Degree",0.0174532925199433]]')
+GK4_PRJ = ('PROJCS["DHDN_3_Degree_Gauss_Zone_4",GEOGCS["GCS_Deutsches_Hauptdreiecksnetz",'
+           'DATUM["D_Deutsches_Hauptdreiecksnetz",SPHEROID["Bessel_1841",6377397.155,'
+           '299.1528128]],PRIMEM["Greenwich",0.0],UNIT["Degree",0.0174532925199433]],'
+           'PROJECTION["Transverse_Mercator"],PARAMETER["False_Easting",4500000.0],'
+           'PARAMETER["False_Northing",0.0],PARAMETER["Central_Meridian",12.0],'
+           'PARAMETER["Scale_Factor",1.0],PARAMETER["Latitude_Of_Origin",0.0],UNIT["Meter",1.0]]')
+
+
+def _shp_bauen(polygone):
+    """Ein Shapefile (Typ 5) aus Listen von Ringen; jeder Ring eine Liste (x, y).
+    Ringe werden geschlossen, wie das Format es verlangt."""
+    import struct
+    saetze = b""
+    for nummer, ringe in enumerate(polygone, 1):
+        geschlossen = [r + [r[0]] for r in ringe]
+        punkte = [p for r in geschlossen for p in r]
+        xs, ys = [p[0] for p in punkte], [p[1] for p in punkte]
+        inhalt = struct.pack("<i", 5) + struct.pack("<4d", min(xs), min(ys), max(xs), max(ys))
+        inhalt += struct.pack("<ii", len(geschlossen), len(punkte))
+        start = 0
+        for r in geschlossen:
+            inhalt += struct.pack("<i", start)
+            start += len(r)
+        for x, y in punkte:
+            inhalt += struct.pack("<dd", x, y)
+        saetze += struct.pack(">ii", nummer, len(inhalt) // 2) + inhalt
+    laenge = (100 + len(saetze)) // 2
+    kopf = struct.pack(">i", 9994) + b"\x00" * 20 + struct.pack(">i", laenge)
+    kopf += struct.pack("<ii", 1000, 5) + struct.pack("<8d", 0, 0, 0, 0, 0, 0, 0, 0)
+    return kopf + saetze
+
+
+def _dbf_bauen(spalten, zeilen, codepage=0x57, kodierung="cp1252"):
+    import struct
+    satz_laenge = 1 + sum(l for _, l in spalten)
+    kopf_laenge = 32 + 32 * len(spalten) + 1
+    kopf = bytearray(32)
+    kopf[0] = 0x03
+    struct.pack_into("<IHH", kopf, 4, len(zeilen), kopf_laenge, satz_laenge)
+    kopf[29] = codepage
+    daten = bytes(kopf)
+    for name, laenge in spalten:
+        feld = bytearray(32)
+        feld[:11] = name.encode("ascii").ljust(11, b"\x00")
+        feld[11] = ord("C")
+        feld[16] = laenge
+        daten += bytes(feld)
+    daten += b"\x0D"
+    for zeile in zeilen:
+        satz = b" "
+        for (name, laenge), wert in zip(spalten, zeile):
+            satz += wert.encode(kodierung).ljust(laenge, b" ")[:laenge]
+        daten += satz
+    return daten
+
+
+class ShapefileTest(unittest.TestCase):
+    """Feldgrenzen aus dem Flächenantrag - selbst gelesen, ohne Zusatzpakete."""
+
+    # Ein Rechteck von 100 x 200 m bei Freising, gegen den Uhrzeigersinn in Grad
+    # (Shapefile will Außenringe im Uhrzeigersinn - hier wird es umgedreht).
+    ECKEN_WGS = [(48.40, 11.70), (48.40, 11.70135), (48.4018, 11.70135), (48.4018, 11.70)]
+
+    def _utm_ring(self):
+        ring = [_tm_vorwaerts(lat, lon) for lat, lon in self.ECKEN_WGS]
+        return list(reversed(ring))   # im Uhrzeigersinn = Außenring
+
+    def test_utm32_polygon_lands_on_the_right_spot(self):
+        from agripilot import shapefile
+        shp = _shp_bauen([[self._utm_ring()]])
+        dbf = _dbf_bauen([("SCHLAGNAME", 30), ("FLIK", 16)], [("Große Wiese", "DEBYLI0123")])
+        umrisse = shapefile.lesen(shp, dbf, UTM32_PRJ)
+        self.assertEqual(len(umrisse), 1)
+        self.assertEqual(umrisse[0].name, "Große Wiese")
+        # Jede Ecke muss auf einen Zentimeter wieder dort liegen, wo sie herkam.
+        for (lat, lon) in self.ECKEN_WGS:
+            naechste = min(umrisse[0].ring, key=lambda p: geo.haversine(lat, lon, p[0], p[1]))
+            self.assertLess(geo.haversine(lat, lon, naechste[0], naechste[1]), 0.01)
+        feld = umrisse[0].als_feld()
+        self.assertAlmostEqual(feld["area_ha"], 2.0, delta=0.01)   # 100 x 200 m
+        self.assertEqual(len(feld["boundary"]), 4)
+
+    def test_zone_prefix_in_the_easting_is_understood_with_and_without_prj(self):
+        from agripilot import shapefile
+        ring = [(x + 32_000_000, y) for x, y in self._utm_ring()]
+        shp = _shp_bauen([[ring]])
+        ohne = shapefile.lesen(shp, None, None)
+        mit = shapefile.lesen(shp, None, UTM32_PRJ.replace('"False_Easting",500000.0',
+                                                            '"False_Easting",32500000.0'))
+        for umriss in (ohne[0], mit[0]):
+            self.assertLess(geo.haversine(48.40, 11.70, *min(
+                umriss.ring, key=lambda p: geo.haversine(48.40, 11.70, *p))), 0.01)
+        self.assertEqual(ohne[0].name, "Feld 1")
+
+    def test_degrees_are_taken_as_they_are(self):
+        from agripilot import shapefile
+        ring = [(lon, lat) for lat, lon in reversed(self.ECKEN_WGS)]
+        umrisse = shapefile.lesen(_shp_bauen([[ring]]), None, WGS84_PRJ)
+        self.assertEqual(umrisse[0].ring[0], (self.ECKEN_WGS[-1][0], self.ECKEN_WGS[-1][1]))
+        # ... und ohne .prj erkannt: Zahlen unter 180 sind Grad.
+        self.assertEqual(shapefile.lesen(_shp_bauen([[ring]]), None, None)[0].ring,
+                         umrisse[0].ring)
+
+    def test_gauss_krueger_on_bessel_is_refused_with_a_reason(self):
+        from agripilot import shapefile
+        shp = _shp_bauen([[[(4_500_000, 5_360_000), (4_500_100, 5_360_000),
+                            (4_500_100, 5_360_100), (4_500_000, 5_360_100)][::-1]]])
+        with self.assertRaises(shapefile.ShapefileFehler) as fehler:
+            shapefile.lesen(shp, None, GK4_PRJ)
+        self.assertIn("Bessel", str(fehler.exception))
+        self.assertIn("EPSG:25832", str(fehler.exception))
+
+    def test_unknown_numbers_without_prj_are_an_error_not_a_guess(self):
+        from agripilot import shapefile
+        shp = _shp_bauen([[[(500_000, 5_360_000), (500_100, 5_360_000),
+                            (500_100, 5_360_100), (500_000, 5_360_100)][::-1]]])
+        with self.assertRaises(shapefile.ShapefileFehler) as fehler:
+            shapefile.lesen(shp, None, None)
+        self.assertIn(".prj", str(fehler.exception))
+
+    def test_holes_are_dropped_and_several_outer_rings_become_several_fields(self):
+        from agripilot import shapefile
+        aussen = self._utm_ring()
+        # Ein Loch: kleiner Ring gegen den Uhrzeigersinn mitten drin.
+        cx = sum(p[0] for p in aussen) / 4
+        cy = sum(p[1] for p in aussen) / 4
+        loch = [(cx - 5, cy - 5), (cx + 5, cy - 5), (cx + 5, cy + 5), (cx - 5, cy + 5)]
+        zweites = [(x + 1000, y) for x, y in aussen]
+        umrisse = shapefile.lesen(_shp_bauen([[aussen, loch, zweites]]),
+                                  _dbf_bauen([("NAME", 20)], [("Doppel",)]), UTM32_PRJ)
+        self.assertEqual([u.name for u in umrisse], ["Doppel (1)", "Doppel (2)"])
+        self.assertEqual(len(umrisse[0].ring), 4)
+
+    def test_dbf_names_come_through_the_codepage(self):
+        from agripilot import shapefile
+        dbf = _dbf_bauen([("BEZEICHN", 20)], [("Föhrenäcker",)], codepage=0x02, kodierung="cp850")
+        self.assertEqual(shapefile.dbf_lesen(dbf)[0]["BEZEICHN"], "Föhrenäcker")
+        dbf = _dbf_bauen([("ID", 6), ("SCHLAG", 20)], [("17", "Am Bach")])
+        umriss = shapefile.lesen(_shp_bauen([[self._utm_ring()]]), dbf, UTM32_PRJ)[0]
+        self.assertEqual(umriss.name, "Am Bach")   # der Name schlägt die Nummer
+
+    def test_garbage_is_refused(self):
+        from agripilot import shapefile
+        with self.assertRaises(shapefile.ShapefileFehler):
+            shapefile.lesen(b"\x00" * 200, None, None)
+        with self.assertRaises(shapefile.ShapefileFehler):
+            shapefile.lesen(_shp_bauen([]), None, None)
+
+
+class ShapefileImportTest(unittest.TestCase):
+    """Der Import in den Motor: Felder anlegen, Namen wiedererkennen, Spuren behalten."""
+
+    def _motor(self):
+        from agripilot import config as config_module
+        from agripilot.engine import Engine
+        ordner = tempfile.TemporaryDirectory()
+        self.addCleanup(ordner.cleanup)
+        store = Storage(os.path.join(ordner.name, "e.db"))
+        self.addCleanup(store.close)
+        return Engine(config_module.load("/kein-solcher-pfad.yaml"), store), store
+
+    def test_import_creates_fields_and_reimport_keeps_id_and_lines(self):
+        from agripilot import shapefile
+        motor, store = self._motor()
+        ring = list(reversed([_tm_vorwaerts(lat, lon) for lat, lon in ShapefileTest.ECKEN_WGS]))
+        shp = _shp_bauen([[ring]])
+        dbf = _dbf_bauen([("NAME", 20)], [("Wiese",)])
+        felder = motor.import_fields(shapefile.lesen(shp, dbf, UTM32_PRJ))
+        self.assertEqual(len(felder), 1)
+        feld = felder[0]
+        self.assertAlmostEqual(feld["area_ha"], 2.0, delta=0.01)
+        self.assertGreater(len(feld["boundary"]), 3)
+        # Eine Spur dazu ...
+        spur = store.save_line({"field_id": feld["id"], "name": "AB", "mode": "ab",
+                                "points": [[0, 0], [0, 50]], "spacing_m": 3.0})
+        # ... dann kommt die Datei noch einmal, die Grenze leicht anders.
+        ring2 = list(reversed([_tm_vorwaerts(lat, lon + 0.00002)
+                               for lat, lon in ShapefileTest.ECKEN_WGS]))
+        felder2 = motor.import_fields(shapefile.lesen(_shp_bauen([[ring2]]), dbf, UTM32_PRJ))
+        self.assertEqual(felder2[0]["id"], feld["id"])
+        self.assertEqual(len(store.list_fields()), 1)
+        self.assertEqual(store.get_line(spur["id"])["field_id"], feld["id"])
+        # Der Bezug blieb, die Grenze wanderte - um etwa 1,5 m nach Osten.
+        self.assertEqual((felder2[0]["datum_lat"], felder2[0]["datum_lon"]),
+                         (feld["datum_lat"], feld["datum_lon"]))
+        self.assertAlmostEqual(felder2[0]["boundary"][0][0] - feld["boundary"][0][0], 1.48, delta=0.1)
+
+
+# ----------------------------------------------------------- Saisonspuren
+
+
+class SaisonspurTest(unittest.TestCase):
+    """Fahrgassen bleiben das Jahr über: die Spur vom Säen wird beim Düngen
+    wieder die Spur - ohne dass jemand daran denken muss."""
+
+    def setUp(self):
+        from agripilot import config as config_module
+        from agripilot.engine import Engine
+        self.dir = tempfile.TemporaryDirectory()
+        self.store = Storage(os.path.join(self.dir.name, "s.db"))
+        self.engine = Engine(config_module.load("/kein-solcher-pfad.yaml"), self.store)
+        self.feld = self.store.save_field({"name": "Acker", "datum_lat": 48.0, "datum_lon": 11.0,
+                                           "boundary": [list(p) for p in QUADRAT], "area_ha": 1.0})
+
+    def tearDown(self):
+        self.store.close()
+        self.dir.cleanup()
+
+    def _spur(self, name, **extra):
+        return self.store.save_line({"field_id": self.feld["id"], "name": name, "mode": "ab",
+                                     "points": [[10, 0], [10, 100]], "spacing_m": 3.0, **extra})
+
+    def test_an_old_database_gets_the_new_columns(self):
+        import sqlite3
+        pfad = os.path.join(self.dir.name, "alt.db")
+        alt = sqlite3.connect(pfad)
+        alt.execute("""CREATE TABLE lines (id TEXT PRIMARY KEY, field_id TEXT NOT NULL,
+            name TEXT NOT NULL, mode TEXT NOT NULL, points TEXT NOT NULL, spacing_m REAL NOT NULL,
+            nudge_m REAL NOT NULL DEFAULT 0, updated_at REAL NOT NULL, deleted INTEGER NOT NULL DEFAULT 0)""")
+        alt.execute("INSERT INTO lines VALUES ('l1','f1','Alt','ab','[[0,0],[0,10]]',3,0,1,0)")
+        alt.commit(); alt.close()
+        store = Storage(pfad)
+        try:
+            spur = store.get_line("l1")
+            self.assertEqual((spur["saison"], spur["fahrgasse_m"]), (0, 0.0))
+            store.update_line("l1", saison=2026, fahrgasse_m=24.0)
+            self.assertEqual(store.get_line("l1")["fahrgasse_m"], 24.0)
+        finally:
+            store.close()   # vor tearDown: Windows löscht keine offene Datei
+
+    def test_the_season_line_is_loaded_with_the_field(self):
+        jahr = time.localtime().tm_year
+        self._spur("Zuletzt")
+        saison = self._spur("Saat", saison=jahr, fahrgasse_m=24.0)
+        self._spur("Vorjahr", saison=jahr - 1, fahrgasse_m=24.0)
+        self.engine.load_field(self.feld["id"])
+        self.assertEqual(self.engine.line.id, saison["id"])
+        self.assertEqual(self.engine.line.fahrgasse_m, 24.0)
+        self.assertEqual(self.engine.line.fahrgasse_jede(), 8)
+        self.assertTrue(self.engine.line.ist_fahrgasse(8))
+        self.assertTrue(self.engine.line.ist_fahrgasse(-16))
+        self.assertFalse(self.engine.line.ist_fahrgasse(3))
+        self.assertEqual(self.engine.state()["line"]["fahrgasse_jede"], 8)
+
+    def test_without_a_season_line_the_newest_line_is_loaded(self):
+        erste = self._spur("Erste")
+        time.sleep(0.01)
+        zweite = self._spur("Zweite")
+        self.engine.load_field(self.feld["id"])
+        self.assertEqual(self.engine.line.id, zweite["id"])
+        self.assertEqual(self.engine.line.fahrgasse_jede(), 0)
+        self.assertIsNotNone(erste)
+
+    def test_setting_the_tramline_spacing_marks_the_season_and_updates_the_active_line(self):
+        jahr = time.localtime().tm_year
+        spur = self._spur("Saat")
+        self.engine.load_field(self.feld["id"])
+        record = self.engine.update_line(spur["id"], {"fahrgasse_m": 18})
+        self.assertEqual((record["saison"], record["fahrgasse_m"]), (jahr, 18.0))
+        self.assertEqual(self.engine.line.fahrgasse_jede(), 6)
+        self.assertEqual(self.store.season_line(self.feld["id"], jahr)["id"], spur["id"])
+        # Null nimmt die Fahrgassen und die Saison wieder weg.
+        record = self.engine.update_line(spur["id"], {"fahrgasse_m": 0})
+        self.assertEqual((record["saison"], record["fahrgasse_m"]), (0, 0.0))
+        self.assertIsNone(self.store.season_line(self.feld["id"], jahr))
+        with self.assertRaises(ValueError):
+            self.engine.update_line(spur["id"], {"fahrgasse_m": -1})
+        with self.assertRaises(KeyError):
+            self.engine.update_line("gibt-es-nicht", {"name": "x"})
+        self.assertEqual(self.engine.update_line(spur["id"], {"name": "  Neu "})["name"], "Neu")
+
+    def test_the_newest_season_line_wins(self):
+        jahr = time.localtime().tm_year
+        alt = self._spur("Erste Saat", saison=jahr, fahrgasse_m=24.0)
+        time.sleep(0.01)
+        neu = self._spur("Nachgesät", saison=jahr, fahrgasse_m=24.0)
+        self.assertEqual(self.store.season_line(self.feld["id"], jahr)["id"], neu["id"])
+        self.assertEqual([l["id"] for l in self.store.list_lines(self.feld["id"])][:2],
+                         [neu["id"], alt["id"]])
+
+
+# --------------------------------------------------------------- Maschinen
+
+
+class MaschinenTest(unittest.TestCase):
+    """Mehrere Maschinen, eine davon aktiv - und das aktive Profil bleibt, was es war."""
+
+    def setUp(self):
+        from agripilot import config as config_module
+        from agripilot.engine import Engine
+        self.dir = tempfile.TemporaryDirectory()
+        self.store = Storage(os.path.join(self.dir.name, "m.db"))
+        self.engine = Engine(config_module.load("/kein-solcher-pfad.yaml"), self.store)
+
+    def tearDown(self):
+        self.store.close()
+        self.dir.cleanup()
+
+    def test_the_existing_profile_becomes_the_first_machine(self):
+        self.engine.update_profile({"name": "Fendt", "width_m": 6.0})
+        liste = self.engine.list_profiles()
+        self.assertEqual(len(liste), 1)
+        self.assertEqual((liste[0]["name"], liste[0]["width_m"], liste[0]["aktiv"]), ("Fendt", 6.0, True))
+        # Änderungen am aktiven Profil landen in der Liste.
+        self.engine.update_profile({"width_m": 9.0})
+        self.assertEqual(self.engine.list_profiles()[0]["width_m"], 9.0)
+
+    def test_new_select_delete(self):
+        from agripilot.engine import Engine
+        self.engine.update_profile({"name": "Fendt", "width_m": 6.0})
+        spritze = self.engine.save_profile_as("Spritze", {"width_m": 24.0})
+        self.assertEqual(self.engine.profile.name, "Spritze")
+        self.assertEqual(self.engine.profile.width_m, 24.0)
+        liste = self.engine.list_profiles()
+        self.assertEqual([p["name"] for p in liste], ["Fendt", "Spritze"])
+        self.assertEqual([p["aktiv"] for p in liste], [False, True])
+        fendt = liste[0]["id"]
+        self.engine.select_profile(fendt)
+        self.assertEqual((self.engine.profile.name, self.engine.profile.width_m), ("Fendt", 6.0))
+        # Ein Neustart liest das aktive Profil wieder ein.
+        neu = Engine(self.engine.config, self.store)
+        self.assertEqual(neu.profile.name, "Fendt")
+        self.assertEqual([p["aktiv"] for p in neu.list_profiles()], [True, False])
+        # Löschen der aktiven wechselt auf die verbleibende; die letzte bleibt.
+        self.engine.delete_profile(fendt)
+        self.assertEqual(self.engine.profile.name, "Spritze")
+        with self.assertRaises(ValueError):
+            self.engine.delete_profile(spritze["id"])
+        with self.assertRaises(KeyError):
+            self.engine.select_profile("nix")
+        with self.assertRaises(ValueError):
+            self.engine.save_profile_as("   ")
+
+
+# ------------------------------------------------------------ Gerätesuche
+
+
+class GeraeteTest(unittest.TestCase):
+    """Die Suche sammelt, was die drei Wege finden - und ein Weg, der scheitert,
+    verdirbt den anderen nichts."""
+
+    def test_results_and_problems_are_collected(self):
+        from agripilot import geraete
+
+        def empfaenger():
+            return ([geraete.Fund("gnss", "COM5", "u-blox GNSS receiver", "sieht nach dem F9P aus")],
+                    {"gnss.source": "serial", "gnss.port": "COM5"}, [])
+
+        def sensor():
+            return [], {}, ["Kein Brick Daemon"]
+
+        def kaputt():
+            raise OSError("Treiber fehlt")
+
+        ergebnis = geraete.suchen(sucher=[empfaenger, sensor, kaputt])
+        self.assertEqual([f.kennung for f in ergebnis.funde], ["COM5"])
+        self.assertEqual(ergebnis.vorschlag["gnss.port"], "COM5")
+        self.assertEqual(len(ergebnis.probleme), 2)
+        self.assertIn("Treiber fehlt", ergebnis.probleme[1])
+        daten = ergebnis.to_dict()
+        self.assertEqual(daten["funde"][0]["hinweis"], "sieht nach dem F9P aus")
+
+    def test_the_real_serial_scan_runs_without_hardware(self):
+        from agripilot import geraete
+        funde, vorschlag, probleme = geraete.serielle_anschluesse()
+        self.assertIsInstance(funde, list)
+        self.assertIsInstance(vorschlag, dict)
+
+
+class MenueApiTest(unittest.TestCase):
+    """Die neuen Menüpunkte von außen: Import, Saisonspur, Maschinen, Gerätesuche."""
+
+    def test_import_lines_profiles_and_device_scan_over_the_interface(self):
+        import base64
+        from unittest import mock
+        from fastapi.testclient import TestClient
+        from agripilot import config as config_module, geraete
+        from agripilot.server import create_app
+
+        with tempfile.TemporaryDirectory() as ordner:
+            config = config_module.load("/kein-solcher-pfad.yaml")
+            config.server.data_dir = ordner
+            config.gnss.source = "simulator"
+            with TestClient(create_app(config)) as client:
+                ring = list(reversed([_tm_vorwaerts(lat, lon) for lat, lon in ShapefileTest.ECKEN_WGS]))
+                antwort = client.post("/api/fields/import", json={
+                    "name": "antrag.shp",
+                    "shp": base64.b64encode(_shp_bauen([[ring]])).decode(),
+                    "dbf": base64.b64encode(_dbf_bauen([("NAME", 20)], [("Wiese",)])).decode(),
+                    "prj": UTM32_PRJ,
+                })
+                self.assertEqual(antwort.status_code, 200, antwort.text)
+                felder = antwort.json()["data"]["felder"]
+                self.assertEqual(felder[0]["name"], "Wiese")
+                self.assertEqual(client.get("/api/fields").json()[0]["id"], felder[0]["id"])
+
+                # Kaputte Datei: 400 mit Grund, kein 500.
+                kaputt = client.post("/api/fields/import", json={"shp": base64.b64encode(b"x" * 300).decode()})
+                self.assertEqual(kaputt.status_code, 400)
+                self.assertEqual(client.post("/api/fields/import", json={"shp": ""}).status_code, 400)
+
+                # Spur anlegen, als Saisonspur setzen, wiederfinden.
+                app = client.app.state.app
+                app.engine.load_field(felder[0]["id"])
+                spur = app.store.save_line({"field_id": felder[0]["id"], "name": "AB", "mode": "ab",
+                                            "points": [[0, 0], [0, 50]], "spacing_m": 3.0})
+                antwort = client.post(f"/api/lines/{spur['id']}", json={"fahrgasse_m": 21})
+                self.assertEqual(antwort.status_code, 200)
+                self.assertEqual(antwort.json()["data"]["saison"], time.localtime().tm_year)
+                self.assertEqual(client.get("/api/lines?field_id=" + felder[0]["id"]).json()[0]["fahrgasse_m"], 21.0)
+                self.assertEqual(client.post("/api/lines/nix", json={"name": "x"}).status_code, 400)
+
+                # Maschinen
+                self.assertEqual(len(client.get("/api/profiles").json()), 1)
+                neu = client.post("/api/profiles", json={"name": "Spritze", "werte": {"width_m": 24}})
+                self.assertEqual(neu.status_code, 200)
+                self.assertEqual(neu.json()["data"]["width_m"], 24.0)
+                liste = client.get("/api/profiles").json()
+                self.assertEqual([p["aktiv"] for p in liste], [False, True])
+                self.assertEqual(client.post(f"/api/profiles/{liste[0]['id']}/select").json()["data"]["name"],
+                                 "Traktor")
+                self.assertEqual(client.delete(f"/api/profiles/{liste[1]['id']}").status_code, 200)
+                self.assertEqual(client.delete(f"/api/profiles/{liste[0]['id']}").status_code, 400)
+                self.assertEqual(client.post("/api/profiles", json={"name": ""}).status_code, 400)
+
+                # Gerätesuche - ohne Hardware nachgestellt.
+                ergebnis = geraete.Suchergebnis(
+                    funde=[geraete.Fund("gnss", "COM5", "u-blox", "sieht nach dem F9P aus")],
+                    vorschlag={"gnss.source": "serial", "gnss.port": "COM5"})
+                with mock.patch.object(geraete, "suchen", return_value=ergebnis):
+                    antwort = client.get("/api/geraete/suchen")
+                self.assertEqual(antwort.status_code, 200)
+                self.assertEqual(antwort.json()["funde"][0]["kennung"], "COM5")
+                self.assertEqual(antwort.json()["vorschlag"]["gnss.port"], "COM5")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -12,6 +12,7 @@ map ten times a second would saturate the link within a few hectares.
 from __future__ import annotations
 
 import asyncio
+import struct
 import contextlib
 import json
 import time
@@ -25,7 +26,8 @@ from fastapi.staticfiles import StaticFiles
 from . import config as config_module
 from . import checklist as checklist_module
 from . import settings as settings_module
-from . import export, imu as imu_module, recorder as recorder_module, sync
+from . import export, geraete as geraete_module, imu as imu_module
+from . import recorder as recorder_module, shapefile as shapefile_module, sync
 from .actuators import build_output
 from .coverage import CoverageMap
 from .engine import Engine
@@ -379,6 +381,34 @@ def create_app(config=None) -> FastAPI:
     async def create_field(payload: dict = Body(...)):
         return guard(engine.create_field, payload.get("name", "Neues Feld"))
 
+    @api.post("/api/fields/import")
+    async def import_fields(payload: dict = Body(...)):
+        """Felder aus einem Shapefile übernehmen.
+
+        Die Dateien kommen base64-kodiert im JSON: .shp muss, .dbf (Namen) und
+        .prj (Koordinatensystem) dürfen. Kein Multipart - das bräuchte ein
+        weiteres Paket auf dem Pi, und drei Dateien von zusammen wenigen
+        hundert Kilobyte passen in einen Text.
+        """
+        import base64
+        try:
+            shp = base64.b64decode(payload.get("shp") or "")
+            dbf = base64.b64decode(payload["dbf"]) if payload.get("dbf") else None
+        except (ValueError, TypeError) as exc:
+            raise HTTPException(400, f"Dateien nicht lesbar: {exc}") from exc
+        if not shp:
+            raise HTTPException(400, "Die .shp-Datei fehlt")
+        if len(shp) > 20_000_000:
+            raise HTTPException(400, "Die .shp-Datei ist größer als 20 MB - das ist kein Feld")
+        prj = payload.get("prj") or None
+        try:
+            umrisse = shapefile_module.lesen(shp, dbf, prj)
+        except shapefile_module.ShapefileFehler as exc:
+            raise HTTPException(400, str(exc)) from exc
+        except (struct.error, IndexError) as exc:
+            raise HTTPException(400, f"Die .shp-Datei ist beschädigt: {exc}") from exc
+        return ok({"felder": engine.import_fields(umrisse)})
+
     @api.post("/api/fields/{field_id}/load")
     async def load_field(field_id: str, with_coverage: bool = True):
         result = guard(engine.load_field, field_id)
@@ -412,6 +442,11 @@ def create_app(config=None) -> FastAPI:
     @api.post("/api/lines/{line_id}/load")
     async def load_line(line_id: str):
         return guard(engine.load_line, line_id)
+
+    @api.post("/api/lines/{line_id}")
+    async def update_line(line_id: str, payload: dict = Body(...)):
+        """Umbenennen oder als Saisonspur mit Fahrgassenabstand festlegen."""
+        return guard(engine.update_line, line_id, payload)
 
     @api.delete("/api/lines/{line_id}")
     async def delete_line(line_id: str):
@@ -606,6 +641,38 @@ def create_app(config=None) -> FastAPI:
     async def update_profile(payload: dict = Body(...)):
         from dataclasses import asdict
         return ok(asdict(engine.update_profile(payload)))
+
+    @api.get("/api/profiles")
+    async def list_profiles() -> list[dict]:
+        return engine.list_profiles()
+
+    @api.post("/api/profiles")
+    async def create_profile(payload: dict = Body(...)):
+        """Neue Maschine aus den aktuellen Werten - unter neuem Namen."""
+        return guard(engine.save_profile_as, payload.get("name", ""), payload.get("werte"))
+
+    @api.post("/api/profiles/{profile_id}/select")
+    async def select_profile(profile_id: str):
+        from dataclasses import asdict
+        return guard(lambda: asdict(engine.select_profile(profile_id)))
+
+    @api.delete("/api/profiles/{profile_id}")
+    async def delete_profile(profile_id: str):
+        guard(engine.delete_profile, profile_id)
+        return ok()
+
+    # -- Geräte -----------------------------------------------------------
+
+    @api.get("/api/geraete/suchen")
+    async def geraete_suchen() -> dict:
+        """Angeschlossene Empfänger, Sensoren und Lenksteuerungen aufspüren.
+
+        Blockiert einige Sekunden (Phidget und Brick Daemon wollen warten) und
+        läuft darum in einem Thread, damit die Position derweil weiterkommt.
+        """
+        ergebnis = await asyncio.to_thread(
+            geraete_module.suchen, config.imu.host, config.imu.port)
+        return ergebnis.to_dict()
 
     @api.post("/api/sections/auto")
     async def set_auto_sections(payload: dict = Body(...)):

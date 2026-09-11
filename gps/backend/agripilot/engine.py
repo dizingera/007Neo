@@ -111,12 +111,77 @@ class Engine:
         fields = VehicleProfile.__dataclass_fields__
         return VehicleProfile(**{k: v for k, v in stored.items() if k in fields})
 
+    # Mehrere Maschinen: jede ein vollständiges Profil unter einer Kennung.
+    # "vehicle_profile" bleibt das aktive - so lesen es alle anderen Stellen,
+    # und eine Datenbank vom Frühjahr hat genau dieses eine, das dann zur
+    # ersten Maschine der Liste wird.
+
+    def list_profiles(self) -> list[dict]:
+        profile = self.store.get_setting("vehicle_profiles") or []
+        aktiv = self.store.get_setting("vehicle_profile_active") or ""
+        if not profile:
+            eintrag = {"id": storage.new_id(), **asdict(self.profile)}
+            profile = [eintrag]
+            aktiv = eintrag["id"]
+            self.store.set_setting("vehicle_profiles", profile)
+            self.store.set_setting("vehicle_profile_active", aktiv)
+        return [{**p, "aktiv": p["id"] == aktiv} for p in profile]
+
+    def save_profile_as(self, name: str, values: dict | None = None) -> dict:
+        """Eine neue Maschine anlegen - aus den aktuellen Werten, mit neuem Namen."""
+        name = (name or "").strip()
+        if not name:
+            raise ValueError("Die Maschine braucht eine Bezeichnung")
+        fields = VehicleProfile.__dataclass_fields__
+        werte = asdict(self.profile)
+        werte.update({k: v for k, v in (values or {}).items() if k in fields})
+        werte["name"] = name
+        neu = {"id": storage.new_id(), **asdict(VehicleProfile(**werte))}
+        profile = [p for p in self.list_profiles()]
+        for p in profile:
+            p.pop("aktiv", None)
+        profile.append(neu)
+        self.store.set_setting("vehicle_profiles", profile)
+        self.select_profile(neu["id"])
+        return neu
+
+    def select_profile(self, profile_id: str) -> VehicleProfile:
+        profile = self.list_profiles()
+        eintrag = next((p for p in profile if p["id"] == profile_id), None)
+        if eintrag is None:
+            raise KeyError("Maschine nicht gefunden")
+        self.store.set_setting("vehicle_profile_active", profile_id)
+        werte = {k: v for k, v in eintrag.items() if k in VehicleProfile.__dataclass_fields__}
+        self.update_profile(werte)
+        self.note(f"Maschine: {self.profile.name}")
+        return self.profile
+
+    def delete_profile(self, profile_id: str) -> None:
+        profile = self.list_profiles()
+        if len(profile) <= 1:
+            raise ValueError("Die letzte Maschine bleibt - eine muss es geben")
+        rest = [p for p in profile if p["id"] != profile_id]
+        if len(rest) == len(profile):
+            raise KeyError("Maschine nicht gefunden")
+        war_aktiv = any(p["id"] == profile_id and p["aktiv"] for p in profile)
+        for p in rest:
+            p.pop("aktiv", None)
+        self.store.set_setting("vehicle_profiles", rest)
+        if war_aktiv:
+            self.select_profile(rest[0]["id"])
+
     def update_profile(self, values: dict) -> VehicleProfile:
         fields = VehicleProfile.__dataclass_fields__
         current = asdict(self.profile)
         current.update({k: v for k, v in values.items() if k in fields})
         self.profile = VehicleProfile(**current)
         self.store.set_setting("vehicle_profile", current)
+        # ... und in der Maschinenliste die aktive mitziehen.
+        profile = self.store.get_setting("vehicle_profiles") or []
+        aktiv = self.store.get_setting("vehicle_profile_active") or ""
+        if profile and any(p["id"] == aktiv for p in profile):
+            self.store.set_setting("vehicle_profiles", [
+                {**current, "id": aktiv} if p["id"] == aktiv else p for p in profile])
         self.sections = build_sections(self.profile.width_m, self.profile.sections)
         if self.line is not None:
             # Changing the working width changes the pass spacing, and with it
@@ -155,11 +220,66 @@ class Engine:
         self.plane = geo.LocalPlane(field["datum_lat"], field["datum_lon"])
         self.coverage = CoverageMap(cell_size=0.5)
         self.line = None
+        # Die Saisonspur zuerst: die Fahrgassen vom Säen sollen beim Düngen und
+        # Spritzen wieder unter den Rädern liegen - das ganze Jahr, ohne dass
+        # jemand daran denken muss. Sonst die zuletzt benutzte Spur.
+        saison = self.store.season_line(field_id, time.localtime().tm_year)
         lines = self.store.list_lines(field_id)
-        if lines:
+        if saison is not None:
+            self.load_line(saison["id"])
+        elif lines:
             self.load_line(lines[0]["id"])
         self.note(f"Feld geladen: {field['name']}")
         return field
+
+    def import_fields(self, umrisse: list) -> list[dict]:
+        """Felder aus einem Shapefile anlegen - eines je Fläche.
+
+        Ein Feld gleichen Namens wird nicht doppelt angelegt, sondern bekommt
+        die neue Grenze: die Datei aus dem Antrag ist die Wahrheit, nicht die
+        alte Umfahrung. Gespeicherte Spuren hängen an der Kennung und bleiben.
+        """
+        vorhandene = {f["name"]: f for f in self.store.list_fields()}
+        angelegt = []
+        for umriss in umrisse:
+            datensatz = umriss.als_feld()
+            alt = vorhandene.get(datensatz["name"])
+            if alt is not None:
+                # Bezug bleibt: die Spuren des Feldes sind in dessen Metern
+                # gespeichert. Die neue Grenze wird auf den alten Bezug gelegt.
+                ebene = geo.LocalPlane(alt["datum_lat"], alt["datum_lon"])
+                datensatz["boundary"] = [
+                    [round(x, 3), round(y, 3)]
+                    for x, y in (ebene.to_local(lat, lon) for lat, lon in umriss.ring)]
+                datensatz["datum_lat"], datensatz["datum_lon"] = alt["datum_lat"], alt["datum_lon"]
+                datensatz["id"] = alt["id"]
+                datensatz["note"] = alt.get("note") or datensatz["note"]
+            angelegt.append(self.store.save_field(datensatz))
+        self.note(f"{len(angelegt)} Felder aus Shapefile übernommen")
+        return angelegt
+
+    def update_line(self, line_id: str, values: dict) -> dict:
+        """Spur umbenennen oder als Saisonspur mit Fahrgassen festlegen."""
+        werte = {}
+        if "name" in values:
+            werte["name"] = str(values["name"]).strip() or "Spur"
+        if "fahrgasse_m" in values:
+            fahrgasse = float(values["fahrgasse_m"] or 0.0)
+            if fahrgasse < 0:
+                raise ValueError("Der Fahrgassenabstand kann nicht negativ sein")
+            werte["fahrgasse_m"] = fahrgasse
+            # Fahrgassen gehören zu einer Saison. Ohne Angabe ist es diese.
+            werte["saison"] = int(values.get("saison") or time.localtime().tm_year) if fahrgasse > 0 else 0
+        elif "saison" in values:
+            werte["saison"] = int(values["saison"] or 0)
+        record = self.store.update_line(line_id, **werte)
+        if record is None:
+            raise KeyError("Spurlinie nicht gefunden")
+        if self.line is not None and self.line.id == line_id:
+            self.line.name = record["name"]
+            self.line.fahrgasse_m = record["fahrgasse_m"]
+            self.line.saison = record["saison"]
+        return record
 
     def create_field(self, name: str) -> dict:
         """Anchor a new field at the current position.
@@ -187,7 +307,10 @@ class Engine:
             self.profile.spacing_m, record["name"], record["id"],
         )
         self.line.nudge_m = record.get("nudge_m", 0.0)
-        self.note(f"Spur aktiv: {record['name']}")
+        self.line.fahrgasse_m = float(record.get("fahrgasse_m") or 0.0)
+        self.line.saison = int(record.get("saison") or 0)
+        zusatz = f" · Fahrgassen alle {self.line.fahrgasse_m:g} m" if self.line.fahrgasse_m else ""
+        self.note(f"Spur aktiv: {record['name']}{zusatz}")
         return record
 
     def clear_line(self) -> None:
