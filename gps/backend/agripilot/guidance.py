@@ -271,7 +271,7 @@ class GuidanceLine:
         rx, ry = _right_vector(kurs)
         probe = (mitte[0] + rx * 0.25, mitte[1] + ry * 0.25)
         innen = (rx, ry) if point_in_polygon(probe, self.points) else (-rx, -ry)
-        if innen[0] != rx:
+        if innen[0] * rx + innen[1] * ry < 0:
             quer = -quer
         return quer, kurs, weg, innen
 

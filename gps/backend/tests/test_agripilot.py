@@ -2543,6 +2543,101 @@ class OberflaecheTest(unittest.TestCase):
         self.assertNotIn("fonts.googleapis", self._lesen("index.html"))
 
 
+class WendeabbruchTest(unittest.TestCase):
+    """Der Befund aus der Durchsicht: nach einem Wendeabbruch fiel die Führung im
+    selben Zyklus auf die Spur zurück, deren Abweichung modulo Spurabstand immer
+    klein aussieht - und die Lenkung blieb an. Jetzt übernimmt der Fahrer, wirklich."""
+
+    class _Lenkung:
+        def __init__(self):
+            from agripilot.config import SteeringConfig
+            self.config = SteeringConfig(enabled=True, max_cross_track_m=1.5)
+            self.armed = True
+            self.gruende = []
+
+        def disarm(self, grund="aus"):
+            self.armed = False
+            self.gruende.append(grund)
+
+    def _motor(self):
+        import tempfile as tf
+        from agripilot import config as config_module
+        from agripilot.engine import Engine
+        ordner = tf.TemporaryDirectory()
+        self.addCleanup(ordner.cleanup)
+        store = Storage(os.path.join(ordner.name, "e.db"))
+        self.addCleanup(store.close)
+        motor = Engine(config_module.load("/kein-solcher-pfad.yaml"), store)
+        motor.update_profile({"width_m": 3.0, "antenna_forward_m": 0.0, "tool_trailing_m": 0.0})
+        feld = store.save_field({"name": "Feld", "datum_lat": 48.0, "datum_lon": 11.0,
+                                 "boundary": [list(p) for p in QUADRAT], "area_ha": 1.0})
+        motor.load_field(feld["id"])
+        motor.line = GuidanceLine("ab", [(50.0, 0.0), (50.0, 100.0)], motor.profile.spacing_m)
+        motor.steering = self._Lenkung()
+        motor.tool_position, motor.heading = (50.0, 50.0), 0.0
+        motor.update_headland({"muster": "u", "radius_m": 4.0})
+        motor.plan_turn()
+        motor.start_turn()
+        return motor
+
+    def test_leaving_the_route_disarms_the_steering_and_leaves_no_line_active(self):
+        motor = self._motor()
+        # Weit neben der Route - aber genau zwischen zwei Spuren, wo die
+        # Spurführung "nur 0 m daneben" melden würde.
+        motor.tool_position = (56.0, 50.0)
+        motor._update_guidance(_fix(speed_ms=1.5))
+        self.assertIsNone(motor.turn)
+        self.assertFalse(motor.steering.armed)
+        self.assertIn("verlassen", motor.steering.gruende[-1])
+        self.assertFalse(motor.guidance.active)
+        self.assertIn("abgebrochen", motor.guidance.message)
+
+    def test_reaching_the_end_hands_over_to_the_line_with_the_steering_kept(self):
+        """Regulär am Ziel: die Route endete geprüft auf der Nachbarspur."""
+        motor = self._motor()
+        ende = motor.turn.pfad[-1]
+        motor.turn.index = len(motor.turn.pfad) - 2
+        motor.tool_position, motor.heading = ende, 180.0
+        motor._update_guidance(_fix(speed_ms=1.5))
+        self.assertIsNone(motor.turn)
+        self.assertTrue(motor.steering.armed)
+        self.assertTrue(motor.guidance.active)
+        self.assertEqual(motor.guidance.mode, "ab")
+
+    def test_the_follower_gives_up_no_later_than_the_steering_would(self):
+        motor = self._motor()
+        self.assertLessEqual(motor.turn.abbruch_abstand_m, 1.5)
+
+
+class QuellenwechselAufraeumTest(unittest.IsolatedAsyncioTestCase):
+    """Der zweite Befund: cancel() ist nur eine Bitte. Bevor die neue Quelle
+    startet, muss die alte wirklich zu Ende sein - sonst hält sie den Port."""
+
+    async def test_old_source_task_is_finished_before_the_new_one_starts(self):
+        import asyncio as aio
+        import tempfile as tf
+        from pathlib import Path
+        from agripilot import config as config_module
+        from agripilot.server import Application
+
+        with tf.TemporaryDirectory() as ordner:
+            config = config_module.load(Path(ordner) / "config.yaml")
+            config.server.data_dir = ordner
+            config.gnss.source = "simulator"
+            app = Application(config)
+            await app.start()
+            try:
+                alte = list(app._quellen_tasks)
+                await aio.sleep(0.05)
+                await app.quelle_wechseln()
+                # Alle alten Aufgaben sind beendet, keine läuft mehr nebenher.
+                self.assertTrue(all(t.done() for t in alte))
+                self.assertTrue(all(not t.done() for t in app._quellen_tasks))
+                self.assertFalse(app.steering.armed)
+            finally:
+                await app.stop()
+
+
 class HeadlandApiTest(unittest.TestCase):
     """Die Bedienung von außen - so, wie die Kabine sie aufruft."""
 

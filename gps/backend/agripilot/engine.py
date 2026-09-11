@@ -415,7 +415,14 @@ class Engine:
             # ihr erster Bogen ein Sprung quer über das Feld.
             raise RuntimeError("Die Maschine steht nicht mehr am Planungspunkt - "
                                "Wende neu planen")
-        self.turn = headland_module.TurnFollower(pfad=list(self.turn_preview))
+        # Der Folger gibt spätestens dort auf, wo auch die Lenkung aufgäbe -
+        # sonst zeigte die Anzeige "Wende läuft", während der Motor längst
+        # abgeschaltet hat und der Fahrer allein lenkt.
+        abbruch = 3.0
+        if self.steering is not None and self.steering.config.enabled:
+            abbruch = min(abbruch, float(self.steering.config.max_cross_track_m))
+        self.turn = headland_module.TurnFollower(pfad=list(self.turn_preview),
+                                                 abbruch_abstand_m=abbruch)
         self.note(f"Wende gestartet ({self.headland.muster.upper()}, "
                   f"{self.headland.richtung})")
         return self.turn.to_dict()
@@ -592,7 +599,22 @@ class Engine:
             zustand = self.turn.solve(
                 self.tool_position, self.heading, fix.speed_ms, self.profile
             )
+            if self.turn.abgebrochen:
+                # Die Maschine folgt der Route nicht mehr. Jetzt übernimmt der
+                # Fahrer - und zwar wirklich: die Lenkung geht aus, und für diesen
+                # Zyklus gibt es keine Spur. Sonst fiele die Führung im selben
+                # Atemzug auf die nächste Spur zurück, deren Abweichung modulo
+                # Spurabstand immer klein aussieht, und die Lenkung zöge mitten in
+                # der gescheiterten Wende auf irgendeine Spur ein.
+                grund = self.turn.grund or "Wende abgebrochen"
+                self.stop_turn(grund)
+                if self.steering is not None:
+                    self.steering.disarm(f"Wende: {grund}")
+                self.guidance = GuidanceState(message=f"Wende abgebrochen: {grund}")
+                return
             if self.turn.fertig:
+                # Regulär am Ziel: die Route endete geprüft auf der Nachbarspur,
+                # dort darf die Spur sofort wieder führen.
                 self.stop_turn(self.turn.grund or "Wende beendet")
             else:
                 self.guidance = zustand

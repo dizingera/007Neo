@@ -492,6 +492,7 @@ class TurnFollower:
     abbruch_abstand_m: float = 3.0
     index: int = 0
     fertig: bool = False
+    abgebrochen: bool = False   # fertig, aber nicht am Ziel: der Fahrer übernimmt
     grund: str = ""
 
     @property
@@ -573,6 +574,7 @@ class TurnFollower:
 
     def abbrechen(self, grund: str = "abgebrochen") -> None:
         self.fertig = True
+        self.abgebrochen = True
         self.grund = grund
 
     def to_dict(self) -> dict:

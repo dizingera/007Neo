@@ -342,7 +342,10 @@ class ReplaySource(GnssSource):
                     continue
                 warten = (versatz - letzte) / self.tempo
                 if warten > 0.0005:
-                    await asyncio.sleep(min(5.0, warten))
+                    # Nicht kappen: eine Lücke von drei Minuten in der Aufzeichnung
+                    # war eine Lücke von drei Minuten - der Empfängerausfall, den man
+                    # sucht. Wer sie nicht abwarten will, stellt das Tempo hoch.
+                    await asyncio.sleep(warten)
                 else:
                     # Kein Abstand zum Vorgänger - trotzdem den anderen einmal
                     # das Wort geben. Sonst hält eine dicht geschriebene oder

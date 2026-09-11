@@ -120,11 +120,19 @@ class Application:
         alte_quelle, alter_sensor = self.source, self.imu
         for task in self._quellen_tasks:
             task.cancel()
-        with contextlib.suppress(Exception):
+        try:
             await alte_quelle.stop()
-        if alter_sensor is not None:
-            with contextlib.suppress(Exception):
+            if alter_sensor is not None:
                 await alter_sensor.stop()
+        except Exception as exc:  # noqa: BLE001 - der Wechsel geht weiter, aber nicht stumm
+            self.engine.note(f"Alte Quelle ließ sich nicht sauber beenden: {exc}")
+        # Abwarten, bis die alten Aufgaben wirklich zu Ende sind. cancel() ist
+        # nur eine Bitte; sie kommt beim nächsten await an. Bis dahin hält eine
+        # serielle Quelle ihren Port noch offen - und die neue Quelle bekäme ihn
+        # nicht -, und ein letzter Fix der alten Quelle liefe noch in die Kette.
+        if self._quellen_tasks:
+            await asyncio.gather(*self._quellen_tasks, return_exceptions=True)
+        self._quellen_tasks = []
         self._quellen_aufbauen()
         # Der Lenkausgang hängt am Sensor (Drehrate als Rückmeldung): neu bauen.
         await self.steering.stop()
@@ -477,7 +485,11 @@ def create_app(config=None) -> FastAPI:
         if isinstance(application.source, recorder_module.ReplaySource):
             raise HTTPException(400, "Es läuft gerade eine Aufzeichnung ab - "
                                      "eine Kopie davon wäre keine neue Messung")
-        return ok(application.aufzeichnung.start())
+        try:
+            return ok(application.aufzeichnung.start())
+        except OSError as exc:
+            # Karte voll, Ordner nicht beschreibbar: dem Fahrer sagen, nicht 500.
+            raise HTTPException(400, f"Aufzeichnung kann nicht starten: {exc}") from exc
 
     @api.post("/api/rohdaten/stop")
     async def stop_rohdaten():
