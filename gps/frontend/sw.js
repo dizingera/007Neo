@@ -13,7 +13,7 @@
 
    Zwischengespeichert wird nur die Hülle: Seite, Stil, Programm, Symbole. */
 
-const CACHE = 'agripilot-huelle-v2';
+const CACHE = 'agripilot-huelle-v3';
 const HUELLE = [
   '/',
   '/index.html',
@@ -54,8 +54,14 @@ self.addEventListener('fetch', (event) => {
   // Hülle: erst das Netz fragen (ein Update soll sofort ankommen), bei
   // Ausfall das Zwischengespeicherte. Umgekehrt hätte man nach jedem Update
   // erst einmal die alte Oberfläche.
+  //
+  // 'no-cache' ist dabei kein Schnickschnack: ohne diese Angabe bedient sich
+  // fetch() aus dem HTTP-Cache des Browsers, der eine Datei ohne Cache-Kopf
+  // tagelang für frisch hält - und dann kommt ein Update auf dem Tablet erst
+  // an, wenn der Browser Lust hat. So fragt er den Server nach dem Stand; eine
+  // unveränderte Datei kostet nur ein "304, unverändert".
   event.respondWith(
-    fetch(event.request)
+    fetch(event.request, { cache: 'no-cache' })
       .then((antwort) => {
         const kopie = antwort.clone();
         caches.open(CACHE).then((cache) => cache.put(event.request, kopie));

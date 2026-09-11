@@ -189,13 +189,25 @@ body.tag .hint { text-shadow: none; }
 @keyframes puls { 50% { opacity: .3; } }
 @media (prefers-reduced-motion: reduce) { .taste i { animation: none !important; } .hint.alarm { animation: none; } .feld { transition: none; } }
 
-/* Hochkant oder schmal: die Spalte wird zur unteren Leiste, die Zahlen rücken zusammen. */
-@media (max-width: 760px) {
-  .cluster { grid-template-columns: auto auto; bottom: auto; top: calc(14 * var(--u)); }
-  .cluster .spark { display: none; }
-  .vg { left: 50%; width: calc(60 * var(--u)); bottom: calc(40 * var(--u)); }
-  .ruf { left: 50%; bottom: calc(48 * var(--u)); }
-  .spalte { left: calc(2.2 * var(--u)); right: calc(2.2 * var(--u)); width: auto; min-width: 0; }
+/* Hochkant: die Spalte wird zur unteren Leiste, zwei Tasten je Zeile; die
+   Zahlen rücken nach oben unter die Chips, das Vorgewende sitzt über der
+   Leiste. Entschieden nach Ausrichtung, nicht nach Breite - ein Tablet
+   hochkant ist 768 px breit und damit kein "schmaler Bildschirm". */
+@media (orientation: portrait) {
+  .cluster { bottom: auto; top: calc(14 * var(--u)); grid-template-columns: auto auto auto; }
+  .spalte { left: calc(2.2 * var(--u)); right: calc(2.2 * var(--u)); width: auto; min-width: 0;
+    flex-direction: row; flex-wrap: wrap; }
+  .reihe:not(.klein) { flex: 1 1 40%; }
+  .reihe.klein { flex: 1 1 100%; }
+  .taste.mark { flex: 1 1 40%; height: calc(9 * var(--u)); }
+  .taste.lenk { flex: 1 1 50%; }
+  .vg { left: 50%; width: calc(60 * var(--u)); bottom: calc(24 * var(--u)); }
+  .ruf { left: 50%; bottom: calc(32 * var(--u)); }
+  .balken { width: calc(60 * var(--u)); }
+  /* Die Chips rücken unter den Balken - nebeneinander ist hochkant kein Platz. */
+  .chips { top: calc(13 * var(--u)); }
+  .cluster { top: calc(25 * var(--u)); }   /* unter den Chips samt Hinweiszeile */
+  .ansicht { top: calc(25 * var(--u)); }
 }
 
 /* --- Menü --- */

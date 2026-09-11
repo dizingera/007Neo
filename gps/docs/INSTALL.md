@@ -25,9 +25,11 @@ System im Simulator – ein virtueller Traktor mit RTK-Fix fährt los.
 Einmal durchspielen:
 
 1. **Menü → Felder**: Namen eingeben, *Feld hier anlegen*.
-2. **A** drücken, ein paar Sekunden warten, **B** drücken → erste Spur.
-3. **Arbeit starten**, Bezeichnung eintragen. Die bearbeitete Fläche wird grün.
-4. **Menü → System**: mit den Reglern lenken und Gas geben.
+2. **A setzen** drücken, ein paar Sekunden warten, derselbe Knopf heißt jetzt
+   **B setzen** → erste Spur. Sie leuchtet grün und läuft zum Horizont.
+3. **Markieren** drücken. Die bearbeitete Fläche wird grün mitgemalt.
+4. **Menü → System**: mit den Reglern lenken und Gas geben. Der Lichtbalken
+   oben wandert, die Zahl darunter zählt die Zentimeter.
 5. **Menü → Aufträge**: die Fahrt als GPX oder CSV herunterladen.
 
 Damit ist klar, wie sich das System verhält, bevor es im Traktor hängt.
