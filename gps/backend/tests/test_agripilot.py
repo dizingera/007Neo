@@ -1530,5 +1530,907 @@ class ServerTest(unittest.TestCase):
                 self.assertFalse(armed["armed"])
 
 
+QUADRAT = [(0.0, 0.0), (100.0, 0.0), (100.0, 100.0), (0.0, 100.0)]
+
+
+class ContourTest(unittest.TestCase):
+    """Kontur: die Feldgrenze selbst ist das Muster, Ring 0 ist die Grenze."""
+
+    def _ring(self, punkte=None, abstand=6.0):
+        return GuidanceLine("contour", punkte or QUADRAT, abstand)
+
+    def test_ring_zero_is_the_boundary(self):
+        zustand = self._ring().solve((0.4, 50.0), 180.0, 2.0, VehicleProfile())
+        self.assertEqual(zustand.pass_number, 0)
+        self.assertAlmostEqual(abs(zustand.cross_track_m), 0.4, places=6)
+
+    def test_each_ring_is_one_working_width_further_in(self):
+        for hinein, ring in ((6.0, 1), (12.0, 2), (18.0, 3)):
+            zustand = self._ring().solve((hinein, 50.0), 180.0, 2.0, VehicleProfile())
+            self.assertEqual(zustand.pass_number, ring)
+            self.assertAlmostEqual(zustand.cross_track_m, 0.0, places=6)
+
+    def test_ring_number_ignores_the_winding_direction(self):
+        """Ob die Grenze im oder gegen den Uhrzeigersinn abgefahren wurde,
+        darf die Ringnummer nicht ändern - sonst liegt Ring 1 mal drinnen
+        und mal draußen."""
+        rechtsherum = self._ring(list(reversed(QUADRAT)))
+        linksherum = self._ring(QUADRAT)
+        for punkt in ((6.0, 50.0), (50.0, 12.0), (94.0, 50.0)):
+            self.assertEqual(
+                rechtsherum.solve(punkt, 0.0, 2.0, VehicleProfile()).pass_number,
+                linksherum.solve(punkt, 0.0, 2.0, VehicleProfile()).pass_number,
+            )
+
+    def test_lightbar_side_follows_the_direction_of_travel(self):
+        """Gemessen wird nach innen, angezeigt wird links/rechts. Derselbe
+        Punkt muss deshalb je nach Fahrtrichtung die Seite wechseln."""
+        ring = self._ring()
+        nach_norden = ring.solve((6.5, 50.0), 0.0, 2.0, VehicleProfile())
+        nach_sueden = ring.solve((6.5, 50.0), 180.0, 2.0, VehicleProfile())
+        self.assertAlmostEqual(nach_norden.cross_track_m, 0.5, places=6)
+        self.assertAlmostEqual(nach_sueden.cross_track_m, -0.5, places=6)
+
+    def test_the_closing_edge_counts_too(self):
+        """Der Ring ist geschlossen. Sonst hätte er eine Lücke genau dort, wo
+        die Aufzeichnung zufällig endete."""
+        # Zwischen letztem und erstem Eckpunkt liegt die Westkante.
+        zustand = self._ring().solve((2.0, 50.0), 0.0, 2.0, VehicleProfile())
+        self.assertEqual(zustand.pass_number, 0)
+        self.assertAlmostEqual(abs(zustand.cross_track_m), 2.0, places=6)
+
+    def test_a_contour_needs_a_boundary(self):
+        with self.assertRaises(ValueError):
+            GuidanceLine("contour", [(0.0, 0.0), (10.0, 0.0)], 6.0)
+
+    def test_drawing_skips_rings_outside_the_field(self):
+        ringe = self._ring().pass_geometry(0, count=2)
+        self.assertTrue(all(r["pass"] >= 0 for r in ringe))
+        self.assertTrue(all(r["closed"] for r in ringe))
+
+    def test_the_contour_is_never_stored_as_a_line(self):
+        self.assertTrue(self._ring().derived)
+
+
+class HeadlandGeometryTest(unittest.TestCase):
+    """Vorgewende: Restdistanz, Ring und Annäherungsalarm."""
+
+    def setUp(self):
+        from agripilot import headland
+        self.headland = headland
+
+    def test_distance_ahead_to_the_boundary(self):
+        self.assertAlmostEqual(
+            self.headland.ray_to_boundary((50.0, 50.0), 0.0, QUADRAT), 50.0, places=6)
+        self.assertAlmostEqual(
+            self.headland.ray_to_boundary((50.0, 50.0), 90.0, QUADRAT), 50.0, places=6)
+        self.assertAlmostEqual(
+            self.headland.ray_to_boundary((10.0, 50.0), 270.0, QUADRAT), 10.0, places=6)
+
+    def test_a_ray_that_never_meets_the_boundary(self):
+        self.assertIsNone(
+            self.headland.ray_to_boundary((150.0, 50.0), 90.0, QUADRAT))
+
+    def test_remaining_distance_is_measured_to_the_headland_not_the_edge(self):
+        """Die Arbeit endet am Vorgewende, nicht an der Grenze - sonst fährt
+        man die Wende in den Zaun."""
+        einstellung = self.headland.HeadlandSettings(spuren=2, alarm_abstand_m=20.0)
+        stand = self.headland.status((50.0, 50.0), 0.0, QUADRAT, einstellung, 6.0)
+        self.assertAlmostEqual(stand.tiefe_m, 12.0, places=6)
+        self.assertAlmostEqual(stand.rest_m, 38.0, places=6)
+        self.assertFalse(stand.alarm)
+
+    def test_the_alarm_comes_before_the_headland(self):
+        einstellung = self.headland.HeadlandSettings(spuren=2, alarm_abstand_m=20.0)
+        stand = self.headland.status((50.0, 75.0), 0.0, QUADRAT, einstellung, 6.0)
+        self.assertAlmostEqual(stand.rest_m, 13.0, places=6)
+        self.assertTrue(stand.alarm)
+
+    def test_inside_the_headland_the_remaining_distance_goes_negative(self):
+        einstellung = self.headland.HeadlandSettings(spuren=2)
+        stand = self.headland.status((50.0, 95.0), 0.0, QUADRAT, einstellung, 6.0)
+        self.assertTrue(stand.im_vorgewende)
+        self.assertLess(stand.rest_m, 0.0)
+        self.assertAlmostEqual(stand.bis_grenze_m, 5.0, places=6)
+
+    def test_depth_follows_the_working_width(self):
+        einstellung = self.headland.HeadlandSettings(spuren=3)
+        self.assertAlmostEqual(einstellung.tiefe_m(6.0), 18.0, places=6)
+        self.assertAlmostEqual(einstellung.tiefe_m(4.0), 12.0, places=6)
+
+    def test_an_explicit_width_overrides_the_implement(self):
+        einstellung = self.headland.HeadlandSettings(spuren=2, breite_m=10.0)
+        self.assertAlmostEqual(einstellung.tiefe_m(6.0), 20.0, places=6)
+
+    def test_the_ring_shrinks_the_field_by_the_depth(self):
+        ring = self.headland.ring(QUADRAT, 10.0)
+        self.assertEqual(len(ring), 4)
+        self.assertAlmostEqual(geo.polygon_area(ring), 80.0 * 80.0, places=3)
+
+    def test_no_ring_without_a_depth(self):
+        self.assertEqual(self.headland.ring(QUADRAT, 0.0), QUADRAT)
+
+
+class TurnPatternTest(unittest.TestCase):
+    """Die beiden Wendemuster - und die Prüfung, ob sie ins Feld passen."""
+
+    def setUp(self):
+        from agripilot import headland
+        self.headland = headland
+
+    def test_u_turn_ends_one_offset_across_and_facing_back(self):
+        pfad = self.headland.plan_u_turn((50.0, 50.0), 0.0, 12.0, 4.0, turn_left=True)
+        ende = pfad[-1]
+        self.assertAlmostEqual(ende[0], 38.0, places=3)   # 12 m nach links
+        self.assertAlmostEqual(ende[1], 50.0, places=3)
+        # Fahrtrichtung am Ende: entgegengesetzt zum Start.
+        kurs = geo.heading_deg(pfad[-2], pfad[-1])
+        self.assertAlmostEqual(abs(geo.angle_difference(kurs, 180.0)), 0.0, delta=6.0)
+
+    def test_u_turn_to_the_right_mirrors(self):
+        pfad = self.headland.plan_u_turn((50.0, 50.0), 0.0, 12.0, 4.0, turn_left=False)
+        self.assertAlmostEqual(pfad[-1][0], 62.0, places=3)
+
+    def test_a_tight_u_turn_needs_no_straight_between_the_arcs(self):
+        """Ist der Spurversatz kleiner als zwei Wendekreise, entfällt die
+        Zwischengerade - die Maschine kommt enger heraus."""
+        eng = self.headland.plan_u_turn((0.0, 0.0), 0.0, 6.0, 4.0, turn_left=True)
+        weit = self.headland.plan_u_turn((0.0, 0.0), 0.0, 20.0, 4.0, turn_left=True)
+        self.assertLess(len(eng), len(weit))
+
+    def test_omega_reverses_the_direction_of_travel(self):
+        pfad = self.headland.plan_omega((50.0, 50.0), 0.0, versatz_m=12.0,
+                                        radius_m=6.0, tiefe_m=14.0, turn_left=True)
+        kurs = geo.heading_deg(pfad[-2], pfad[-1])
+        self.assertGreater(abs(geo.angle_difference(kurs, 0.0)), 120.0)
+
+    def test_omega_reaches_the_neighbouring_pass(self):
+        pfad = self.headland.plan_omega((50.0, 50.0), 0.0, versatz_m=12.0,
+                                        radius_m=6.0, tiefe_m=14.0, turn_left=True)
+        self.assertAlmostEqual(pfad[-1][0], 38.0, places=3)
+
+    def test_omega_reaches_further_forward_than_the_u_turn(self):
+        """Genau deshalb gibt es beide: die Ω-Wende holt aus, die U-Wende nicht."""
+        omega = self.headland.plan_omega((0.0, 0.0), 0.0, 12.0, 4.0, 14.0, True)
+        u = self.headland.plan_u_turn((0.0, 0.0), 0.0, 12.0, 4.0, True)
+        self.assertGreater(max(p[1] for p in omega), max(p[1] for p in u))
+
+    def test_a_route_inside_the_field_passes(self):
+        pfad = self.headland.plan_u_turn((50.0, 50.0), 0.0, 12.0, 4.0, turn_left=True)
+        self.assertTrue(self.headland.route_im_feld(pfad, QUADRAT))
+
+    def test_a_route_that_leaves_the_field_is_rejected(self):
+        """Auch ein einziger Punkt draußen reicht. Der Rest im Feld hilft
+        nichts, wenn das Vorderrad im Graben steht."""
+        pfad = self.headland.plan_u_turn((2.0, 50.0), 0.0, 12.0, 4.0, turn_left=True)
+        self.assertFalse(self.headland.route_im_feld(pfad, QUADRAT))
+
+    def test_without_a_boundary_nothing_is_confirmed(self):
+        pfad = self.headland.plan_u_turn((50.0, 50.0), 0.0, 12.0, 4.0, turn_left=True)
+        self.assertFalse(self.headland.route_im_feld(pfad, []))
+
+
+class TurnFollowerTest(unittest.TestCase):
+    """Das Nachfahren der Route - mit derselben Ehrlichkeit wie die Spur."""
+
+    def setUp(self):
+        from agripilot import headland
+        self.headland = headland
+        self.pfad = self.headland.plan_u_turn((0.0, 0.0), 0.0, 12.0, 4.0, turn_left=True)
+
+    def _follower(self):
+        return self.headland.TurnFollower(pfad=list(self.pfad))
+
+    def test_on_the_route_the_deviation_is_zero(self):
+        folger = self._follower()
+        zustand = folger.solve(self.pfad[3], 0.0, 3.0, VehicleProfile())
+        self.assertTrue(zustand.active)
+        self.assertEqual(zustand.mode, "turn")
+        self.assertLess(abs(zustand.cross_track_m), 0.05)
+
+    def test_the_reported_deviation_is_from_the_route_not_the_old_pass(self):
+        """Sonst reißt die Sicherheitsgrenze der Lenkung in jeder Wende
+        sofort, und sie wäre keine Grenze mehr."""
+        folger = self._follower()
+        neben = (self.pfad[3][0] + 0.6, self.pfad[3][1])
+        zustand = folger.solve(neben, 0.0, 3.0, VehicleProfile())
+        self.assertAlmostEqual(abs(zustand.cross_track_m), 0.6, delta=0.1)
+
+    def test_it_steers_back_towards_the_route(self):
+        """Auf gerader Route ist das Vorzeichen eindeutig. Im Bogen ist es das
+        nicht - dort bestimmt die Krümmung den Einschlag, und ein Meter Versatz
+        nach innen kehrt ihn nicht um."""
+        gerade = self.headland.TurnFollower(
+            pfad=[(0.0, float(n)) for n in range(0, 40, 2)])
+        links = gerade.solve((-1.0, 10.0), 0.0, 3.0, VehicleProfile())
+        rechts = gerade.solve((1.0, 10.0), 0.0, 3.0, VehicleProfile())
+        self.assertGreater(links.steer_angle_deg, 0.0)    # nach rechts zurück
+        self.assertLess(rechts.steer_angle_deg, 0.0)      # nach links zurück
+
+    def test_in_a_bend_it_steers_into_the_bend(self):
+        folger = self._follower()
+        zustand = folger.solve(self.pfad[2], 0.0, 2.0, VehicleProfile())
+        self.assertLess(zustand.steer_angle_deg, 0.0)     # Linkswende: links
+
+    def test_the_steer_angle_stays_within_the_mechanical_stop(self):
+        folger = self._follower()
+        profil = VehicleProfile(max_steer_deg=30.0)
+        zustand = folger.solve(self.pfad[0], 170.0, 3.0, profil)
+        self.assertLessEqual(abs(zustand.steer_angle_deg), 30.0)
+
+    def test_leaving_the_route_ends_the_turn(self):
+        folger = self._follower()
+        folger.solve((self.pfad[3][0] + 8.0, self.pfad[3][1]), 0.0, 3.0,
+                     VehicleProfile())
+        self.assertTrue(folger.fertig)
+        self.assertIn("verlassen", folger.grund)
+
+    def test_reaching_the_end_finishes_the_turn(self):
+        folger = self._follower()
+        folger.solve(self.pfad[-1], 180.0, 3.0, VehicleProfile())
+        self.assertTrue(folger.fertig)
+        self.assertFalse(folger.aktiv)
+
+
+class TrailerTest(unittest.TestCase):
+    """Gezogene Geräte: die Ausrichtung läuft nach, statt starr zu folgen."""
+
+    def _profil(self, **werte):
+        grund = {"trailed": True, "hitch_length_m": 4.0, "antenna_forward_m": 0.0,
+                 "antenna_right_m": 0.0, "tool_trailing_m": 0.0}
+        grund.update(werte)
+        return VehicleProfile(**grund)
+
+    def test_a_rigid_implement_sits_where_the_tool_sits(self):
+        profil = VehicleProfile(trailed=False, antenna_forward_m=1.2,
+                                tool_trailing_m=3.0)
+        self.assertEqual(profil.implement_position((10.0, 20.0), 42.0),
+                         profil.tool_position((10.0, 20.0), 42.0))
+
+    def test_a_trailed_implement_hangs_behind_the_hitch(self):
+        from agripilot.guidance import ImplementHeading
+        profil = self._profil()
+        nachlauf = ImplementHeading(value=0.0)
+        # Fahrzeug nach Norden, Gerät in derselben Ausrichtung: 4 m dahinter.
+        lage = profil.implement_position((0.0, 0.0), 0.0, nachlauf.value)
+        self.assertAlmostEqual(lage[0], 0.0, places=6)
+        self.assertAlmostEqual(lage[1], -4.0, places=6)
+
+    def test_standing_still_the_implement_does_not_swing(self):
+        """Die Drehrate hängt an der Geschwindigkeit. Am Lenkrad zu drehen,
+        während die Maschine steht, bewegt kein Anhängegerät."""
+        from agripilot.guidance import ImplementHeading
+        nachlauf = ImplementHeading(value=0.0)
+        for _ in range(50):
+            nachlauf.update(90.0, 0.0, 0.1, self._profil())
+        self.assertAlmostEqual(nachlauf.value, 0.0, places=6)
+
+    def test_the_implement_swings_in_behind_while_driving(self):
+        from agripilot.guidance import ImplementHeading
+        nachlauf = ImplementHeading(value=0.0)
+        for _ in range(200):
+            nachlauf.update(90.0, 3.0, 0.1, self._profil())
+        self.assertAlmostEqual(nachlauf.value, 90.0, delta=1.0)
+
+    def test_a_short_drawbar_follows_faster(self):
+        from agripilot.guidance import ImplementHeading
+        kurz, lang = ImplementHeading(value=0.0), ImplementHeading(value=0.0)
+        for _ in range(10):
+            kurz.update(90.0, 3.0, 0.1, self._profil(hitch_length_m=2.0))
+            lang.update(90.0, 3.0, 0.1, self._profil(hitch_length_m=8.0))
+        self.assertGreater(kurz.value, lang.value)
+
+    def test_in_a_curve_the_implement_lags_behind(self):
+        """Der ganze Punkt der Übung: in der Kurve steht das Gerät innerhalb
+        der Fahrspur, nicht starr hinter dem Fahrzeug."""
+        from agripilot.guidance import ImplementHeading
+        profil = self._profil()
+        nachlauf = ImplementHeading(value=0.0)
+        nachlauf.update(45.0, 3.0, 0.2, profil)
+        self.assertLess(nachlauf.value, 45.0)
+        self.assertGreater(nachlauf.value, 0.0)
+        gezogen = profil.implement_position((0.0, 0.0), 45.0, nachlauf.value)
+        starr = profil.implement_position((0.0, 0.0), 45.0, 45.0)
+        self.assertGreater(geo.distance(gezogen, starr), 0.1)
+
+    def test_switching_the_option_off_restores_the_rigid_behaviour(self):
+        from agripilot.guidance import ImplementHeading
+        nachlauf = ImplementHeading(value=0.0)
+        nachlauf.update(90.0, 3.0, 0.1, self._profil(trailed=False))
+        self.assertAlmostEqual(nachlauf.value, 90.0, places=6)
+
+
+class EngineHeadlandTest(unittest.TestCase):
+    """Was der Motor daraus macht - Kontur, Wende und Markieren am Gerät."""
+
+    def _motor(self, **profil):
+        import tempfile as tf
+        from agripilot import config as config_module
+        from agripilot.engine import Engine
+        ordner = tf.TemporaryDirectory()
+        self.addCleanup(ordner.cleanup)
+        store = Storage(os.path.join(ordner.name, "e.db"))
+        self.addCleanup(store.close)
+        motor = Engine(config_module.load("/kein-solcher-pfad.yaml"), store)
+        motor.update_profile({"width_m": 6.0, "antenna_forward_m": 0.0,
+                              "tool_trailing_m": 0.0, **profil})
+        feld = store.save_field({
+            "name": "Testfeld", "datum_lat": 48.0, "datum_lon": 11.0,
+            "boundary": [list(p) for p in QUADRAT],
+            "area_ha": 1.0,
+        })
+        motor.load_field(feld["id"])
+        return motor
+
+    def test_the_contour_comes_from_the_boundary(self):
+        motor = self._motor()
+        motor.use_contour()
+        self.assertEqual(motor.line.mode, "contour")
+        self.assertEqual(len(motor.line.points), 4)
+
+    def test_no_contour_without_a_boundary(self):
+        motor = self._motor()
+        motor.field = {**motor.field, "boundary": []}
+        with self.assertRaises(RuntimeError):
+            motor.use_contour()
+
+    def test_the_contour_follows_a_re_recorded_boundary(self):
+        """Eine gespeicherte Kopie liefe der Grenze davon, ohne dass es
+        jemand merkt."""
+        motor = self._motor()
+        motor.use_contour()
+        motor.save_boundary([(0.0, 0.0), (50.0, 0.0), (50.0, 50.0), (0.0, 50.0)])
+        self.assertEqual(motor.line.mode, "contour")
+        self.assertAlmostEqual(max(p[0] for p in motor.line.points), 50.0, places=3)
+
+    def test_nudging_the_contour_creates_no_stored_line(self):
+        motor = self._motor()
+        motor.use_contour()
+        motor.tool_position = (6.0, 50.0)
+        motor.nudge(0.01)
+        self.assertEqual(motor.store.list_lines(motor.field["id"]), [])
+
+    def test_a_planned_turn_is_checked_against_the_boundary(self):
+        motor = self._motor()
+        motor.tool_position = (50.0, 50.0)
+        motor.heading = 0.0
+        motor.update_headland({"muster": "u", "richtung": "links", "radius_m": 4.0})
+        plan = motor.plan_turn()
+        self.assertTrue(plan["im_feld"])
+
+    def test_a_turn_at_the_edge_is_refused(self):
+        motor = self._motor()
+        motor.tool_position = (2.0, 50.0)
+        motor.heading = 0.0
+        motor.update_headland({"muster": "u", "richtung": "links", "radius_m": 4.0})
+        plan = motor.plan_turn()
+        self.assertFalse(plan["im_feld"])
+        with self.assertRaises(RuntimeError):
+            motor.start_turn()
+
+    def test_a_stale_plan_is_not_started(self):
+        """Die Route beginnt dort, wo sie geplant wurde. Von woanders aus wäre
+        ihr erster Bogen ein Sprung quer über das Feld."""
+        motor = self._motor()
+        motor.tool_position = (50.0, 50.0)
+        motor.heading = 0.0
+        motor.update_headland({"muster": "u", "radius_m": 4.0})
+        motor.plan_turn()
+        motor.tool_position = (50.0, 80.0)
+        with self.assertRaises(RuntimeError):
+            motor.start_turn()
+
+    def test_during_a_turn_the_route_guides_not_the_line(self):
+        motor = self._motor()
+        motor.line = GuidanceLine("ab", [(0.0, 0.0), (0.0, 100.0)],
+                                  motor.profile.spacing_m)
+        motor.tool_position = (50.0, 50.0)
+        motor.heading = 0.0
+        motor.update_headland({"muster": "u", "radius_m": 4.0})
+        motor.plan_turn()
+        motor.start_turn()
+        motor._update_guidance(_fix(speed_ms=2.0))
+        self.assertEqual(motor.guidance.mode, "turn")
+        # An der AB-Linie wären es 50 m Abweichung gewesen.
+        self.assertLess(abs(motor.guidance.cross_track_m), 1.0)
+
+    def test_losing_gps_ends_a_running_turn(self):
+        motor = self._motor()
+        motor.tool_position = (50.0, 50.0)
+        motor.heading = 0.0
+        motor.update_headland({"muster": "u", "radius_m": 4.0})
+        motor.plan_turn()
+        motor.start_turn()
+        motor.fix = _fix(received_at=time.time() - 10.0)
+        motor.tick()
+        self.assertIsNone(motor.turn)
+
+    def test_the_headland_ring_is_only_recomputed_when_something_changed(self):
+        motor = self._motor()
+        motor.update_headland({"spuren": 2})
+        erst = motor.headland_ring()
+        self.assertIs(motor.headland_ring(), erst)
+        motor.update_headland({"spuren": 3})
+        self.assertIsNot(motor.headland_ring(), erst)
+
+    def test_a_trailed_rig_marks_at_the_implement(self):
+        """Markiert wird, wo das Gerät steht - beim gezogenen Gerät ist das
+        nicht dort, wo das Fahrzeug steht."""
+        motor = self._motor(trailed=True, hitch_length_m=5.0)
+        motor.heading = 0.0
+        motor.implement_heading.reset(0.0)
+        motor.implement_position = motor.profile.implement_position(
+            (50.0, 50.0), 0.0, 0.0)
+        self.assertAlmostEqual(motor.implement_position[1], 45.0, places=6)
+
+
+class TurnDrivenTest(unittest.TestCase):
+    """Die Wende einmal wirklich fahren - Einspurmodell gegen Wendeführung.
+
+    Vorzeichen lassen sich in Einzelteilen prüfen und trotzdem im Zusammenspiel
+    falsch haben: ein verdrehtes Vorzeichen sähe in jedem einzelnen Test richtig
+    aus und schickte die Maschine auf dem Feld in die andere Richtung. Deshalb
+    hier einmal die geschlossene Schleife - Position hinein, Einschlag heraus,
+    Maschine bewegt, von vorn -, und am Ende die eine Frage: steht sie auf der
+    Nachbarspur und schaut sie zurück?
+    """
+
+    RASTER = [(0.0, 0.0), (300.0, 0.0), (300.0, 300.0), (0.0, 300.0)]
+
+    def _motor(self):
+        import tempfile as tf
+        from agripilot import config as config_module
+        from agripilot.engine import Engine
+        ordner = tf.TemporaryDirectory()
+        self.addCleanup(ordner.cleanup)
+        store = Storage(os.path.join(ordner.name, "e.db"))
+        self.addCleanup(store.close)
+        motor = Engine(config_module.load("/kein-solcher-pfad.yaml"), store)
+        motor.update_profile({"width_m": 12.0, "overlap_m": 0.0,
+                              "antenna_forward_m": 0.0, "tool_trailing_m": 0.0,
+                              "wheelbase_m": 2.6, "max_steer_deg": 35.0})
+        feld = store.save_field({
+            "name": "Wendefeld", "datum_lat": 48.0, "datum_lon": 11.0,
+            "boundary": [list(p) for p in self.RASTER], "area_ha": 9.0,
+        })
+        motor.load_field(feld["id"])
+        return motor
+
+    def _fahren(self, motor, start, kurs, schritte, dt=0.1, tempo=1.5):
+        """Einspurmodell: der Einschlag aus der Führung bewegt die Maschine."""
+        from agripilot.nmea import Fix
+        ost, nord, heading = start[0], start[1], kurs
+        uhr = 1_000_000.0
+        for _ in range(schritte):
+            lat, lon = motor.plane.to_wgs(ost, nord)
+            motor.on_fix(Fix(lat=lat, lon=lon, fix_quality=4, speed_ms=tempo,
+                             course_deg=heading, received_at=uhr))
+            einschlag = motor.guidance.steer_angle_deg if motor.guidance.active else 0.0
+            drehrate = math.degrees(tempo / 2.6 * math.tan(math.radians(einschlag)))
+            heading = (heading + drehrate * dt) % 360.0
+            h = math.radians(heading)
+            ost += math.sin(h) * tempo * dt
+            nord += math.cos(h) * tempo * dt
+            uhr += dt
+            if motor.turn is None:
+                break
+        return (ost, nord), heading
+
+    def _wende_fahren(self, muster):
+        motor = self._motor()
+        motor.line = GuidanceLine("ab", [(150.0, 0.0), (150.0, 300.0)],
+                                  motor.profile.spacing_m)
+        start, kurs = (150.0, 150.0), 0.0
+        motor.tool_position, motor.heading = start, kurs
+        motor.update_headland({"muster": muster, "richtung": "links",
+                               "radius_m": 6.0, "ueberspringen": 1})
+        plan = motor.plan_turn()
+        self.assertTrue(plan["im_feld"], "Route liegt nicht im Feld")
+        motor.start_turn()
+        return motor, self._fahren(motor, start, kurs, schritte=900)
+
+    def test_a_u_turn_ends_on_the_neighbouring_pass_facing_back(self):
+        motor, (ende, kurs) = self._wende_fahren("u")
+        self.assertIsNone(motor.turn, "Die Wende ist nicht zu Ende gefahren")
+        self.assertAlmostEqual(abs(geo.angle_difference(kurs, 180.0)), 0.0, delta=25.0)
+        # Eine Arbeitsbreite nach links, also nach Westen.
+        self.assertAlmostEqual(ende[0], 138.0, delta=3.0)
+
+    def test_an_omega_turn_ends_on_the_neighbouring_pass_facing_back(self):
+        motor, (ende, kurs) = self._wende_fahren("omega")
+        self.assertIsNone(motor.turn)
+        self.assertAlmostEqual(abs(geo.angle_difference(kurs, 180.0)), 0.0, delta=30.0)
+        self.assertAlmostEqual(ende[0], 138.0, delta=4.0)
+
+    def test_after_the_turn_the_line_guides_again(self):
+        """Die Wende gibt ab, die Spur übernimmt - sonst stünde die Maschine
+        auf der neuen Spur ohne Führung."""
+        motor, (ende, kurs) = self._wende_fahren("u")
+        motor.tool_position, motor.heading = ende, kurs
+        motor._update_guidance(_fix(speed_ms=1.5))
+        self.assertEqual(motor.guidance.mode, "ab")
+        self.assertEqual(abs(motor.guidance.pass_number), 1)
+
+    def test_the_machine_stays_inside_the_field(self):
+        motor, (ende, _) = self._wende_fahren("omega")
+        self.assertTrue(geo.point_in_polygon(ende, self.RASTER))
+
+
+class SimulatorSteeringTest(unittest.TestCase):
+    """Wem das virtuelle Lenkrad gehört, solange die Automatik nicht greift."""
+
+    class _Simulator:
+        def __init__(self):
+            self.steer_deg = 0.0
+
+        def set_steer(self, grad):
+            self.steer_deg = grad
+
+    class _Steuerung:
+        """Ein Lenkregler, dessen Antwort der Test vorgibt."""
+
+        def __init__(self):
+            from agripilot.steering import SteerCommand
+            self.armed = False
+            self.command = SteerCommand()
+
+        def update(self, guidance, fix, context=None, now=None):
+            return self.command
+
+    def _motor(self):
+        import tempfile as tf
+        from agripilot import config as config_module
+        from agripilot.engine import Engine
+        ordner = tf.TemporaryDirectory()
+        self.addCleanup(ordner.cleanup)
+        store = Storage(os.path.join(ordner.name, "e.db"))
+        self.addCleanup(store.close)
+        motor = Engine(config_module.load("/kein-solcher-pfad.yaml"), store)
+        motor.simulator = self._Simulator()
+        motor.steering = self._Steuerung()
+        return motor
+
+    def test_a_manual_steer_angle_survives_the_next_position(self):
+        """Vorher wurde der Regler unter Menü → System zehnmal je Sekunde
+        wieder auf gerade gesetzt und war damit wirkungslos."""
+        motor = self._motor()
+        motor.simulator.set_steer(20.0)
+        motor._update_steering(_fix(speed_ms=2.0))
+        motor._update_steering(_fix(speed_ms=2.0))
+        self.assertAlmostEqual(motor.simulator.steer_deg, 20.0, places=6)
+
+    def test_the_autosteer_angle_wins_while_it_is_engaged(self):
+        from agripilot.steering import SteerCommand
+        motor = self._motor()
+        motor.simulator.set_steer(20.0)
+        motor.steering.command = SteerCommand(engaged=True, angle_deg=-7.0)
+        motor._update_steering(_fix(speed_ms=2.0))
+        self.assertAlmostEqual(motor.simulator.steer_deg, -7.0, places=6)
+
+    def test_disengaging_straightens_the_wheels_once(self):
+        """Beim Abschalten geht der Einschlag auf null - danach hat wieder der
+        Fahrer das Lenkrad."""
+        from agripilot.steering import SteerCommand
+        motor = self._motor()
+        motor.steering.command = SteerCommand(engaged=True, angle_deg=-7.0)
+        motor._update_steering(_fix(speed_ms=2.0))
+        motor.steering.command = SteerCommand(engaged=False)
+        motor._update_steering(_fix(speed_ms=2.0))
+        self.assertAlmostEqual(motor.simulator.steer_deg, 0.0, places=6)
+        motor.simulator.set_steer(15.0)
+        motor._update_steering(_fix(speed_ms=2.0))
+        self.assertAlmostEqual(motor.simulator.steer_deg, 15.0, places=6)
+
+
+class RohdatenTest(unittest.TestCase):
+    """Mitschreiben, was hereinkommt - roh, vor jeder Auswertung."""
+
+    def setUp(self):
+        from agripilot import recorder
+        self.recorder = recorder
+        self.ordner = tempfile.TemporaryDirectory()
+        self.addCleanup(self.ordner.cleanup)
+        self.aufzeichnung = recorder.Aufzeichnung(self.ordner.name)
+        self.addCleanup(self.aufzeichnung.stop)
+
+    def _zeilen(self):
+        from pathlib import Path
+        return Path(self.aufzeichnung.pfad).read_text(encoding="ascii").splitlines()
+
+    def test_the_file_starts_with_a_readable_header(self):
+        self.aufzeichnung.start(jetzt=1000.0)
+        self.aufzeichnung.stop()
+        zeilen = self._zeilen()
+        self.assertEqual(zeilen[0], self.recorder.KOPFZEILE)
+        self.assertTrue(zeilen[1].startswith("# begonnen "))
+
+    def test_lines_carry_the_offset_from_the_start(self):
+        self.aufzeichnung.start(jetzt=1000.0)
+        self.aufzeichnung.nmea("$GNGGA,eins*00", jetzt=1000.0)
+        self.aufzeichnung.nmea("$GNGGA,zwei*00", jetzt=1000.25)
+        self.aufzeichnung.stop()
+        daten = [z for z in self._zeilen() if not z.startswith("#")]
+        self.assertEqual(daten[0], "0.000\tN\t$GNGGA,eins*00")
+        self.assertEqual(daten[1], "0.250\tN\t$GNGGA,zwei*00")
+
+    def test_the_tilt_is_recorded_alongside(self):
+        from agripilot.imu import Attitude
+        self.aufzeichnung.start(jetzt=1000.0)
+        self.aufzeichnung.imu(Attitude(roll_deg=-1.5, pitch_deg=0.25,
+                                       yaw_rate_deg_s=2.0, calibration=3),
+                              jetzt=1000.1)
+        self.aufzeichnung.stop()
+        daten = [z for z in self._zeilen() if not z.startswith("#")]
+        self.assertEqual(daten[0], "0.100\tI\t-1.500,0.250,,2.000,3")
+
+    def test_nothing_is_written_before_the_start(self):
+        self.aufzeichnung.nmea("$GNGGA,verloren*00")
+        self.assertFalse(self.aufzeichnung.laeuft)
+        self.assertEqual(self.aufzeichnung.zeilen, 0)
+
+    def test_stopping_keeps_the_last_block(self):
+        """Gesammelt wird in Blöcken - beim Beenden darf nichts liegen bleiben."""
+        self.aufzeichnung.start(jetzt=1000.0)
+        self.aufzeichnung.nmea("$GNGGA,letzter*00", jetzt=1000.0)
+        self.aufzeichnung.stop()
+        self.assertIn("letzter", "\n".join(self._zeilen()))
+
+    def test_only_our_own_names_are_valid(self):
+        """Der Name wird zu einem Pfad. Ohne Prüfung wäre '../../etc/passwd'
+        ein gültiger Name einer Aufzeichnung."""
+        self.assertTrue(self.recorder.ist_gueltiger_name("rohdaten-20260910-211503.txt"))
+        for boese in ("../../etc/passwd", "rohdaten-x.txt", "", "rohdaten-20260910-211503.txt.bak",
+                      "unter/rohdaten-20260910-211503.txt"):
+            self.assertFalse(self.recorder.ist_gueltiger_name(boese), boese)
+
+    def test_the_listing_finds_recordings_and_their_length(self):
+        self.aufzeichnung.start(jetzt=1000.0)
+        self.aufzeichnung.nmea("$GNGGA,eins*00", jetzt=1000.0)
+        self.aufzeichnung.nmea("$GNGGA,zwei*00", jetzt=1007.5)
+        self.aufzeichnung.stop()
+        from pathlib import Path
+        eintraege = self.recorder.liste(Path(self.ordner.name))
+        self.assertEqual(len(eintraege), 1)
+        self.assertAlmostEqual(eintraege[0]["dauer_s"], 7.5, places=3)
+        self.assertGreater(eintraege[0]["groesse_b"], 0)
+
+    def test_foreign_files_are_not_listed(self):
+        from pathlib import Path
+        (Path(self.ordner.name) / "notizen.txt").write_text("nichts", encoding="ascii")
+        self.assertEqual(self.recorder.liste(Path(self.ordner.name)), [])
+
+
+class ReplayTest(unittest.IsolatedAsyncioTestCase):
+    """Eine aufgezeichnete Fahrt noch einmal - durch dieselbe Rechenkette."""
+
+    def setUp(self):
+        from agripilot import recorder
+        self.recorder = recorder
+        self.ordner = tempfile.TemporaryDirectory()
+        self.addCleanup(self.ordner.cleanup)
+
+    def _satz(self, schritt: int) -> str:
+        """Ein GGA-Satz derselben Bauart, die auch der Simulator erzeugt."""
+        return nmea.build_gga(48.1370 + schritt * 0.00002, 11.5756,
+                              520.0, 4, 22, 0.6)
+
+    def _aufzeichnen(self, schritte=6):
+        """Eine kleine Fahrt mitschreiben - Position und Lage im Wechsel."""
+        from agripilot.imu import Attitude
+        auf = self.recorder.Aufzeichnung(self.ordner.name)
+        auf.start(jetzt=1000.0)
+        for i in range(schritte):
+            t = 1000.0 + i * 0.1
+            # Erst die Lage, dann die Position - so herum kommt es auch im Feld:
+            # der Neigungssensor liefert deutlich häufiger als der Empfänger,
+            # zu jedem Fix liegt also eine frische Lage schon vor.
+            auf.imu(Attitude(roll_deg=-2.0 - i, pitch_deg=0.5,
+                             yaw_rate_deg_s=1.0, calibration=3), jetzt=t)
+            auf.nmea(self._satz(i), jetzt=t)
+        auf.stop()
+        return auf.pfad
+
+    async def test_a_recorded_drive_comes_back_through_the_whole_chain(self):
+        pfad = self._aufzeichnen()
+        # Werte merken, nicht das Fix-Objekt: der Parser reicht bei jedem Satz
+        # dasselbe Objekt weiter und schreibt es fort. Eine Liste von Fixes wäre
+        # sechsmal derselbe letzte Stand.
+        gesehen = []
+        quelle = self.recorder.ReplaySource(
+            lambda f: gesehen.append((f.lat, f.valid)), pfad, tempo=20.0)
+        await quelle.abspielen()
+        self.assertEqual(len(gesehen), 6)
+        self.assertTrue(all(gueltig for _, gueltig in gesehen))
+        # Die Fahrt ging nach Norden - die Breitengrade müssen wachsen.
+        self.assertLess(gesehen[0][0], gesehen[-1][0])
+
+    async def test_position_and_tilt_stay_in_step(self):
+        """Zwei getrennte Leser derselben Datei würden auseinanderlaufen - und
+        dann läge die Schräglage neben der Position, also genau der Fehler, den
+        man mit der Aufzeichnung untersuchen wollte."""
+        pfad = self._aufzeichnen()
+        gesehen = []
+
+        def merken(fix):
+            gesehen.append((fix.lat, quelle.imu.attitude.roll_deg))
+
+        quelle = self.recorder.ReplaySource(merken, pfad, tempo=20.0)
+        await quelle.abspielen()
+        # Zu jedem Fix gehört die Lage, die im selben Augenblick aufgezeichnet
+        # wurde: Neigung -2, -3, -4 ... in derselben Reihenfolge.
+        self.assertEqual([round(r, 1) for _, r in gesehen],
+                         [-2.0, -3.0, -4.0, -5.0, -6.0, -7.0])
+
+    async def test_the_recorded_zeroing_is_not_subtracted_twice(self):
+        """Aufgezeichnet wird die bereits genullte Lage. Sie beim Abspielen
+        noch einmal zu nullen ergäbe den doppelten Versatz."""
+        pfad = self._aufzeichnen()
+        quelle = self.recorder.ReplaySource(lambda f: None, pfad, tempo=20.0)
+        quelle.imu.roll_offset = 5.0        # als hätte jemand genullt
+        await quelle.abspielen()
+        self.assertAlmostEqual(quelle.imu.attitude.roll_deg, -7.0, places=3)
+
+    async def test_a_missing_recording_does_not_fall_back_to_the_simulator(self):
+        """Sonst stünde eine erfundene Fahrt auf dem Bildschirm, während der
+        Fahrer glaubt, seine eigene zu sehen."""
+        import asyncio as aio
+        from pathlib import Path
+        quelle = self.recorder.ReplaySource(
+            lambda f: None, Path(self.ordner.name) / "gibt-es-nicht.txt")
+        aufgabe = aio.create_task(quelle.run())
+        await aio.wait_for(quelle.fertig.wait(), 2.0)
+        self.assertIn("nicht gefunden", quelle.status)
+        self.assertEqual(quelle.lines_received, 0)
+        await quelle.stop()
+        aufgabe.cancel()
+
+    async def test_it_stops_at_the_end_and_says_so(self):
+        import asyncio as aio
+        pfad = self._aufzeichnen()
+        quelle = self.recorder.ReplaySource(lambda f: None, pfad, tempo=20.0)
+        aufgabe = aio.create_task(quelle.run())
+        await aio.wait_for(quelle.fertig.wait(), 3.0)
+        self.assertIn("zu Ende", quelle.status)
+        self.assertEqual(quelle.durchlaeufe, 1)
+        await quelle.stop()
+        aufgabe.cancel()
+
+    async def test_a_faster_replay_takes_less_time(self):
+        pfad = self._aufzeichnen(schritte=10)
+        beginn = time.monotonic()
+        quelle = self.recorder.ReplaySource(lambda f: None, pfad, tempo=10.0)
+        await quelle.abspielen()
+        self.assertLess(time.monotonic() - beginn, 0.5)   # roh wären es 0,9 s
+
+    async def test_comment_and_broken_lines_are_skipped(self):
+        """Die Datei ist Text und darf von Hand angesehen worden sein."""
+        from pathlib import Path
+        pfad = Path(self.ordner.name) / "rohdaten-20260910-120000.txt"
+        pfad.write_text(
+            self.recorder.KOPFZEILE + "\n"
+            "# von Hand kommentiert\n"
+            "\n"
+            "kaputt\n"
+            "nichtszahl\tN\t$GPGGA,x*00\n"
+            "0.000\tN\t" + self._satz(0) + "\n",
+            encoding="ascii")
+        fixes = []
+        quelle = self.recorder.ReplaySource(fixes.append, pfad, tempo=20.0)
+        await quelle.abspielen()
+        self.assertEqual(len(fixes), 1)
+
+
+class RohdatenApiTest(unittest.TestCase):
+    """Aufzeichnen über die Schnittstelle - so, wie die Kabine es aufruft."""
+
+    def test_record_list_download_and_delete(self):
+        from fastapi.testclient import TestClient
+        from agripilot import config as config_module
+        from agripilot.server import create_app
+
+        with tempfile.TemporaryDirectory() as ordner:
+            config = config_module.load("/kein-solcher-pfad.yaml")
+            config.server.data_dir = ordner
+            config.gnss.source = "simulator"
+            with TestClient(create_app(config)) as client:
+                self.assertEqual(client.post("/api/rohdaten/start").status_code, 200)
+                time.sleep(1.2)
+                stand = client.post("/api/rohdaten/stop").json()["data"]
+                self.assertFalse(stand["laeuft"])
+                self.assertGreater(stand["zeilen"], 0)
+
+                uebersicht = client.get("/api/rohdaten").json()
+                self.assertEqual(len(uebersicht["dateien"]), 1)
+                name = uebersicht["dateien"][0]["datei"]
+
+                inhalt = client.get(f"/api/rohdaten/{name}")
+                self.assertEqual(inhalt.status_code, 200)
+                self.assertIn("agripilot-rohdaten", inhalt.text)
+                self.assertIn("GGA", inhalt.text)
+
+                # Pfadausflüge werden abgelehnt, nicht befolgt.
+                self.assertIn(client.get("/api/rohdaten/..%2F..%2Fconfig.yaml")
+                              .status_code, (400, 404))
+
+                self.assertEqual(client.delete(f"/api/rohdaten/{name}").status_code, 200)
+                self.assertEqual(len(client.get("/api/rohdaten").json()["dateien"]), 0)
+
+    def test_no_recording_while_a_replay_is_running(self):
+        """Gefragt wird die laufende Quelle, nicht die Einstellung: die wechselt
+        erst beim Neustart. Sonst zeichnete man die Kopie noch einmal auf."""
+        from fastapi.testclient import TestClient
+        from agripilot import config as config_module, recorder
+        from agripilot.server import create_app
+
+        with tempfile.TemporaryDirectory() as ordner:
+            from pathlib import Path
+            rohdaten = Path(ordner) / "rohdaten"
+            rohdaten.mkdir()
+            aufzeichnung = rohdaten / "rohdaten-20260910-120000.txt"
+            aufzeichnung.write_text(
+                recorder.KOPFZEILE + "\n0.000\tN\t"
+                + nmea.build_gga(48.0, 11.0, 500.0, 4, 22, 0.6) + "\n",
+                encoding="ascii")
+
+            config = config_module.load("/kein-solcher-pfad.yaml")
+            config.server.data_dir = ordner
+            config.gnss.source = "replay"
+            config.gnss.replay_file = aufzeichnung.name
+            with TestClient(create_app(config)) as client:
+                self.assertEqual(client.post("/api/rohdaten/start").status_code, 400)
+                # Auch wenn jemand die Einstellung schon zurückgestellt hat:
+                # gelaufen wird bis zum Neustart weiter auf der Aufzeichnung.
+                config.gnss.source = "simulator"
+                antwort = client.post("/api/rohdaten/start")
+                self.assertEqual(antwort.status_code, 400)
+                self.assertIn("Kopie", antwort.json()["detail"])
+
+
+class HeadlandApiTest(unittest.TestCase):
+    """Die Bedienung von außen - so, wie die Kabine sie aufruft."""
+
+    def test_contour_headland_and_turn_over_the_interface(self):
+        from fastapi.testclient import TestClient
+        from agripilot import config as config_module
+        from agripilot.server import create_app
+
+        with tempfile.TemporaryDirectory() as ordner:
+            config = config_module.load("/kein-solcher-pfad.yaml")
+            config.server.data_dir = ordner
+            config.gnss.source = "simulator"
+            with TestClient(create_app(config)) as client:
+                feld = client.post("/api/fields", json={"name": "Kontur"}).json()
+                feld_id = feld["data"]["id"]
+
+                # Ohne Grenze gibt es keine Kontur - und das steht auch so da.
+                antwort = client.post("/api/guidance/contour")
+                self.assertEqual(antwort.status_code, 400)
+                self.assertIn("Feldgrenze", antwort.json()["detail"])
+
+                app = client.app.state.app
+                app.engine.save_boundary([(0.0, 0.0), (200.0, 0.0),
+                                          (200.0, 200.0), (0.0, 200.0)])
+                self.assertEqual(client.post("/api/guidance/contour").status_code, 200)
+                zustand = client.get("/api/state").json()
+                self.assertEqual(zustand["line"]["mode"], "contour")
+                self.assertTrue(zustand["line"]["derived"])
+
+                # Vorgewende einstellen und wiederfinden
+                self.assertEqual(client.post("/api/headland", json={
+                    "spuren": 3, "muster": "u", "alarm_abstand_m": 25.0,
+                }).status_code, 200)
+                vorgewende = client.get("/api/headland").json()
+                self.assertEqual(vorgewende["spuren"], 3)
+                self.assertEqual(vorgewende["muster"], "u")
+
+                # Der Simulator fährt - danach lässt sich eine Wende planen.
+                time.sleep(1.2)
+                plan = client.post("/api/turn/plan", json={"richtung": "links"})
+                self.assertEqual(plan.status_code, 200)
+                self.assertGreater(len(plan.json()["data"]["punkte"]), 10)
+                self.assertEqual(client.post("/api/turn/stop").status_code, 200)
+                self.assertNotEqual(feld_id, "")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

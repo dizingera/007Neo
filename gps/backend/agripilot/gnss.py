@@ -34,6 +34,10 @@ class GnssSource:
         self.last_line_at = 0.0
         self.lines_received = 0
         self.status = "gestoppt"
+        # Mitschreiben, wenn eine Aufzeichnung läuft (siehe recorder.py). Hier
+        # angehängt und nicht in jeder einzelnen Quelle, weil alle Quellen
+        # durch `handle_line` gehen - eine Stelle, die niemand vergessen kann.
+        self.recorder = None
 
     async def run(self) -> None:  # pragma: no cover - overridden
         raise NotImplementedError
@@ -47,6 +51,10 @@ class GnssSource:
     async def handle_line(self, line: str) -> None:
         self.lines_received += 1
         self.last_line_at = time.time()
+        if self.recorder is not None and self.recorder.laeuft:
+            # Roh, vor der Auswertung. Ein Protokoll der Ergebnisse würde jeden
+            # Auswertungsfehler mit aufzeichnen, den man gerade sucht.
+            self.recorder.nmea(line, self.last_line_at)
         fix = self.parser.feed(line)
         if fix is not None:
             fix.received_at = self.last_line_at
@@ -268,4 +276,15 @@ def build_source(config, on_fix: FixCallback) -> GnssSource:
         return TcpSource(on_fix, config.gnss.host, config.gnss.tcp_port)
     if kind == "udp":
         return UdpSource(on_fix, config.gnss.tcp_port)
+    if kind == "replay":
+        # Spät geladen: recorder.py braucht dieses Modul, das wäre sonst ein Ring.
+        from pathlib import Path
+
+        from .recorder import ReplaySource
+        pfad = config.gnss.replay_file
+        if pfad and not Path(pfad).is_absolute():
+            # Ein bloßer Dateiname meint die eigene Aufzeichnung im Datenordner.
+            pfad = str(Path(config.server.data_dir) / "rohdaten" / pfad)
+        return ReplaySource(on_fix, pfad, config.gnss.replay_speed,
+                            config.gnss.replay_loop)
     return SimulatorSource(on_fix)

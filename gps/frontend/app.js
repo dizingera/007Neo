@@ -124,6 +124,21 @@ function updateHud(s) {
     el('tiltBox').title = `Hangausgleich ${correction.toFixed(0)} cm`;
   }
 
+  // Restdistanz bis zum Vorgewende. Gezählt wird bis zum Beginn des
+  // Vorgewendes, nicht bis zur Grenze – dort endet die Arbeit.
+  const headland = s.headland;
+  const zeigen = !!(headland && headland.aktiv && headland.rest_m != null
+                    && headland.tiefe_m > 0);
+  el('restBox').hidden = !zeigen;
+  if (zeigen) {
+    const rest = headland.rest_m;
+    el('rest').textContent = rest >= 0 ? rest.toFixed(0) : `−${Math.abs(rest).toFixed(0)}`;
+    el('rest').className = 'readout-value' +
+      (headland.alarm ? ' left' : rest < 0 ? '' : ' centre');
+    el('restBox').title = headland.im_vorgewende
+      ? 'Im Vorgewende' : `Vorgewendetiefe ${headland.tiefe_m.toFixed(1)} m`;
+  }
+
   // Genauigkeit ist die Zahl, an der alles hängt – deshalb immer sichtbar.
   const fixChip = el('fixChip');
   if (!fix) { fixChip.textContent = 'kein GPS'; fixChip.className = 'chip bad'; }
@@ -172,11 +187,25 @@ function updateHud(s) {
   }
   if (s.recording && s.recording.mode === 'curve') hint.push('Kurve wird aufgezeichnet');
   if (s.recording && s.recording.pending_a) hint.push('A gesetzt – jetzt B setzen');
+  const turn = s.turn || {};
+  if (turn.aktiv) hint.push('Wende läuft – Hand am Lenkrad');
+  else if (turn.geplant) {
+    hint.push(turn.im_feld
+      ? 'Wende geplant – ↻ noch einmal drücken zum Starten'
+      : 'Wende geplant, liegt aber nicht im Feld – Richtung oder Wendekreis ändern');
+  }
+  if (headland && headland.alarm && !turn.aktiv) {
+    hint.push(`Vorgewende in ${Math.max(0, headland.rest_m).toFixed(0)} m`);
+  }
   if (!state.connected) hint.push('Keine Verbindung zum Gerät');
   el('hint').textContent = hint.join('\n');
+  el('hint').classList.toggle('alarm', !!(headland && headland.alarm && !turn.aktiv));
 
   drawLightbar(guidance);
   drawSections(s.sections || []);
+  // Nur wenn jemand hinsieht: eine laufende Aufzeichnung soll mitzählen,
+  // aber nicht zehnmal je Sekunde in ein verstecktes Feld schreiben.
+  if (!el('sheet').hidden) rohdatenStatus();
 
   el('btnJob').classList.toggle('active', !!s.job);
   el('btnJob').querySelector('span').textContent = s.job ? 'Arbeit beenden' : 'Arbeit starten';
@@ -184,6 +213,14 @@ function updateHud(s) {
       s.recording && s.recording.mode === 'boundary');
   el('btnCurve').classList.toggle('recording', s.recording && s.recording.mode === 'curve');
   el('btnSteer').classList.toggle('armed', steering && steering.armed);
+
+  // Ein Knopf, drei Zustände: planen, starten, abbrechen. Was er als Nächstes
+  // tut, steht drauf – eine Wende soll niemand aus Versehen starten.
+  const turnBtn = el('btnTurn');
+  turnBtn.querySelector('span').textContent =
+    turn.aktiv ? 'Abbrechen' : turn.geplant ? 'Wende starten' : 'Wende';
+  turnBtn.classList.toggle('active', !!turn.aktiv);
+  turnBtn.classList.toggle('recording', !!turn.geplant && !turn.aktiv);
 }
 
 const LEDS = 21;
@@ -287,9 +324,11 @@ function render() {
   applyWorldTransform();
   drawCoverage();
   drawBoundary();
+  drawHeadland();
   drawPasses();
   drawTrail();
   drawRecording();
+  drawTurn();
   ctx.restore();
 
   drawVehicle();
@@ -335,16 +374,57 @@ function drawBoundary() {
   ctx.stroke();
 }
 
+/* Vorgewende: die Linie, an der die Arbeit endet und die Wende beginnt.
+ * Zeichenhilfe – gerechnet wird gegen die echte Feldgrenze, nicht gegen sie. */
+function drawHeadland() {
+  const headland = state.live && state.live.headland;
+  if (!headland || !headland.ring || headland.ring.length < 3) return;
+  ctx.beginPath();
+  headland.ring.forEach(([x, y], index) =>
+    index ? ctx.lineTo(x, y) : ctx.moveTo(x, y));
+  ctx.closePath();
+  ctx.save();
+  ctx.setLineDash([6 / state.view.scale, 5 / state.view.scale]);
+  ctx.strokeStyle = headland.alarm ? '#f85149' : '#e3b34188';
+  ctx.lineWidth = (headland.alarm ? 2.5 : 1.5) / state.view.scale;
+  ctx.stroke();
+  ctx.restore();
+}
+
+/* Die geplante oder laufende Wende. Geplant gestrichelt, gefahren durchgezogen –
+ * damit auf einen Blick klar ist, ob die Maschine der Route schon folgt. */
+function drawTurn() {
+  const turn = state.live && state.live.turn;
+  if (!turn || !turn.punkte || turn.punkte.length < 2) return;
+  ctx.save();
+  ctx.beginPath();
+  turn.punkte.forEach(([x, y], index) => index ? ctx.lineTo(x, y) : ctx.moveTo(x, y));
+  if (turn.aktiv) {
+    ctx.strokeStyle = '#58a6ff';
+    ctx.lineWidth = 3 / state.view.scale;
+  } else {
+    ctx.setLineDash([4 / state.view.scale, 4 / state.view.scale]);
+    ctx.strokeStyle = turn.im_feld ? '#58a6ffcc' : '#f85149';
+    ctx.lineWidth = 2 / state.view.scale;
+  }
+  ctx.stroke();
+  ctx.restore();
+}
+
 function drawPasses() {
   const s = state.live;
   if (!s || !s.line) return;
   const line = s.line;
   const current = s.guidance.active ? s.guidance.pass_number : 0;
+  const ring = line.mode === 'contour';
   for (let offset = current - 6; offset <= current + 6; offset++) {
+    // Ring -1 läge außerhalb der Feldgrenze – dort wird nicht gearbeitet.
+    if (ring && offset < 0) continue;
     const points = shiftLine(line, offset * line.spacing_m + line.nudge_m);
     if (!points.length) continue;
     ctx.beginPath();
     points.forEach(([x, y], index) => index ? ctx.lineTo(x, y) : ctx.moveTo(x, y));
+    if (ring) ctx.closePath();
     const active = offset === current;
     ctx.strokeStyle = active ? '#3fb950' : '#3d4b5c';
     ctx.lineWidth = (active ? 3 : 1.4) / state.view.scale;
@@ -368,6 +448,24 @@ function shiftLine(line, shift) {
       mid[0] + forward[0] * t + right[0] * shift,
       mid[1] + forward[1] * t + right[1] * shift,
     ]);
+  }
+  if (line.mode === 'contour') {
+    // Geschlossener Ring, versetzt nach innen. Der Umlaufsinn der Grenze wird
+    // herausgerechnet – sonst läge Ring 1 mal drinnen und mal draußen, je
+    // nachdem, wie herum jemand das Feld abgefahren hat.
+    const n = points.length;
+    let area = 0;
+    for (let i = 0; i < n; i++) {
+      const [x1, y1] = points[i], [x2, y2] = points[(i + 1) % n];
+      area += x1 * y2 - x2 * y1;
+    }
+    const inward = area > 0 ? -1 : 1;
+    return points.map((p, index) => {
+      const a = points[(index - 1 + n) % n], b = points[(index + 1) % n];
+      const heading = Math.atan2(b[0] - a[0], b[1] - a[1]);
+      return [p[0] + Math.cos(heading) * shift * inward,
+              p[1] - Math.sin(heading) * shift * inward];
+    });
   }
   return points.map((p, index) => {
     const a = points[Math.max(0, index - 1)];
@@ -414,8 +512,26 @@ function drawVehicle() {
 
   // Arbeitsbreite mit dem Schaltzustand jeder Sektion
   const bar = (profile.width_m || 3) * scale;
+  const implement = s.implement || {};
   ctx.save();
-  ctx.translate(0, 12);
+  if (implement.trailed && implement.heading != null && s.heading != null) {
+    // Das gezogene Gerät hängt am Zugpunkt und steht in seiner eigenen
+    // Ausrichtung – in der Kurve sichtbar innerhalb der Fahrspur. Genau das
+    // soll man sehen, sonst glaubt man dem starren Balken.
+    const lag = (implement.heading - s.heading + 540) % 360 - 180;
+    ctx.rotate(lag * Math.PI / 180);
+    ctx.translate(0, (implement.hitch_length_m || 4) * scale);
+    ctx.save();
+    ctx.beginPath();
+    ctx.moveTo(0, -(implement.hitch_length_m || 4) * scale);
+    ctx.lineTo(0, 0);
+    ctx.strokeStyle = '#8b949e';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    ctx.restore();
+  } else {
+    ctx.translate(0, 12);
+  }
   if (sections.length) {
     sections.forEach((section) => {
       const x0 = section.left_m * scale, x1 = section.right_m * scale;
@@ -500,6 +616,37 @@ el('btnBoundary').onclick = async () => {
     toast('Grenze aufzeichnen – einmal um das Feld fahren');
   }
 };
+/* Wende: planen, ansehen, starten. Bewusst zwei Druck – die Route liegt erst
+ * sichtbar auf der Karte, bevor die Maschine ihr folgt. */
+el('btnTurn').onclick = async () => {
+  const turn = (state.live && state.live.turn) || {};
+  if (turn.aktiv) {
+    await api('POST', '/api/turn/stop');
+    toast('Wende abgebrochen');
+    return;
+  }
+  if (turn.geplant) {
+    const result = await api('POST', '/api/turn/start');
+    if (result) toast('Wende läuft – Hand am Lenkrad');
+    return;
+  }
+  const plan = await api('POST', '/api/turn/plan', {});
+  if (!plan) return;
+  if (!plan.data.grenze_vorhanden) {
+    toast('Ohne Feldgrenze wird die Route nicht geprüft', true);
+  } else if (!plan.data.im_feld) {
+    toast('Route liegt nicht vollständig im Feld', true);
+  } else {
+    toast(`${plan.data.muster === 'u' ? 'U' : 'Ω'}-Wende geplant, ` +
+          `${plan.data.laenge_m.toFixed(0)} m – noch einmal drücken zum Starten`);
+  }
+};
+
+el('btnContour').onclick = async () => {
+  const result = await api('POST', '/api/guidance/contour');
+  if (result) { toast('Kontur aktiv – Ring 0 ist die Feldgrenze'); refreshLists(); }
+};
+
 el('btnNudgeLeft').onclick = () => api('POST', '/api/guidance/nudge', { metres: -0.01 });
 el('btnNudgeRight').onclick = () => api('POST', '/api/guidance/nudge', { metres: 0.01 });
 
@@ -588,9 +735,39 @@ el('btnAPlus').onclick = async () => {
 el('btnSaveProfile').onclick = async () => {
   const payload = {};
   document.querySelectorAll('#profileForm input').forEach((input) => {
-    payload[input.name] = input.type === 'number' ? parseFloat(input.value) : input.value;
+    payload[input.name] = input.type === 'checkbox' ? input.checked
+      : input.type === 'number' ? parseFloat(input.value) : input.value;
   });
   if (await api('POST', '/api/profile', payload)) toast('Maschine übernommen');
+};
+
+/* ------------------------------------------------------------ Vorgewende */
+
+function fillHeadland() {
+  const headland = state.live && state.live.headland;
+  if (!headland) return;
+  document.querySelectorAll('#headlandForm input, #headlandForm select, ' +
+                            '#headlandSwitches input').forEach((input) => {
+    const wert = headland[input.name];
+    if (wert === undefined) return;
+    if (input.type === 'checkbox') input.checked = !!wert;
+    else input.value = wert;
+  });
+  const profil = state.live.profile || {};
+  el('headlandInfo').textContent =
+    `Tiefe ${(headland.tiefe_m || 0).toFixed(1)} m` +
+    ` · Arbeitsbreite ${(profil.width_m || 0).toFixed(2)} m` +
+    ` · Spurabstand ${((profil.width_m || 0) - (profil.overlap_m || 0)).toFixed(2)} m`;
+}
+
+el('btnSaveHeadland').onclick = async () => {
+  const payload = {};
+  document.querySelectorAll('#headlandForm input, #headlandForm select, ' +
+                            '#headlandSwitches input').forEach((input) => {
+    payload[input.name] = input.type === 'checkbox' ? input.checked
+      : input.type === 'number' ? parseFloat(input.value) : input.value;
+  });
+  if (await api('POST', '/api/headland', payload)) toast('Vorgewende übernommen');
 };
 
 el('autoSections').onchange = (event) =>
@@ -624,7 +801,8 @@ async function refreshLists() {
   }
   if (active === 'jobs') renderJobs(await (await fetch('/api/jobs')).json());
   if (active === 'machine') fillProfile();
-  if (active === 'system') renderSystem();
+  if (active === 'headland') fillHeadland();
+  if (active === 'system') { renderSystem(); renderRohdaten(); }
   if (active === 'setup') renderSetup(await (await fetch('/api/checklist')).json());
   if (active === 'settings' && !settings.geladen) loadSettings();
 }
@@ -712,7 +890,9 @@ function fillProfile() {
   const profile = state.live && state.live.profile;
   if (!profile) return;
   document.querySelectorAll('#profileForm input').forEach((input) => {
-    if (profile[input.name] !== undefined) input.value = profile[input.name];
+    if (profile[input.name] === undefined) return;
+    if (input.type === 'checkbox') input.checked = !!profile[input.name];
+    else input.value = profile[input.name];
   });
   el('autoSections').checked = !!(state.live && state.live.auto_sections);
 }
@@ -1005,6 +1185,84 @@ el('btnSetupReset').onclick = async () => {
   if (!confirm('Alle Bestätigungen löschen? Nur nach einem Umbau sinnvoll.')) return;
   const antwort = await api('DELETE', '/api/checklist');
   if (antwort) { toast('Inbetriebnahme zurückgesetzt'); renderSetup(antwort.data); }
+};
+
+/* ----------------------------------------------------------- Rohdaten */
+
+function mb(bytes) {
+  return bytes < 1024 * 1024 ? `${Math.round(bytes / 1024)} kB`
+                             : `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function dauer(sekunden) {
+  const s = Math.max(0, Math.round(sekunden));
+  return s < 60 ? `${s} s` : `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')} min`;
+}
+
+/* Der Zustand der laufenden Aufzeichnung kommt mit dem Livebild – so zählt die
+ * Anzeige mit, statt beim Öffnen des Menüs einmal stehen zu bleiben. */
+function rohdatenStatus() {
+  const stand = state.live && state.live.system && state.live.system.rohdaten;
+  if (!stand) return;
+  const button = el('btnRohdaten');
+  button.textContent = stand.laeuft ? 'Aufzeichnung beenden' : 'Aufzeichnung starten';
+  button.classList.toggle('danger', !!stand.laeuft);
+  if (stand.fehler) {
+    el('rohdatenInfo').textContent = `Abgebrochen: ${stand.fehler}`;
+  } else if (stand.laeuft) {
+    el('rohdatenInfo').textContent =
+      `läuft · ${dauer(stand.dauer_s)} · ${stand.zeilen} Zeilen · ${mb(stand.groesse_b)}`;
+  } else {
+    el('rohdatenInfo').textContent = '';
+  }
+}
+
+async function renderRohdaten() {
+  const antwort = await fetch('/api/rohdaten');
+  if (!antwort.ok) return;
+  const daten = await antwort.json();
+  rohdatenStatus();
+  const host = el('rohdatenList');
+  host.innerHTML = '';
+  daten.dateien.forEach((datei) => {
+    const abgespielt = daten.abspielen.aktiv && daten.abspielen.datei === datei.datei;
+    host.appendChild(item({
+      active: abgespielt,
+      title: datei.datei,
+      sub: `${dauer(datei.dauer_s)} · ${mb(datei.groesse_b)}` +
+           (abgespielt ? ' · wird gerade abgespielt' : ''),
+      actions: [
+        ['Herunterladen', () => { window.location = `/api/rohdaten/${datei.datei}`; }],
+        ['Abspielen', async () => {
+          if (!confirm(`"${datei.datei}" abspielen?\n\nDer Empfänger wird dafür ` +
+                       `abgeschaltet – das System läuft danach auf der ` +
+                       `Aufzeichnung, nicht auf der Wirklichkeit. Wirkt nach ` +
+                       `einem Neustart.`)) return;
+          const ok_ = await api('POST', '/api/settings', { aenderungen: {
+            'gnss.source': 'replay', 'gnss.replay_file': datei.datei,
+          }});
+          if (ok_) toast('Abspielen eingestellt – wirkt nach einem Neustart');
+        }],
+        ['Löschen', async () => {
+          if (!confirm(`"${datei.datei}" löschen?`)) return;
+          if (await api('DELETE', `/api/rohdaten/${datei.datei}`)) renderRohdaten();
+        }],
+      ],
+    }));
+  });
+  if (!daten.dateien.length) {
+    host.innerHTML = '<p class="note">Noch nichts aufgezeichnet.</p>';
+  }
+}
+
+el('btnRohdaten').onclick = async () => {
+  const stand = state.live && state.live.system && state.live.system.rohdaten;
+  const laeuft = stand && stand.laeuft;
+  const antwort = await api('POST', laeuft ? '/api/rohdaten/stop' : '/api/rohdaten/start');
+  if (!antwort) return;
+  toast(laeuft ? `Aufzeichnung beendet: ${antwort.data.datei}`
+               : 'Aufzeichnung läuft');
+  renderRohdaten();
 };
 
 function item({ active, title, sub, actions }) {

@@ -20,11 +20,14 @@ gleichen Netz.
 
 | | |
 |---|---|
-| **Spurführung** | AB-Linien, A+ (Punkt und Himmelsrichtung), aufgezeichnete Kurven. Lichtbalken und Abweichung in Zentimetern. Spurversatz („Nudge") in 1-cm-Schritten. |
+| **Spurführung** | AB-Linien, A+ (Punkt und Himmelsrichtung), aufgezeichnete Kurven, Kontur (die Feldgrenze als Ringspur). Lichtbalken und Abweichung in Zentimetern. Spurversatz („Nudge") in 1-cm-Schritten. |
+| **Vorgewende** | Tiefe in Arbeitsbreiten aus der Feldgrenze, Restdistanz in Metern, Annäherungsalarm. Zwei Wendemuster – Ω-Wende (weiter Bogen) und U-Wende (kompakt) – jeweils geplant, angesehen und erst dann gefahren. Geprüft wird jeder Punkt der Route gegen die Feldgrenze. |
 | **Bearbeitete Fläche** | Wird live mitgezeichnet. Hektar, Überlappung in Prozent, Lücken sofort sichtbar. |
 | **Sektionen** | Bis zu 24 Teilbreiten, automatisch aus über bereits bearbeitetem Boden und außerhalb der Feldgrenze. |
+| **Gezogene Geräte** | Anhängerkinematik statt starrem Versatz: die Ausrichtung des Geräts läuft dem Fahrzeug nach, abhängig von Tempo und Deichsellänge. In der Kurve wird dort markiert, wo das Gerät wirklich ist. |
 | **Flächenvermessung** | Feld einmal umfahren – Grenze und Hektar sind gespeichert. |
 | **Fahrtenaufzeichnung** | Jede Arbeit mit Datum, Dauer, Strecke, Fläche und Überlappung. Export als GPX, GeoJSON und CSV. |
+| **Rohdaten und Abspielmodus** | Zeichnet auf Wunsch auf, was *hereinkommt* – rohe NMEA-Sätze und Lagemeldungen mit Zeitstempel – und spielt dieselbe Datei wieder ein. Ein Fehler vom Feld lässt sich damit am Schreibtisch nachstellen, statt ihn zu erraten. |
 | **Mehrere Traktoren** | Der Master verteilt Felder und Spuren und gibt die RTK-Korrekturen weiter. Beide sehen, was der andere schon bearbeitet hat. |
 | **Hangausgleich** | Neigungssensor (Tinkerforge IMU Brick) rechnet die Schräglage heraus. Bei 3 m Antennenhöhe sind 6° Hang sonst 31 cm Versatz. |
 | **Lenkautomatik** | Rechnet den Lenkwinkel und treibt entweder einen Phidget-Motor (Positionsregler der Platine, Sollwinkel in Grad) oder gibt an eine externe Lenkplatine aus – **ab Werk abgeschaltet**, siehe [Sicherheit](#sicherheit). |
@@ -56,11 +59,22 @@ ansehen und einstellen, bevor ein einziges Kabel verlegt ist:
 ```bash
 cd gps/backend
 pip install -r requirements.txt
-python3 -m agripilot.server
+python3 ../scripts/run_sim.py
 ```
 
-Dann `http://localhost:8080` öffnen. Unter **Menü → System** stehen zwei Regler
+Dann `http://localhost:8088` öffnen. Unter **Menü → System** stehen zwei Regler
 für Geschwindigkeit und Lenkung des virtuellen Traktors.
+
+`run_sim.py` legt Konfiguration und Datenbank in `gps/.simulator/` ab und lässt
+damit die Einstellungen einer echten Anlage unangetastet. Wer stattdessen
+`python3 -m agripilot.server` startet, landet in `C:\ProgramData\AgriPilot`
+bzw. `/etc/agripilot` – dort schreiben zu dürfen ist nicht garantiert.
+
+Eine aufgezeichnete Fahrt statt des Simulators:
+
+```bash
+python3 ../scripts/run_sim.py --abspielen rohdaten-20260910-224314.txt
+```
 
 ## Auf dem Traktor einrichten
 
@@ -108,7 +122,10 @@ gps/
 │   ├── imu.py        Neigungssensor: Hangausgleich, Drehrate, Kurs im Stand
 │   ├── ntrip.py      RTK-Korrekturen (Caster, roher Strom, Funkmodem) und
 │                     ihre Weitergabe an die anderen Traktoren
-│   ├── guidance.py   AB-Linien, Kurven, Spurabstand, Abweichung, Lenkwinkel
+│   ├── guidance.py   AB-Linien, Kurven, Kontur, Spurabstand, Abweichung,
+│                     Lenkwinkel, Nachlauf gezogener Geräte
+│   ├── headland.py   Vorgewende: Restdistanz, Alarm, Ω- und U-Wende, Route
+│   ├── recorder.py   Rohdaten mitschreiben und wieder abspielen
 │   ├── coverage.py   Bearbeitete Fläche als Raster, Überlappung, Sektionen
 │   ├── steering.py   Lenkbefehl mit allen Sicherheitsbedingungen
 │   ├── actuators.py  Ausgänge: Phidget-Motor, externe Lenkplatine, nur Anzeige
@@ -133,7 +150,13 @@ gps/
 cd gps/backend && python3 -m unittest discover -s tests -v
 ```
 
-86 Tests, ohne Zusatzpakete lauffähig. Geprüft wird vor allem, was im Feld Geld
+203 Tests, ohne Zusatzpakete lauffähig. Geprüft wird vor allem, was im Feld Geld
 kostet, wenn es falsch ist: Flächen, das Vorzeichen der Abweichung, der
 Hangausgleich und die Bedingungen, unter denen die Lenkautomatik einschalten
 darf.
+
+Die Wende wird dabei einmal wirklich gefahren: Position hinein, Einschlag
+heraus, Einspurmodell bewegt die Maschine, von vorn – und am Ende die Frage,
+ob sie auf der Nachbarspur steht und zurückschaut. Ein verdrehtes Vorzeichen
+sieht in jedem einzelnen Test richtig aus und schickt die Maschine auf dem Feld
+trotzdem in die andere Richtung.

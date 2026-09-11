@@ -35,7 +35,8 @@ DEFAULT_DATA_DIR = str(_default_paths()[1])
 @dataclass
 class GnssConfig:
     # "serial" for a receiver on USB/UART, "tcp"/"udp" for one on the network,
-    # "simulator" to run the whole system on a desk with no hardware at all.
+    # "simulator" to run the whole system on a desk with no hardware at all,
+    # "replay" to run a recorded drive again (siehe recorder.py).
     source: str = "simulator"
     port: str = "/dev/ttyACM0"
     baudrate: int = 115200
@@ -44,6 +45,12 @@ class GnssConfig:
     # Where to write RTCM corrections back to.  For a USB receiver this is the
     # same serial port; leave empty to not feed corrections at all.
     rtcm_out: str = "auto"
+
+    # Abspielmodus. Ein bloßer Dateiname meint eine eigene Aufzeichnung im
+    # Datenordner; ein vollständiger Pfad wird genommen, wie er dasteht.
+    replay_file: str = ""
+    replay_speed: float = 1.0
+    replay_loop: bool = False
 
 
 @dataclass

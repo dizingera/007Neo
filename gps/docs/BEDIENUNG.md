@@ -6,8 +6,8 @@
  ┌──────────────────────────────────────────────────────────────┐
  │ ▓▓▓▓▓▓▓▓▓░░░░░░░░░░░░░░░░░░░░░░░  Lichtbalken               │
  ├──────────────────────────────────────────────────────────────┤
- │   12      8.4      3      2.41   4.1  [RTK fix ±2 cm]        │
- │ cm ABW.   km/h    SPUR   ha      ° Hang [Lenkung] [Master]   │
+ │   12    8.4    3    2.41   4.1    38   [RTK fix ±2 cm]       │
+ │ cm ABW. km/h  SPUR   ha   ° Hang  m VG [Lenkung] [Master]    │
  ├──────────────────────────────────────────────────────────────┤
  │ Oberes Feld                                            + − ↑ │
  │ AB Nord · 6,00 m                                             │
@@ -17,7 +17,7 @@
  │                                                              │
  │                     [1][2][3][4][5]  Sektionen               │
  ├──────────────────────────────────────────────────────────────┤
- │  A    B    ∿    ⬠    ◀    ▶    Arbeit    Lenkung    Menü    │
+ │  A    B    ∿    ⬠    ↻    ◀    ▶   Arbeit  Lenkung  Menü    │
  └──────────────────────────────────────────────────────────────┘
 ```
 
@@ -29,6 +29,11 @@ Die Zahl links daneben nennt die Abweichung in Zentimetern, die Farbe sagt
 dasselbe wie der Balken.
 
 ![Aufträge](bilder/auftraege.png)
+
+**„m VG"** ist die Strecke bis zum Beginn des Vorgewendes – nicht bis zur
+Feldgrenze. Sie erscheint nur, wenn eine Feldgrenze gespeichert und eine
+Vorgewendetiefe eingestellt ist, und wird negativ, sobald man im Vorgewende
+steht. Siehe [Vorgewende und Wenden](#vorgewende-und-wenden-menü--vorgewende).
 
 **Der Hang-Wert** erscheint nur, wenn ein Neigungssensor eingerichtet ist. Er
 zeigt die Schräglage, und der Ausgleich dazu läuft im Hintergrund: bei 3 m
@@ -62,12 +67,23 @@ Fertig. Alle weiteren Spuren liegen im Abstand der Arbeitsbreite parallel dazu.
 Richtung, in die der Traktor gerade zeigt. Gut, um die Richtung vom Nachbarfeld
 oder vom letzten Jahr zu übernehmen.
 
-**Kurven (Kontur)** – für krumme Felder und Vorgewende: **∿ Kurve** drücken, die
-gewünschte Linie abfahren, wieder **∿ Kurve** drücken. Alle weiteren Spuren
-folgen dieser Form.
+**Kurven** – für krumme Felder: **∿ Kurve** drücken, die gewünschte Linie
+abfahren, wieder **∿ Kurve** drücken. Alle weiteren Spuren folgen dieser Form.
+
+**Kontur – die Feldgrenze selbst als Spur:** **Menü → Spuren → *◎ Kontur***.
+Ring 0 ist die Feldgrenze, jeder weitere Ring liegt eine Arbeitsbreite weiter
+innen. Kein A- und kein B-Punkt nötig, und nichts abzufahren, was ohnehin schon
+abgefahren wurde – die Grenze ist da. Gedacht für das Vorgewende und für krumme
+Schläge. Wie herum die Grenze aufgezeichnet wurde, spielt keine Rolle: Ring 1
+liegt immer weiter innen, nie weiter außen.
+
+Die Kontur wird **nicht gespeichert**: sie entsteht bei jedem Aufruf neu aus der
+aktuellen Grenze. Wer die Grenze neu abfährt, hat sofort die neue Kontur. Eine
+gespeicherte Kopie läge nach dem nächsten Abfahren still daneben – und man
+sähe es erst abends an den Streifen im Feld.
 
 Angelegte Spuren stehen unter **Menü → Spuren** und lassen sich jederzeit wieder
-laden.
+laden. Die Kontur steht nicht in dieser Liste; sie wird über den Knopf geholt.
 
 ## Arbeiten
 
@@ -107,6 +123,66 @@ schließt.
 
 Antippen schaltet eine Sektion von Hand ab und wieder frei. Die Automatik
 insgesamt lässt sich unter **Menü → Maschine** abschalten.
+
+## Vorgewende und Wenden (Menü → Vorgewende)
+
+Das Vorgewende ist kein zweites Feld, sondern eine Tiefe: so viele
+Arbeitsbreiten vom Rand nach innen, wie zum Wenden gebraucht werden. Es kommt
+deshalb aus der Feldgrenze und wandert mit dem Gerät mit – wer ein breiteres
+Gerät anhängt, hat automatisch ein tieferes Vorgewende.
+
+**Einstellen:** Anzahl der Vorgewendespuren (üblich 2), Alarmabstand,
+kleinster Wendekreis der Maschine, Wendemuster und Wenderichtung. Eine Breite
+je Spur trägt nur ein, wer ein Vorgewende will, das breiter ist als die
+Maschine; sonst bleibt dort die Null stehen.
+
+**Im Feld sichtbar** wird daraus dreierlei:
+
+* Die **gestrichelte Linie** innerhalb der Feldgrenze – dort endet die Arbeit.
+* Die Anzeige **„m bis Vorgewende"** oben. Sie zählt bis zum *Beginn* des
+  Vorgewendes, nicht bis zur Grenze. Wer bis zur Grenze zählt, wendet zu spät.
+  Die Zahl wird negativ, sobald man drin steht – das sagt auch, wie weit.
+* Der **Annäherungsalarm**: unter dem eingestellten Abstand blinkt der Hinweis
+  rot und der Vorgewendering wird rot.
+
+### Wenden
+
+Die Taste **↻** hat drei Zustände, und sie sagt jedes Mal, was sie als Nächstes
+tut:
+
+1. **„Wende"** – planen. Die Route erscheint gestrichelt auf der Karte, blau
+   wenn sie im Feld liegt, rot wenn nicht.
+2. **„Wende starten"** – die Maschine folgt der Route.
+3. **„Abbrechen"** – zurück an den Fahrer.
+
+Zwei Druck, nicht einer: eine Wende, die auf Knopfdruck losfährt, hat niemand
+vorher angesehen.
+
+**Die beiden Muster:**
+
+| | |
+|---|---|
+| **Ω-Wende** (weiter Bogen) | Holt nach vorn aus und kommt in einem Bogen zurück. Braucht mehr Vorgewendetiefe, fährt dafür weichere Radien. |
+| **U-Wende** (kompakt) | Zwei Viertelkreise mit einer Geraden dazwischen. Kommt mit deutlich weniger Tiefe aus; dafür wächst die Zwischengerade mit dem Spurversatz. |
+
+**Was die Wende nicht tut:** rückwärts fahren. Gesteuert wird das Lenkrad, nicht
+Fahrstufe und nicht Gas – ein Muster mit Rückwärtsgang wäre eine Route, die die
+Maschine nicht fahren kann. Wo der Platz für keines der beiden Muster reicht,
+wird von Hand gewendet.
+
+**Die Sicherheitsprüfung** verlangt, dass *jeder* Punkt der Route innerhalb der
+Feldgrenze liegt. Ein einziger draußen genügt zur Ablehnung – der Rest im Feld
+hilft nichts, wenn das Vorderrad im Graben steht. Ohne gespeicherte Feldgrenze
+kann nicht geprüft werden; dann sagt die Anzeige das auch.
+
+Während der Wende zeigt die Abweichung oben den Abstand **zur Wenderoute**,
+nicht zur verlassenen Spur. Das ist kein Schönheitsfehler, sondern nötig: die
+Lenkautomatik gibt ab, wenn die Abweichung zu groß wird, und in einer Wende ist
+man von der alten Spur zwangsläufig weit weg. Wer der Route nicht folgt, bekommt
+sie abgebrochen und lenkt selbst weiter.
+
+Bei einem Positionsausfall endet die Wende sofort. Blind auf einem Bogen zu
+lenken ist schlimmer als gar nicht zu lenken.
 
 ## Lenkautomatik
 
@@ -185,6 +261,70 @@ wieder auf.
 
 Die **Feldgrenze** bleibt davon unberührt: was hinausragt, schaltet ab,
 unabhängig von der Überdeckung. Draußen zu arbeiten wäre kein Schönheitsfehler.
+
+**Gezogenes Gerät (Anhängerkinematik).** Ein angebautes Gerät dreht sich mit dem
+Traktor. Ein gezogenes nicht: es hängt an der Deichsel und schwenkt erst ein,
+während es gezogen wird. In der Kurve steht es deshalb spürbar *innerhalb* der
+Fahrspur – ein starrer Versatz behauptet das Gegenteil und malt die bearbeitete
+Fläche an die falsche Stelle.
+
+Mit der Option wird die Fläche dort markiert, wo das Gerät wirklich ist. Die
+**Deichsellänge** ist der Abstand vom Zugpunkt bis zur Geräteachse; je kürzer
+sie ist, desto schneller folgt das Gerät. Im Stand schwenkt nichts, egal wie
+weit am Lenkrad gedreht wird – auch das steckt im Modell und entspricht der
+Erfahrung.
+
+Geführt wird weiterhin das **Fahrzeug**. Auf ein nachlaufendes Gerät zu führen
+klingt genauer, macht die Lenkung aber unruhig: das Gerät zieht erst dorthin,
+wo das Fahrzeug vorhin war.
+
+## Rohdaten aufzeichnen und abspielen (Menü → System)
+
+Ein Fehler auf dem Feld ist teuer zu untersuchen: er passiert einmal, bei Regen,
+mit einem Anhänger hinten dran – und wenn man ihn nachstellen will, steht der
+Traktor schon wieder in der Halle. Was bleibt, ist die Erinnerung des Fahrers,
+und die reicht nicht, um zwischen „der Empfänger hat gesprungen", „der Sensor
+hatte ein falsches Vorzeichen" und „die Führung hat sich verrechnet" zu
+unterscheiden.
+
+**Aufzeichnen:** Menü → System → *Aufzeichnung starten*. Ab da wird
+mitgeschrieben, was **hereinkommt** – die rohen NMEA-Sätze und die Lagemeldungen
+des Neigungssensors, jeweils mit Zeitstempel. Läuft eine Aufzeichnung, zählt die
+Anzeige daneben mit. Rund 7 MB je Stunde; bei 200 MB endet sie von selbst,
+damit eine vergessene Aufzeichnung dem Pi nicht die Karte vollschreibt.
+
+Sinnvoll ist, sie **vor** der Fahrt zu starten, bei der man etwas vermutet.
+Nachträglich lässt sich nichts aufzeichnen.
+
+**Abspielen:** in der Liste bei der Aufzeichnung auf *Abspielen*, dann das
+Programm neu starten. Danach läuft dieselbe Fahrt noch einmal – durch dieselbe
+Rechenkette, mit denselben Zeitabständen. Position und Neigung kommen aus
+derselben Datei und bleiben deshalb im selben Takt. Zurück auf den Empfänger
+geht es über Einstellungen → Empfänger → Quelle.
+
+**Was aufgezeichnet wird, ist das Rohe, nicht das Errechnete.** Ein Protokoll
+der Ergebnisse würde jeden Auswertungsfehler mit aufzeichnen, den man gerade
+sucht: liegt er in der Auswertung, steht in der Datei schon das falsche Ergebnis,
+und der Abspielmodus bestätigt ihn brav.
+
+Es ist eine Textdatei – im Notfall genügt ein Texteditor:
+
+```
+# agripilot-rohdaten 1
+# begonnen 2026-09-10T22:43:14
+0.028	N	$GPGGA,204314.028,4808.232142,N,01134.535997,E,4,22,0.6,520.0,M,45.0,M,,*50
+5.012	I	0.579,0.000,48.331,17.901,3
+```
+
+Erste Spalte: Sekunden seit dem Beginn. Zweite: `N` für einen NMEA-Satz, `I` für
+eine Lagemeldung (Neigung, Nicken, Kurs, Drehrate, Kalibrierung).
+
+Zwei Dinge, die nicht gehen und aus gutem Grund nicht gehen: während des
+Abspielens lässt sich **nicht** aufzeichnen – eine Kopie der Kopie wäre keine
+neue Messung. Und eine fehlende Aufzeichnungsdatei fällt **nicht** still auf den
+Simulator zurück; dann stünde eine erfundene Fahrt auf dem Bildschirm, während
+man glaubt, die eigene zu sehen. Stattdessen sagt die Statuszeile, dass die
+Datei fehlt.
 
 ## Einbau-Checkliste (Menü → Einbau)
 

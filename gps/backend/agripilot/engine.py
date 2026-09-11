@@ -22,11 +22,17 @@ import time
 from dataclasses import asdict
 from typing import Any, Optional
 
-from . import geo, storage
+from . import geo, headland as headland_module, storage
 from .actuators import SteerContext
 from .config import Config
 from .coverage import CoverageMap, Section, build_sections
-from .guidance import GuidanceLine, GuidanceState, HeadingFilter, VehicleProfile
+from .guidance import (
+    GuidanceLine,
+    GuidanceState,
+    HeadingFilter,
+    ImplementHeading,
+    VehicleProfile,
+)
 from .imu import terrain_offset
 from .nmea import Fix
 
@@ -54,8 +60,27 @@ class Engine:
         self.fix: Optional[Fix] = None
         self.position: Optional[geo.Point] = None      # antenna, local metres
         self.tool_position: Optional[geo.Point] = None
+        # Beim starren Anbau dasselbe wie tool_position; beim gezogenen Gerät
+        # nicht - dort wird hier markiert, und in der Kurve liegt das spürbar
+        # innerhalb der Fahrspur.
+        self.implement_position: Optional[geo.Point] = None
+        self.implement_heading = ImplementHeading()
         self.heading: Optional[float] = None
         self.guidance = GuidanceState()
+
+        # Vorgewende: Tiefe, Alarm und Wendemuster. Steht in der Datenbank, weil
+        # es zur Maschine gehört und einen Neustart überleben soll.
+        self.headland = headland_module.HeadlandSettings.from_dict(
+            self.store.get_setting("headland")
+        )
+        self.headland_status = headland_module.HeadlandStatus()
+        self.turn: Optional[headland_module.TurnFollower] = None
+        self.turn_preview: list[geo.Point] = []
+        self.turn_preview_ok = False
+        self._turn_planned_at: Optional[geo.Point] = None
+        self._ring_key: Optional[tuple] = None
+        self._ring_cache: list[list[float]] = []
+        self._steering_was_engaged = False
 
         self.record_mode: Optional[str] = None          # "boundary" | "curve"
         self._recording: list[geo.Point] = []
@@ -95,7 +120,28 @@ class Engine:
             # Changing the working width changes the pass spacing, and with it
             # which pass the machine is on - but not the reference line itself.
             self.line.spacing = self.profile.spacing_m
+        # Aus einem angebauten Gerät ist gerade ein gezogenes geworden (oder
+        # umgekehrt). Die nachlaufende Ausrichtung des alten Geräts weiterzu-
+        # schleppen hieße, mit der Geometrie des vorigen zu markieren.
+        self.implement_heading.reset(self.heading)
         return self.profile
+
+    def update_headland(self, values: dict) -> headland_module.HeadlandSettings:
+        """Vorgewende und Wendemuster ändern.
+
+        Eine laufende Wende wird dabei abgebrochen: sie wurde nach den alten
+        Werten geplant, und eine Route halb nach neuen Zahlen weiterzufahren
+        wäre die schlechteste von beiden.
+        """
+        felder = headland_module.HeadlandSettings.__dataclass_fields__
+        aktuell = self.headland.to_dict()
+        aktuell.update({k: v for k, v in values.items() if k in felder})
+        self.headland = headland_module.HeadlandSettings.from_dict(aktuell)
+        self.store.set_setting("headland", self.headland.to_dict())
+        if self.turn is not None:
+            self.stop_turn("Einstellungen geändert")
+        self.turn_preview, self.turn_preview_ok = [], False
+        return self.headland
 
     # -- field and line ---------------------------------------------------
 
@@ -145,6 +191,30 @@ class Engine:
     def clear_line(self) -> None:
         self.line = None
         self.guidance = GuidanceState()
+
+    def use_contour(self) -> dict:
+        """Die Feldgrenze selbst als Spurmuster nehmen.
+
+        Ring 0 ist die Grenze, jeder weitere Ring liegt eine Arbeitsbreite
+        weiter innen. Kein A- und kein B-Punkt nötig - was für das Vorgewende
+        und für krumme Schläge der kürzere Weg ist als eine Kurve abzufahren,
+        die man ohnehin schon einmal abgefahren hat.
+
+        Die Kontur wird **nicht gespeichert**. Sie entsteht bei jedem Aufruf neu
+        aus der aktuellen Grenze; eine gespeicherte Kopie würde nach dem nächsten
+        Abfahren der Grenze still danebenliegen.
+        """
+        if self.field is None:
+            raise RuntimeError("Kein Feld ausgewählt")
+        grenze = [tuple(p) for p in (self.field.get("boundary") or [])]
+        if len(grenze) < 3:
+            raise RuntimeError("Ohne Feldgrenze gibt es keine Kontur - erst die "
+                               "Grenze abfahren (⬠)")
+        self.line = GuidanceLine(
+            "contour", grenze, self.profile.spacing_m, "Kontur", "contour",
+        )
+        self.note("Kontur aktiv: Ring 0 ist die Feldgrenze")
+        return self.line.to_dict()
 
     def set_a(self) -> dict:
         self._require_position()
@@ -212,6 +282,13 @@ class Engine:
         })
         self.field = field
         self.note(f"Feldgrenze gespeichert: {area_ha:.2f} ha")
+        if self.line is not None and self.line.mode == "contour":
+            # Die Kontur hängt an der Grenze. Wird die Grenze neu abgefahren,
+            # muss die Ringspur mitkommen - sonst führt sie ab jetzt gegen eine
+            # Grenze, die es nicht mehr gibt.
+            nudge = self.line.nudge_m
+            self.use_contour()
+            self.line.nudge_m = nudge
         return field
 
     def _save_line(self, mode: str, points: list[geo.Point], name: str) -> dict:
@@ -237,6 +314,10 @@ class Engine:
         if self.line is None:
             raise RuntimeError("Keine Spur aktiv")
         self.line.nudge_m += metres
+        if self.line.derived:
+            # Die Kontur ist keine gespeicherte Spur. Sie hier anzulegen würde
+            # bei jedem Versatz eine neue Spur in die Liste schreiben.
+            return self.line.nudge_m
         self.store.save_line({
             "id": self.line.id,
             "field_id": self.field["id"],
@@ -247,6 +328,101 @@ class Engine:
             "nudge_m": self.line.nudge_m,
         })
         return self.line.nudge_m
+
+    # -- Vorgewende und Wende ---------------------------------------------
+
+    def headland_ring(self) -> list[list[float]]:
+        """Die Vorgewendelinie zum Zeichnen - gerechnet nur, wenn nötig.
+
+        Der Versatz kostet für jeden Eckpunkt einen Blick auf die ganze Grenze.
+        Das ist einmal je Änderung nichts und zehnmal je Sekunde zu viel, also
+        wird das Ergebnis behalten, bis sich Grenze oder Tiefe ändern.
+        """
+        if (self.field is None or not self.field.get("boundary")
+                or not self.headland.aktiv):
+            return []
+        tiefe = self.headland.tiefe_m(self.profile.width_m)
+        if tiefe <= 0.0:
+            return []
+        schluessel = (self.field["id"], self.field.get("updated_at"), round(tiefe, 3))
+        if self._ring_key != schluessel:
+            self._ring_key = schluessel
+            self._ring_cache = [
+                list(p) for p in headland_module.ring(
+                    [tuple(p) for p in self.field["boundary"]], tiefe)
+            ]
+        return self._ring_cache
+
+    def plan_turn(self, muster: str = "", richtung: str = "") -> dict:
+        """Eine Wende planen und vollständig prüfen - gefahren wird noch nichts.
+
+        Zwei Schritte, absichtlich getrennt: erst sieht der Fahrer die Route auf
+        der Karte liegen, dann startet er sie. Eine Wende, die auf Knopfdruck
+        sofort losfährt, hat niemand vorher angesehen.
+
+        Geprüft wird gegen die Feldgrenze, Punkt für Punkt. Ragt auch nur ein
+        Stück hinaus, bleibt ``im_feld`` falsch - und mit der
+        Sicherheitsprüfung an lässt sich die Route dann nicht starten.
+        """
+        self._require_position()
+        if self.heading is None:
+            raise RuntimeError("Noch kein Kurs - ein Stück geradeaus fahren")
+        einstellung = self.headland
+        if muster or richtung:
+            werte = einstellung.to_dict()
+            if muster:
+                werte["muster"] = muster
+            if richtung:
+                werte["richtung"] = richtung
+            einstellung = headland_module.HeadlandSettings.from_dict(werte)
+
+        grenze = [tuple(p) for p in (self.field.get("boundary") or [])] \
+            if self.field else []
+        pfad = headland_module.plan(
+            self.tool_position, self.heading, einstellung,
+            self.profile.spacing_m, einstellung.tiefe_m(self.profile.width_m),
+        )
+        im_feld = headland_module.route_im_feld(pfad, grenze)
+        self.turn_preview = pfad
+        self.turn_preview_ok = im_feld
+        self._turn_planned_at = self.tool_position
+        return {
+            "punkte": [list(p) for p in pfad],
+            "im_feld": im_feld,
+            "muster": einstellung.muster,
+            "richtung": einstellung.richtung,
+            "laenge_m": sum(geo.distance(pfad[i], pfad[i + 1])
+                            for i in range(len(pfad) - 1)),
+            "grenze_vorhanden": len(grenze) >= 3,
+        }
+
+    def start_turn(self) -> dict:
+        """Die geplante Route übernehmen und ihr folgen."""
+        if not self.turn_preview:
+            raise RuntimeError("Erst eine Wende planen")
+        if self.headland.nur_im_feld and not self.turn_preview_ok:
+            raise RuntimeError(
+                "Die Route liegt nicht vollständig im Feld. Wenderichtung, "
+                "Wendekreis oder Vorgewendetiefe ändern - oder die "
+                "Sicherheitsprüfung bewusst abschalten.")
+        self._require_position()
+        losgefahren = getattr(self, "_turn_planned_at", None)
+        if losgefahren is not None and \
+                geo.distance(losgefahren, self.tool_position) > 5.0:
+            # Die Route beginnt dort, wo sie geplant wurde. Von hier aus wäre
+            # ihr erster Bogen ein Sprung quer über das Feld.
+            raise RuntimeError("Die Maschine steht nicht mehr am Planungspunkt - "
+                               "Wende neu planen")
+        self.turn = headland_module.TurnFollower(pfad=list(self.turn_preview))
+        self.note(f"Wende gestartet ({self.headland.muster.upper()}, "
+                  f"{self.headland.richtung})")
+        return self.turn.to_dict()
+
+    def stop_turn(self, grund: str = "vom Fahrer beendet") -> None:
+        if self.turn is None:
+            return
+        self.turn = None
+        self.note(f"Wende beendet: {grund}")
 
     # -- jobs -------------------------------------------------------------
 
@@ -314,7 +490,16 @@ class Engine:
         self.position = self._compensate_terrain(self.position, heading, attitude)
 
         previous_tool = self.tool_position
+        previous_implement = self.implement_position
         self.tool_position = self.profile.tool_position(self.position, heading)
+
+        # Das gezogene Gerät schwenkt dem Fahrzeug nach, statt sich mit ihm zu
+        # drehen. Erst die Ausrichtung fortschreiben, dann daraus die Lage - in
+        # dieser Reihenfolge, sonst markiert man mit der Ausrichtung von vorhin.
+        self.implement_heading.update(heading, fix.speed_ms, dt, self.profile)
+        self.implement_position = self.profile.implement_position(
+            self.position, heading, self.implement_heading.value
+        )
 
         # A position that moved further than the machine could have travelled is
         # a receiver artefact - a re-acquired fix after a gap under trees, or a
@@ -332,8 +517,14 @@ class Engine:
         elif previous_tool is not None:
             plausible = False
 
+        if not plausible:
+            # Nach einem Positionssprung ist auch die nachlaufende Ausrichtung
+            # des Geräts nichts mehr wert - sie wurde aus dem Sprung gerechnet.
+            self.implement_heading.reset(heading)
+
+        self._update_headland()
         self._update_guidance(fix)
-        self._update_coverage(previous_tool if plausible else None)
+        self._update_coverage(previous_implement if plausible else None)
         self._update_steering(fix)
         self._record_track(fix, now)
 
@@ -365,7 +556,34 @@ class Engine:
         return (antenna[0] - right[0] * right_off - forward[0] * forward_off,
                 antenna[1] - right[1] * right_off - forward[1] * forward_off)
 
+    def _update_headland(self) -> None:
+        """Restdistanz, Vorgewendelage und Annäherungsalarm nachführen."""
+        grenze = [tuple(p) for p in (self.field.get("boundary") or [])] \
+            if self.field else []
+        vorher = self.headland_status.alarm
+        self.headland_status = headland_module.status(
+            self.tool_position, self.heading, grenze, self.headland,
+            self.profile.width_m,
+        )
+        if self.headland_status.alarm and not vorher:
+            self.note(f"Vorgewende in {self.headland_status.rest_m:.0f} m")
+
     def _update_guidance(self, fix: Fix) -> None:
+        if self.turn is not None and self.tool_position is not None \
+                and self.heading is not None:
+            # Während einer geplanten Wende führt die Route, nicht die Spur.
+            # Gemeldet wird die Abweichung von der Route - damit prüft die
+            # Lenkung weiter gegen etwas Sinnvolles statt gegen die verlassene
+            # Spur, von der man in einer Wende zwangsläufig weit weg ist.
+            zustand = self.turn.solve(
+                self.tool_position, self.heading, fix.speed_ms, self.profile
+            )
+            if self.turn.fertig:
+                self.stop_turn(self.turn.grund or "Wende beendet")
+            else:
+                self.guidance = zustand
+                return
+
         if self.line is None or self.tool_position is None or self.heading is None:
             self.guidance = GuidanceState(message="Keine Spur aktiv")
             return
@@ -385,28 +603,37 @@ class Engine:
             fuehrungspunkt, self.heading, fix.speed_ms, self.profile
         )
 
-    def _update_coverage(self, previous_tool: Optional[geo.Point]) -> None:
+    def _update_coverage(self, previous_implement: Optional[geo.Point]) -> None:
         """Mark the ground swept since the previous position.
 
-        `previous_tool` is None when the last step was not believable; the
+        `previous_implement` is None when the last step was not believable; the
         anchor is then simply moved without painting, so a dropout leaves a gap
         in the map rather than a false stripe.
+
+        Markiert wird an der Lage **des Geräts** und mit **seiner** Ausrichtung.
+        Beim starren Anbau ist das der Werkzeugpunkt wie bisher; beim gezogenen
+        Gerät liegt es in der Kurve innerhalb der Fahrspur, und genau das soll
+        in der Karte stehen.
         """
-        if self.job is None or self.tool_position is None or self.heading is None:
+        if self.job is None or self.implement_position is None \
+                or self.heading is None:
             return
+        kurs = self.implement_heading.value if self.profile.trailed else self.heading
+        if kurs is None:
+            kurs = self.heading
         boundary = None
         if self.field and self.field.get("boundary"):
             boundary = [tuple(p) for p in self.field["boundary"]]
         if self.auto_sections:
             self.coverage.update_auto_sections(
-                self.tool_position, self.heading, self.sections,
+                self.implement_position, kurs, self.sections,
                 speed_ms=self.fix.speed_ms if self.fix else 0.0,
                 boundary=boundary,
                 pcc=self.profile.section_pcc,
             )
-        if previous_tool is not None:
+        if previous_implement is not None:
             self.coverage.add_swath(
-                previous_tool, self.tool_position, self.heading, self.sections
+                previous_implement, self.implement_position, kurs, self.sections
             )
 
     def _update_steering(self, fix: Fix) -> None:
@@ -423,8 +650,18 @@ class Engine:
         command = self.steering.update(self.guidance, fix, context)
         # On the simulator, close the loop so autosteer can be demonstrated and
         # tuned without a machine.
+        #
+        # Solange die Automatik nicht greift, gehört das Lenkrad dem Fahrer -
+        # am Schreibtisch also dem Regler unter Menü → System. Hier bei jeder
+        # Position eine Null hineinzuschreiben hieß: der Regler stand zehnmal
+        # je Sekunde wieder auf gerade und war damit wirkungslos. Genullt wird
+        # nur im Augenblick des Abschaltens, so wie es die echte Anlage tut.
         if self.simulator is not None:
-            self.simulator.set_steer(command.angle_deg if command.engaged else 0.0)
+            if command.engaged:
+                self.simulator.set_steer(command.angle_deg)
+            elif self._steering_was_engaged:
+                self.simulator.set_steer(0.0)
+        self._steering_was_engaged = command.engaged
 
     def _record_track(self, fix: Fix, now: float) -> None:
         if self.job is None or self.tool_position is None:
@@ -455,10 +692,14 @@ class Engine:
         darf. Die Hardware fängt das über ihren Failsafe ab, aber die Anzeige
         stünde weiter auf "lenkt". Deshalb wird hier von außen nachgesehen.
         """
-        if self.steering is None or not self.steering.armed:
-            return
         now = now or time.time()
         age = now - self.fix.received_at if (self.fix and self.fix.received_at) else 99.0
+        if age > 2.0 and self.turn is not None:
+            # Eine Wende ohne Positionsdaten weiterzuführen hieße, blind auf
+            # einem Bogen zu lenken. Sie endet hier, nicht erst beim nächsten Fix.
+            self.stop_turn("keine GPS-Daten")
+        if self.steering is None or not self.steering.armed:
+            return
         if age > 2.0:
             self.steering.disarm("keine GPS-Daten mehr")
             self.note("Lenkung abgeschaltet: keine GPS-Daten")
@@ -481,8 +722,27 @@ class Engine:
             "fix": fix.to_dict() if fix else None,
             "position": list(self.position) if self.position else None,
             "tool_position": list(self.tool_position) if self.tool_position else None,
+            "implement": {
+                "position": (list(self.implement_position)
+                             if self.implement_position else None),
+                "heading": self.implement_heading.value,
+                "trailed": self.profile.trailed,
+                "hitch_length_m": self.profile.hitch_length_m,
+            },
             "heading": self.heading,
             "guidance": self.guidance.to_dict(),
+            "headland": {
+                **self.headland.to_dict(),
+                **self.headland_status.to_dict(),
+                "ring": self.headland_ring(),
+            },
+            "turn": {
+                "aktiv": self.turn is not None,
+                "punkte": ([list(p) for p in self.turn.pfad] if self.turn
+                           else [list(p) for p in self.turn_preview]),
+                "geplant": bool(self.turn_preview) and self.turn is None,
+                "im_feld": self.turn_preview_ok,
+            },
             "line": self.line.to_dict() if self.line else None,
             "field": {
                 "id": self.field["id"],

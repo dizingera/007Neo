@@ -91,7 +91,11 @@ GRUPPEN: list[Gruppe] = [
                 ("tcp", "TCP (Empfänger im Netz)"),
                 ("udp", "UDP (Empfänger im Netz)"),
                 ("simulator", "Simulator (keine Hardware)"),
-            ), hilfe="Der übliche Fall ist ein F9P per USB: seriell."),
+                ("replay", "Aufzeichnung abspielen (Fehlersuche)"),
+            ), hilfe="Der übliche Fall ist ein F9P per USB: seriell. "
+                     "'Aufzeichnung abspielen' fährt eine mitgeschriebene Fahrt "
+                     "noch einmal - zum Untersuchen am Schreibtisch, nicht zum "
+                     "Arbeiten auf dem Feld."),
             Feld("gnss.port", "Anschluss", hilfe="Windows z. B. COM3, Linux /dev/ttyACM0. "
                                                  "Die Geräteerkennung findet ihn."),
             Feld("gnss.baudrate", "Baudrate", "ganzzahl", minimum=4800, maximum=921600,
@@ -102,6 +106,18 @@ GRUPPEN: list[Gruppe] = [
             Feld("gnss.rtcm_out", "Korrekturen zum Empfänger", hilfe=
                  "Wohin die RTK-Korrekturen zurückgeschrieben werden. 'auto' nimmt "
                  "denselben Anschluss; leer lassen heißt: gar nicht einspeisen."),
+            Feld("gnss.replay_file", "Abzuspielende Aufzeichnung", hilfe=
+                 "Nur beim Abspielen. Ein bloßer Dateiname meint eine eigene "
+                 "Aufzeichnung (Menü → System → Rohdaten); ein vollständiger Pfad "
+                 "wird genommen, wie er dasteht."),
+            Feld("gnss.replay_speed", "Abspieltempo", "zahl", einheit="×",
+                 minimum=0.05, maximum=20.0, hilfe=
+                 "1,0 spielt die Fahrt in ihrem eigenen Takt ab - nur dort läuft "
+                 "alles so wie im Feld. Schneller ist zum Durchspulen gedacht: "
+                 "die Positionen rücken vor, während in den Sätzen weiterhin die "
+                 "aufgezeichnete Geschwindigkeit steht."),
+            Feld("gnss.replay_loop", "Aufzeichnung wiederholen", "schalter",
+                 hilfe="Am Ende wieder von vorn, statt stehen zu bleiben."),
         ],
     ),
     Gruppe(

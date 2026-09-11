@@ -40,6 +40,11 @@
     <div class="readout-value" id="tilt">--</div>
     <div class="readout-label">° Hang</div>
   </div>
+  <!-- Bis zum Vorgewende, nicht bis zur Grenze: dort endet die Arbeit. -->
+  <div class="readout small" id="restBox" hidden>
+    <div class="readout-value" id="rest">--</div>
+    <div class="readout-label">m bis Vorgewende</div>
+  </div>
   <div class="status-block">
     <div class="chip" id="fixChip">kein GPS</div>
     <div class="chip" id="steerChip">Lenkung aus</div>
@@ -70,6 +75,7 @@
   <button class="tool" id="btnB"><b>B</b><span>Spur anlegen</span></button>
   <button class="tool" id="btnCurve"><b>∿</b><span>Kurve</span></button>
   <button class="tool" id="btnBoundary"><b>⬠</b><span>Grenze</span></button>
+  <button class="tool" id="btnTurn"><b>↻</b><span>Wende</span></button>
   <button class="tool nudge" id="btnNudgeLeft"><b>◀</b><span>1 cm</span></button>
   <button class="tool nudge" id="btnNudgeRight"><b>▶</b><span>1 cm</span></button>
   <button class="tool wide" id="btnJob"><b>▶</b><span>Arbeit starten</span></button>
@@ -84,6 +90,7 @@
       <button data-tab="fields" class="tab active">Felder</button>
       <button data-tab="lines" class="tab">Spuren</button>
       <button data-tab="jobs" class="tab">Aufträge</button>
+      <button data-tab="headland" class="tab">Vorgewende</button>
       <button data-tab="machine" class="tab">Maschine</button>
       <button data-tab="system" class="tab">System</button>
       <button data-tab="setup" class="tab">Einbau</button>
@@ -105,9 +112,15 @@
   <section class="tab-panel" data-panel="lines" hidden>
     <div class="row">
       <button id="btnAPlus" class="primary">A+ Spur in aktueller Fahrtrichtung</button>
+      <button id="btnContour">◎ Kontur (Feldgrenze als Ringspur)</button>
     </div>
     <p class="note">A+ legt eine Spur durch die aktuelle Position in die Richtung,
       in die der Traktor gerade fährt – praktisch, wenn kein Platz für einen B-Punkt ist.</p>
+    <p class="note"><b>Kontur</b> braucht weder A noch B: Ring 0 ist die Feldgrenze
+      selbst, jeder weitere Ring liegt eine Arbeitsbreite weiter innen. Für das
+      Vorgewende und für krumme Schläge. Die Kontur wird nicht gespeichert –
+      sie entsteht jedes Mal neu aus der aktuellen Grenze und kann ihr deshalb
+      nicht davonlaufen.</p>
     <div class="list" id="lineList"></div>
   </section>
 
@@ -116,6 +129,52 @@
       <a class="button" id="btnJobsCsv" href="/api/jobs.csv">Alle Arbeiten als CSV</a>
     </div>
     <div class="list" id="jobList"></div>
+  </section>
+
+  <section class="tab-panel" data-panel="headland" hidden>
+    <div class="grid" id="headlandForm">
+      <label>Vorgewendespuren<input type="number" step="1" min="0" max="12" name="spuren"></label>
+      <label>Breite je Spur (m, 0 = Arbeitsbreite)<input type="number" step="0.1" min="0" max="80" name="breite_m"></label>
+      <label>Alarmabstand (m)<input type="number" step="1" min="1" max="200" name="alarm_abstand_m"></label>
+      <label>Kleinster Wendekreis (m)<input type="number" step="0.5" min="1.5" max="30" name="radius_m"></label>
+      <label>Wiedereinfahrt (Spuren weiter)<input type="number" step="1" min="1" max="8" name="ueberspringen"></label>
+      <label>Wendemuster
+        <select name="muster">
+          <option value="omega">Ω-Wende (weiter Bogen)</option>
+          <option value="u">U-Wende (kompakt)</option>
+        </select>
+      </label>
+      <label>Wenderichtung
+        <select name="richtung">
+          <option value="links">nach links</option>
+          <option value="rechts">nach rechts</option>
+        </select>
+      </label>
+    </div>
+    <div class="row" id="headlandSwitches">
+      <label class="switch"><input type="checkbox" name="aktiv">
+        Vorgewende anzeigen</label>
+      <label class="switch"><input type="checkbox" name="alarm_aktiv">
+        Annäherungsalarm</label>
+      <label class="switch"><input type="checkbox" name="nur_im_feld">
+        Sicherheitsprüfung: Route muss im Feld liegen</label>
+    </div>
+    <div class="row">
+      <button id="btnSaveHeadland" class="primary">Übernehmen</button>
+      <span class="note" id="headlandInfo" role="status" aria-atomic="true"></span>
+    </div>
+    <p class="note">Die <b>Tiefe</b> ist die Zahl der Spuren mal der Arbeitsbreite –
+      sie wandert mit dem Gerät mit. Die Restdistanz oben zählt bis zum
+      <i>Beginn</i> des Vorgewendes, nicht bis zur Grenze: dort endet die Arbeit
+      und beginnt die Wende.</p>
+    <p class="note"><b>Ω-Wende</b> holt nach vorn aus und braucht mehr Tiefe, fährt
+      dafür weichere Radien. Die <b>U-Wende</b> kommt mit deutlich weniger Tiefe
+      aus; dafür wächst die Zwischengerade mit dem Spurversatz.</p>
+    <p class="note"><b>Die Wende wird nur gelenkt.</b> Fahrstufe und Gas bleiben
+      beim Fahrer, und rückwärts fährt kein Muster. Die Sicherheitsprüfung
+      verlangt, dass <i>jeder</i> Punkt der Route im Feld liegt – ein einziger
+      draußen genügt zur Ablehnung. Wer sie abschaltet, fährt auf eigene
+      Verantwortung; Not-Aus und Hand am Lenkrad bleiben Bedingung.</p>
   </section>
 
   <section class="tab-panel" data-panel="machine" hidden>
@@ -128,6 +187,9 @@
       <label>Antennenhöhe über Boden (m)<input type="number" step="0.01" name="antenna_height_m"></label>
       <label>Gerät hinter Achse (m)<input type="number" step="0.01" name="tool_trailing_m"></label>
       <label>Gerät seitlich (m)<input type="number" step="0.01" name="tool_offset_m"></label>
+      <label class="switch"><input type="checkbox" name="trailed">
+        Gezogenes Gerät (Anhängerkinematik)</label>
+      <label>Deichsellänge (m)<input type="number" step="0.1" min="0.5" name="hitch_length_m"></label>
       <label>Radstand (m)<input type="number" step="0.01" name="wheelbase_m"></label>
       <label>Max. Lenkeinschlag (°)<input type="number" step="1" name="max_steer_deg"></label>
       <label>Lenkschärfe<input type="number" step="0.05" name="steer_gain"></label>
@@ -154,6 +216,14 @@
       <b>Abschalten ab:</b> ein offenes Teilstück schließt erst, wenn dieser Anteil
       seiner Breite überdeckt ist – das verhindert Flackern am Fahrspurrand. Die
       Feldgrenze schaltet unabhängig davon sofort ab.</p>
+    <p class="note"><b>Gezogenes Gerät:</b> ein angebautes Gerät dreht sich mit dem
+      Traktor, ein gezogenes nicht – es schwenkt erst ein, während es gezogen wird,
+      und steht in der Kurve innerhalb der Fahrspur. Mit dieser Option wird die
+      bearbeitete Fläche dort markiert, wo das Gerät wirklich ist. Die
+      <b>Deichsellänge</b> ist der Abstand vom Zugpunkt bis zur Geräteachse: je
+      kürzer, desto schneller folgt es. Geführt wird weiterhin das Fahrzeug –
+      auf ein nachlaufendes Gerät zu führen macht die Lenkung unruhig, nicht
+      genauer.</p>
   </section>
 
   <section class="tab-panel" data-panel="settings" hidden>
@@ -192,6 +262,23 @@
       Sensor sitzt nie exakt waagerecht in der Kabine – ein Grad Montagefehler
       sind bei 3 m Antennenhöhe schon 5 cm Dauerversatz in jeder Spur.</p>
     <div class="list" id="systemList"></div>
+
+    <h3 class="abschnitt">Rohdaten</h3>
+    <div class="row">
+      <button id="btnRohdaten" class="primary">Aufzeichnung starten</button>
+      <span class="note" id="rohdatenInfo" role="status" aria-atomic="true"></span>
+    </div>
+    <p class="note">Zeichnet auf, was <b>hereinkommt</b>: die rohen NMEA-Sätze und
+      die Lagemeldungen des Neigungssensors, mit Zeitstempel. Dieselbe Datei lässt
+      sich unter <b>Einstellungen → Empfänger → Quelle: „Aufzeichnung abspielen"</b>
+      wieder einlesen – dann läuft dieselbe Fahrt am Schreibtisch noch einmal durch
+      dieselbe Rechenkette. Genau das braucht man, um einen Fehler vom Feld
+      nachzustellen, statt ihn zu erraten.</p>
+    <p class="note">Aufgezeichnet wird das Rohe, nicht das Errechnete: ein
+      Protokoll der Ergebnisse würde jeden Auswertungsfehler mit aufzeichnen, den
+      man gerade sucht. Es ist eine Textdatei – im Notfall genügt ein Texteditor.
+      Rund 7 MB je Stunde; bei 200 MB endet die Aufzeichnung von selbst.</p>
+    <div class="list" id="rohdatenList"></div>
     <div class="row" id="simRow" hidden>
       <label>Simulator km/h <input type="range" id="simSpeed" min="0" max="15" step="0.5" value="9"></label>
       <label>Lenken <input type="range" id="simSteer" min="-30" max="30" step="1" value="0"></label>

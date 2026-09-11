@@ -25,7 +25,7 @@ from fastapi.staticfiles import StaticFiles
 from . import config as config_module
 from . import checklist as checklist_module
 from . import settings as settings_module
-from . import export, imu as imu_module, sync
+from . import export, imu as imu_module, recorder as recorder_module, sync
 from .actuators import build_output
 from .coverage import CoverageMap
 from .engine import Engine
@@ -49,10 +49,25 @@ class Application:
         self.source = build_source(config, self.engine.on_fix)
         if isinstance(self.source, SimulatorSource):
             self.engine.simulator = self.source
-        # Der Neigungssensor kennt beim Simulator das virtuelle Fahrzeug, damit
-        # Hangausgleich und Drehrate auch ohne Hardware sichtbar werden.
-        self.imu = imu_module.build_source(config, self.engine.simulator)
+        # Beim Abspielen führt die Aufzeichnung beide Ströme: Position und Lage
+        # kommen aus derselben Datei und bleiben damit im selben Takt. Ein
+        # zweiter, eigener Sensor daneben würde davonlaufen - und dann läge die
+        # Schräglage neben der Position, also genau der Fehler, den man mit der
+        # Aufzeichnung untersuchen wollte.
+        if isinstance(self.source, recorder_module.ReplaySource):
+            self.imu = self.source.imu
+        else:
+            # Der Neigungssensor kennt beim Simulator das virtuelle Fahrzeug,
+            # damit Hangausgleich und Drehrate auch ohne Hardware sichtbar werden.
+            self.imu = imu_module.build_source(config, self.engine.simulator)
         self.engine.imu = self.imu
+
+        # Rohdaten: eine Aufzeichnung, an beiden Quellen angehängt.
+        self.aufzeichnung = recorder_module.Aufzeichnung(
+            Path(config.server.data_dir) / "rohdaten")
+        self.source.recorder = self.aufzeichnung
+        if self.imu is not None:
+            self.imu.recorder = self.aufzeichnung
         self.steering = SteeringController(
             config.steering, build_output(config, self.imu)
         )
@@ -109,6 +124,10 @@ class Application:
     async def stop(self) -> None:
         with contextlib.suppress(Exception):
             self.engine.stop_job()
+        # Eine halb geschriebene Aufzeichnung ist trotzdem eine: was auf der
+        # Karte steht, bleibt lesbar - der letzte Block gehört noch dazu.
+        with contextlib.suppress(Exception):
+            self.aufzeichnung.stop()
         await self.steering.stop()
         await self.source.stop()
         if self.imu is not None:
@@ -192,7 +211,10 @@ class Application:
                 "status": self.source.status,
                 "healthy": self.source.healthy,
                 "lines": self.source.lines_received,
+                # Beim Abspielen: wo in der Aufzeichnung wir gerade sind.
+                "replay_s": getattr(self.source, "position_s", None),
             },
+            "rohdaten": self.aufzeichnung.status(),
             "corrections": {
                 "source": self.config.corrections.source,
                 "status": self.corrections.status if self.corrections else (
@@ -333,6 +355,11 @@ def create_app(config=None) -> FastAPI:
             engine.clear_line()
         return ok()
 
+    @api.post("/api/guidance/contour")
+    async def use_contour():
+        """Die Feldgrenze als Ringspur nehmen - ohne A- und B-Punkt."""
+        return guard(engine.use_contour)
+
     @api.post("/api/guidance/a")
     async def set_a():
         return guard(engine.set_a)
@@ -366,6 +393,96 @@ def create_app(config=None) -> FastAPI:
     @api.post("/api/record/stop")
     async def stop_recording(payload: dict = Body(default={})):
         return guard(engine.stop_recording, payload.get("name", ""))
+
+    # -- Rohdaten: aufzeichnen und abspielen -------------------------------
+
+    @api.get("/api/rohdaten")
+    async def list_rohdaten() -> dict:
+        return {
+            "aufzeichnung": application.aufzeichnung.status(),
+            "dateien": recorder_module.liste(application.aufzeichnung.ordner),
+            "abspielen": {
+                "aktiv": config.gnss.source == "replay",
+                "datei": config.gnss.replay_file,
+                "tempo": config.gnss.replay_speed,
+                "schleife": config.gnss.replay_loop,
+                "position_s": getattr(application.source, "position_s", None),
+            },
+        }
+
+    @api.post("/api/rohdaten/start")
+    async def start_rohdaten():
+        """Mitschreiben, was hereinkommt - roh, vor jeder Auswertung."""
+        # Gefragt wird die *laufende* Quelle, nicht die Einstellung: die Quelle
+        # wechselt erst beim Neustart. Wer in der Oberfläche zurück auf
+        # "Simulator" stellt, läuft bis dahin weiter auf der Aufzeichnung - und
+        # bekäme sonst eine Kopie der Kopie, die aussieht wie eine echte Fahrt.
+        if isinstance(application.source, recorder_module.ReplaySource):
+            raise HTTPException(400, "Es läuft gerade eine Aufzeichnung ab - "
+                                     "eine Kopie davon wäre keine neue Messung")
+        return ok(application.aufzeichnung.start())
+
+    @api.post("/api/rohdaten/stop")
+    async def stop_rohdaten():
+        return ok(application.aufzeichnung.stop())
+
+    def _rohdatei(name: str) -> Path:
+        # Der Name kommt von außen und wird zu einem Pfad: nur die selbst
+        # vergebenen Namen sind gültig, sonst wäre '../../etc/passwd' einer.
+        if not recorder_module.ist_gueltiger_name(name):
+            raise HTTPException(400, "Kein gültiger Name einer Aufzeichnung")
+        pfad = application.aufzeichnung.ordner / name
+        if not pfad.exists():
+            raise HTTPException(404, "Aufzeichnung gibt es nicht")
+        return pfad
+
+    @api.get("/api/rohdaten/{name}")
+    async def download_rohdaten(name: str):
+        pfad = _rohdatei(name)
+        return PlainTextResponse(
+            pfad.read_text(encoding="ascii", errors="replace"),
+            headers={"Content-Disposition": f'attachment; filename="{name}"'})
+
+    @api.delete("/api/rohdaten/{name}")
+    async def delete_rohdaten(name: str):
+        pfad = _rohdatei(name)
+        if (application.aufzeichnung.laeuft
+                and application.aufzeichnung.pfad == pfad):
+            raise HTTPException(400, "Diese Aufzeichnung läuft gerade")
+        if config.gnss.source == "replay" and config.gnss.replay_file == name:
+            raise HTTPException(400, "Diese Aufzeichnung wird gerade abgespielt")
+        pfad.unlink()
+        return ok()
+
+    # -- Vorgewende und Wende ---------------------------------------------
+
+    @api.get("/api/headland")
+    async def get_headland() -> dict:
+        return {
+            **engine.headland.to_dict(),
+            **engine.headland_status.to_dict(),
+            "arbeitsbreite_m": engine.profile.width_m,
+            "spurabstand_m": engine.profile.spacing_m,
+        }
+
+    @api.post("/api/headland")
+    async def set_headland(payload: dict = Body(...)):
+        return guard(lambda: engine.update_headland(payload).to_dict())
+
+    @api.post("/api/turn/plan")
+    async def plan_turn(payload: dict = Body(default={})):
+        """Route berechnen und gegen die Feldgrenze prüfen - noch nicht fahren."""
+        return guard(engine.plan_turn, str(payload.get("muster", "")),
+                     str(payload.get("richtung", "")))
+
+    @api.post("/api/turn/start")
+    async def start_turn():
+        return guard(engine.start_turn)
+
+    @api.post("/api/turn/stop")
+    async def stop_turn():
+        engine.stop_turn()
+        return ok()
 
     # -- jobs -------------------------------------------------------------
 

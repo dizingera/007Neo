@@ -1,14 +1,18 @@
 """Guidance: turn a position into "how far off the pass am I, and where do I steer".
 
-Two pattern types cover almost all field work:
+Three pattern types cover almost all field work:
 
 * AB line - two points define a direction, and the field is covered by parallel
   passes spaced one working width apart.
-* Curve (contour) - a recorded track is repeated at one width spacing, for
-  headlands and irregular fields.
+* Curve - a recorded track is repeated at one width spacing, for headlands and
+  irregular fields.
+* Contour - the stored field boundary itself is the pattern: ring 0 is the
+  boundary, every further ring lies one working width further in.  No A/B point
+  is needed, and the ring number does not depend on which way round the
+  boundary happened to be recorded.
 
-Both reduce to the same question: signed lateral distance to the nearest pass.
-Everything the driver sees (lightbar, centimetres off, pass number) and
+All three reduce to the same question: signed lateral distance to the nearest
+pass.  Everything the driver sees (lightbar, centimetres off, pass number) and
 everything the autosteer needs (steer angle) comes out of that one number plus
 the heading error.
 """
@@ -25,11 +29,24 @@ from .geo import (
     distance,
     heading_deg,
     normalize_heading,
+    point_in_polygon,
     project_on_segment,
     simplify,
 )
 
-Mode = Literal["ab", "curve"]
+# "turn" ist kein Muster, das man anlegt - es ist der Zustand während einer
+# geplanten Wende (siehe headland.py) und erscheint nur in der Ausgabe.
+Mode = Literal["ab", "curve", "contour", "turn"]
+
+
+def _forward_vector(heading: float) -> Point:
+    h = math.radians(heading)
+    return math.sin(h), math.cos(h)
+
+
+def _right_vector(heading: float) -> Point:
+    h = math.radians(heading)
+    return math.cos(h), -math.sin(h)
 
 
 @dataclass
@@ -50,6 +67,8 @@ class VehicleProfile:
     antenna_height_m: float = 3.0   # Boden bis Antenne - Maßstab des Hangausgleichs
     tool_offset_m: float = 0.0      # implement pulled off-centre (+ = right)
     tool_trailing_m: float = 0.0    # distance from rear axle back to the tool
+    trailed: bool = False           # gezogenes Gerät statt starrer Anbau
+    hitch_length_m: float = 4.0     # Zugpunkt bis Geräteachse (nur gezogen)
     max_steer_deg: float = 35.0
     steer_gain: float = 0.9         # Stanley k: higher = harder pull back to line
     steer_softening: float = 1.2    # m/s added to the denominator; tames low speed
@@ -94,6 +113,42 @@ class VehicleProfile:
             antenna[1] - forward[1] * back + right[1] * side,
         )
 
+    def hitch_position(self, antenna: Point, heading: float) -> Point:
+        """Der Zugpunkt - Mitte Hinterachse, seitlicher Antennenversatz heraus."""
+        forward = _forward_vector(heading)
+        right = _right_vector(heading)
+        return (
+            antenna[0] - forward[0] * self.antenna_forward_m
+            - right[0] * self.antenna_right_m,
+            antenna[1] - forward[1] * self.antenna_forward_m
+            - right[1] * self.antenna_right_m,
+        )
+
+    def implement_position(self, antenna: Point, heading: float,
+                           implement_heading: Optional[float] = None) -> Point:
+        """Wo das Gerät steht - dort wird markiert.
+
+        Beim starr angebauten Gerät ist das der Werkzeugpunkt aus
+        ``tool_position``: es steht immer genau hinter dem Fahrzeug.
+
+        Beim gezogenen Gerät nicht. Es hängt am Zugpunkt und richtet sich nach
+        *seiner eigenen* Ausrichtung aus, die dem Fahrzeug nachläuft (siehe
+        ``ImplementHeading``). In der Kurve steht es deshalb spürbar innerhalb
+        der Fahrspur - genau der Unterschied, den ein starrer Versatz
+        verschweigt und den man abends an den Streifen im Feld sieht.
+        """
+        if not self.trailed:
+            return self.tool_position(antenna, heading)
+        gezogen_kurs = heading if implement_heading is None else implement_heading
+        hitch = self.hitch_position(antenna, heading)
+        forward = _forward_vector(gezogen_kurs)
+        right = _right_vector(gezogen_kurs)
+        laenge = max(0.5, self.hitch_length_m)
+        return (
+            hitch[0] - forward[0] * laenge + right[0] * self.tool_offset_m,
+            hitch[1] - forward[1] * laenge + right[1] * self.tool_offset_m,
+        )
+
 
 @dataclass
 class GuidanceState:
@@ -132,12 +187,20 @@ class GuidanceLine:
     """A reference pattern plus the passes derived from it."""
 
     def __init__(self, mode: Mode, points: Sequence[Point], spacing: float,
-                 name: str = "", line_id: str = "") -> None:
+                 name: str = "", line_id: str = "", derived: bool = False) -> None:
         if len(points) < 2:
             raise ValueError("Eine Führungslinie braucht mindestens zwei Punkte")
+        if mode == "contour" and len(points) < 3:
+            raise ValueError("Die Kontur braucht eine Feldgrenze mit mindestens "
+                             "drei Punkten")
         self.mode: Mode = mode
         self.name = name
         self.id = line_id
+        # Abgeleitet heißt: entsteht bei jedem Laden neu aus etwas anderem (die
+        # Kontur aus der Feldgrenze) und wird deshalb nicht als eigene Spur
+        # gespeichert. Eine gespeicherte Kopie liefe der Grenze davon, sobald
+        # jemand sie neu abfährt - und niemand würde es merken.
+        self.derived = derived or mode == "contour"
         self.spacing = max(0.1, spacing)
         self.nudge_m = 0.0  # manual sideways trim of the whole pattern
         if mode == "ab":
@@ -174,11 +237,52 @@ class GuidanceLine:
         _, lateral, head, along = best
         return lateral, head, along
 
+    def _contour_lateral(self, p: Point) -> tuple[float, float, float, Point]:
+        """Abstand zur Ringspur, gemessen **nach innen**.
+
+        Die Feldgrenze ist ein geschlossener Ring, also wird auch das
+        Schlussstück vom letzten zum ersten Punkt mitgerechnet - sonst hätte der
+        Ring genau dort eine Lücke, an der die Aufzeichnung zufällig endete.
+
+        Gemessen wird entlang der nach innen zeigenden Normalen, nicht "rechts
+        der Fahrtrichtung". Damit hängt die Ringnummer nicht davon ab, ob die
+        Grenze im oder gegen den Uhrzeigersinn abgefahren wurde: Ring 0 ist
+        immer die Grenze, Ring 1 immer eine Arbeitsbreite weiter drinnen. Für
+        den Lichtbalken rechnet ``solve`` das anschließend in die Fahrtrichtung
+        zurück.
+        """
+        bester = (float("inf"), 0.0, 0.0, 0.0, 0.0)   # d, quer, kurs, weg, i
+        gefahren = 0.0
+        n = len(self.points)
+        for i in range(n):
+            a, b = self.points[i], self.points[(i + 1) % n]
+            stueck = distance(a, b)
+            fuss, t, quer = project_on_segment(p, a, b)
+            d = distance(p, fuss)
+            if d < bester[0]:
+                bester = (d, quer, heading_deg(a, b), gefahren + t * stueck, i)
+            gefahren += stueck
+        _, quer, kurs, weg, i = bester
+
+        # `quer` ist positiv rechts der Kantenrichtung. Ob das nach innen oder
+        # nach außen zeigt, sagt eine Probe kurz neben dem Fußpunkt.
+        a, b = self.points[int(i)], self.points[(int(i) + 1) % n]
+        mitte = ((a[0] + b[0]) / 2.0, (a[1] + b[1]) / 2.0)
+        rx, ry = _right_vector(kurs)
+        probe = (mitte[0] + rx * 0.25, mitte[1] + ry * 0.25)
+        innen = (rx, ry) if point_in_polygon(probe, self.points) else (-rx, -ry)
+        if innen[0] != rx:
+            quer = -quer
+        return quer, kurs, weg, innen
+
     def solve(self, position: Point, vehicle_heading: float,
               speed_ms: float, profile: VehicleProfile) -> GuidanceState:
         """Compute the guidance state for a tool position and heading."""
+        innen: Optional[Point] = None
         if self.mode == "ab":
             lateral, line_heading, along = self._ab_lateral(position)
+        elif self.mode == "contour":
+            lateral, line_heading, along, innen = self._contour_lateral(position)
         else:
             lateral, line_heading, along = self._curve_lateral(position)
 
@@ -199,6 +303,13 @@ class GuidanceLine:
 
         # On a reversed pass "right of the line" flips too.
         signed_xte = -cross_track if reversed_dir else cross_track
+        if innen is not None:
+            # Auf dem Ring wurde nach innen gemessen. Der Lichtbalken zeigt aber
+            # "links/rechts der Spur" - also zurück in die Fahrtrichtung drehen.
+            # Beide Vektoren stehen senkrecht auf derselben Kante, das Produkt
+            # ist damit +1 oder -1: es kehrt das Vorzeichen um oder lässt es.
+            rx, ry = _right_vector(target)
+            signed_xte = cross_track * (innen[0] * rx + innen[1] * ry)
 
         steer = self._steer_angle(signed_xte, heading_error, speed_ms, profile)
 
@@ -240,12 +351,31 @@ class GuidanceLine:
         """Geometry of the neighbouring passes so the cab display can draw them."""
         result = []
         for offset in range(centre_pass - count, centre_pass + count + 1):
+            # Ring -1 läge außerhalb der Feldgrenze. Ihn zu zeichnen hieße, eine
+            # Spur anzubieten, auf der nicht gearbeitet wird.
+            if self.mode == "contour" and offset < 0:
+                continue
             shift = offset * self.spacing + self.nudge_m
+            punkte = self._shift(shift, length)
+            if not punkte:
+                continue
             result.append({
                 "pass": offset,
-                "points": [list(p) for p in self._shift(shift, length)],
+                "points": [list(p) for p in punkte],
+                "closed": self.mode == "contour",
             })
         return result
+
+    def _inward(self) -> float:
+        """+1, wenn die Linksnormale nach innen zeigt, sonst -1.
+
+        Aus dem Umlaufsinn der gespeicherten Grenze, einmal je Zeichnung.
+        """
+        n = len(self.points)
+        flaeche = sum(self.points[i][0] * self.points[(i + 1) % n][1]
+                      - self.points[(i + 1) % n][0] * self.points[i][1]
+                      for i in range(n))
+        return 1.0 if flaeche > 0 else -1.0
 
     def _shift(self, shift: float, length: float) -> list[Point]:
         if self.mode == "ab":
@@ -260,15 +390,27 @@ class GuidanceLine:
                 (mid[0] + forward[0] * half, mid[1] + forward[1] * half),
             ]
             return [(x + right[0] * shift, y + right[1] * shift) for x, y in base]
+        pts = self.points
+        out: list[Point] = []
+        if self.mode == "contour":
+            # Ring: geschlossen versetzen, und zwar nach innen. Der Umlaufsinn
+            # der Grenze wird dabei herausgerechnet, sonst wäre Ring 1 mal
+            # drinnen und mal draußen - je nachdem, wie herum jemand das Feld
+            # abgefahren hat.
+            nach_innen = -self._inward()
+            n = len(pts)
+            for i, p in enumerate(pts):
+                a, b = pts[(i - 1) % n], pts[(i + 1) % n]
+                right = _right_vector(heading_deg(a, b))
+                out.append((p[0] + right[0] * shift * nach_innen,
+                            p[1] + right[1] * shift * nach_innen))
+            return out
         # Curve: offset each vertex along the local normal.  Good enough for
         # drawing; the guidance maths above never relies on it.
-        out: list[Point] = []
-        pts = self.points
         for i, p in enumerate(pts):
             a = pts[max(0, i - 1)]
             b = pts[min(len(pts) - 1, i + 1)]
-            head = math.radians(heading_deg(a, b))
-            right = (math.cos(head), -math.sin(head))
+            right = _right_vector(heading_deg(a, b))
             out.append((p[0] + right[0] * shift, p[1] + right[1] * shift))
         return out
 
@@ -280,6 +422,7 @@ class GuidanceLine:
             "points": [list(p) for p in self.points],
             "spacing_m": self.spacing,
             "nudge_m": self.nudge_m,
+            "derived": self.derived,
         }
 
 
@@ -310,6 +453,51 @@ def lightbar_offset(cross_track_m: float, led_cm: float = 5.0,
     """
     steps = int(round(cross_track_m * 100.0 / led_cm))
     return max(-leds, min(leds, steps))
+
+
+@dataclass
+class ImplementHeading:
+    """Die nachlaufende Ausrichtung eines gezogenen Geräts.
+
+    Ein angebautes Gerät dreht sich mit dem Fahrzeug; ein gezogenes nicht. Es
+    hängt an der Deichsel und schwenkt erst ein, während es gezogen wird - das
+    klassische Anhängernachlaufmodell:
+
+        Drehrate = Geschwindigkeit / Deichsellänge · sin(Winkel zum Fahrzeug)
+
+    Zwei Dinge fallen daraus heraus, und beide entsprechen der Erfahrung: im
+    Stand dreht sich nichts, egal wie sehr am Lenkrad gedreht wird, und je
+    kürzer die Deichsel, desto schneller folgt das Gerät.
+
+    Die Begrenzung der Drehrate ist keine Physik, sondern Vorsicht: bei einer
+    sehr kurzen Deichsel und einem großen Zeitschritt würde das Modell sonst
+    über die Fahrzeugausrichtung hinausschießen und anfangen zu schwingen -
+    ein Rechenfehler, der auf dem Bildschirm wie ein schlingerndes Gerät
+    aussähe.
+    """
+
+    max_rate_deg_s: float = 170.0
+    value: Optional[float] = None
+
+    def reset(self, heading: Optional[float] = None) -> None:
+        """Nach einem Positionssprung: lieber neu anfangen als weiterschleppen."""
+        self.value = heading
+
+    def update(self, vehicle_heading: float, speed_ms: float, dt: float,
+               profile: VehicleProfile) -> float:
+        if self.value is None:
+            self.value = vehicle_heading
+        if not profile.trailed:
+            self.value = vehicle_heading
+            return self.value
+        if dt <= 0.0 or dt > 5.0:
+            return self.value
+        laenge = max(0.5, profile.hitch_length_m)
+        winkel = angle_difference(vehicle_heading, self.value)
+        rate = math.degrees(abs(speed_ms) / laenge * math.sin(math.radians(winkel)))
+        rate = max(-self.max_rate_deg_s, min(self.max_rate_deg_s, rate))
+        self.value = normalize_heading(self.value + rate * dt)
+        return self.value
 
 
 @dataclass

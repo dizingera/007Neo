@@ -67,6 +67,8 @@ class ImuSource:
         self.status = "aus"
         self.roll_offset = 0.0
         self.pitch_offset = 0.0
+        # Mitschreiben, wenn eine Aufzeichnung läuft (siehe recorder.py).
+        self.recorder = None
 
     async def run(self) -> None:  # pragma: no cover - in Unterklassen
         raise NotImplementedError
@@ -99,6 +101,11 @@ class ImuSource:
             calibration=calibration,
             received_at=time.time(),
         )
+        if self.recorder is not None and self.recorder.laeuft:
+            # Aufgezeichnet wird die genullte Lage, also das, womit die
+            # Rechenkette arbeitet. Beim Abspielen steht die Nullung dann schon
+            # drin - sie ein zweites Mal abzuziehen wäre der doppelte Versatz.
+            self.recorder.imu(self.attitude, self.attitude.received_at)
 
 
 class TinkerforgeImu(ImuSource):
