@@ -310,6 +310,8 @@ class ReplaySource(GnssSource):
                     await asyncio.sleep(1.0)
                 return
             self.fertig.set()
+            # Eine Schleife über eine kurze Aufzeichnung darf nicht heißlaufen.
+            await asyncio.sleep(0.1)
 
     async def abspielen(self) -> None:
         """Die Aufzeichnung genau einmal abspielen und dann zurückkommen.
@@ -341,6 +343,12 @@ class ReplaySource(GnssSource):
                 warten = (versatz - letzte) / self.tempo
                 if warten > 0.0005:
                     await asyncio.sleep(min(5.0, warten))
+                else:
+                    # Kein Abstand zum Vorgänger - trotzdem den anderen einmal
+                    # das Wort geben. Sonst hält eine dicht geschriebene oder
+                    # schnell abgespielte Datei die Ereignisschleife fest, und
+                    # Oberfläche wie Schnittstelle stehen still.
+                    await asyncio.sleep(0)
                 letzte = versatz
                 self.position_s = versatz
                 await self._eintrag(teile[1], teile[2])

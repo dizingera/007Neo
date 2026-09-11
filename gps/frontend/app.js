@@ -1377,13 +1377,13 @@ async function renderRohdaten() {
         ['Herunterladen', () => { window.location = `/api/rohdaten/${datei.datei}`; }],
         ['Abspielen', async () => {
           if (!confirm(`"${datei.datei}" abspielen?\n\nDer Empfänger wird dafür ` +
-                       `abgeschaltet – das System läuft danach auf der ` +
-                       `Aufzeichnung, nicht auf der Wirklichkeit. Wirkt nach ` +
-                       `einem Neustart.`)) return;
+                       `abgeschaltet und die Lenkung geht aus – das System läuft ` +
+                       `danach auf der Aufzeichnung, nicht auf der Wirklichkeit. ` +
+                       `Zurück über Einstellungen → Empfänger → Quelle.`)) return;
           const ok_ = await api('POST', '/api/settings', { aenderungen: {
             'gnss.source': 'replay', 'gnss.replay_file': datei.datei,
           }});
-          if (ok_) toast('Abspielen eingestellt – wirkt nach einem Neustart');
+          if (ok_) { toast('Aufzeichnung läuft – Lenkung ist aus'); el('sheet').hidden = true; }
         }],
         ['Löschen', async () => {
           if (!confirm(`"${datei.datei}" löschen?`)) return;

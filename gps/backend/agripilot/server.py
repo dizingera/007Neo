@@ -46,28 +46,13 @@ class Application:
         self.config = config
         self.store = Storage(config.db_path)
         self.engine = Engine(config, self.store)
-        self.source = build_source(config, self.engine.on_fix)
-        if isinstance(self.source, SimulatorSource):
-            self.engine.simulator = self.source
-        # Beim Abspielen führt die Aufzeichnung beide Ströme: Position und Lage
-        # kommen aus derselben Datei und bleiben damit im selben Takt. Ein
-        # zweiter, eigener Sensor daneben würde davonlaufen - und dann läge die
-        # Schräglage neben der Position, also genau der Fehler, den man mit der
-        # Aufzeichnung untersuchen wollte.
-        if isinstance(self.source, recorder_module.ReplaySource):
-            self.imu = self.source.imu
-        else:
-            # Der Neigungssensor kennt beim Simulator das virtuelle Fahrzeug,
-            # damit Hangausgleich und Drehrate auch ohne Hardware sichtbar werden.
-            self.imu = imu_module.build_source(config, self.engine.simulator)
-        self.engine.imu = self.imu
-
         # Rohdaten: eine Aufzeichnung, an beiden Quellen angehängt.
         self.aufzeichnung = recorder_module.Aufzeichnung(
             Path(config.server.data_dir) / "rohdaten")
-        self.source.recorder = self.aufzeichnung
-        if self.imu is not None:
-            self.imu.recorder = self.aufzeichnung
+        self.source = None
+        self.imu = None
+        self._quellen_tasks: list[asyncio.Task] = []
+        self._quellen_aufbauen()
         self.steering = SteeringController(
             config.steering, build_output(config, self.imu)
         )
@@ -82,6 +67,79 @@ class Application:
         self.tasks: list[asyncio.Task] = []
         self.clients: set[WebSocket] = set()
 
+    def _quellen_aufbauen(self) -> None:
+        """Empfänger und Neigungssensor aus der Konfiguration bauen.
+
+        Getrennt vom Rest, weil das auch im Betrieb passieren darf: wer eine
+        Aufzeichnung ansehen will, soll dafür nicht den Dienst durchstarten.
+        """
+        config = self.config
+        self.source = build_source(config, self.engine.on_fix)
+        self.engine.simulator = (self.source if isinstance(self.source, SimulatorSource)
+                                 else None)
+        # Beim Abspielen führt die Aufzeichnung beide Ströme: Position und Lage
+        # kommen aus derselben Datei und bleiben damit im selben Takt. Ein
+        # zweiter, eigener Sensor daneben würde davonlaufen - und dann läge die
+        # Schräglage neben der Position, also genau der Fehler, den man mit der
+        # Aufzeichnung untersuchen wollte.
+        if isinstance(self.source, recorder_module.ReplaySource):
+            self.imu = self.source.imu
+        else:
+            # Der Neigungssensor kennt beim Simulator das virtuelle Fahrzeug,
+            # damit Hangausgleich und Drehrate auch ohne Hardware sichtbar werden.
+            self.imu = imu_module.build_source(config, self.engine.simulator)
+        self.engine.imu = self.imu
+        self.source.recorder = self.aufzeichnung
+        if self.imu is not None:
+            self.imu.recorder = self.aufzeichnung
+            # Die Nullung des Sensors gehört zum Einbau und darf einen Neustart
+            # überleben - sonst muss nach jedem Ausschalten neu genullt werden.
+            offsets = self.store.get_setting("imu_offsets") or {}
+            self.imu.roll_offset = float(offsets.get("roll_offset", 0.0))
+            self.imu.pitch_offset = float(offsets.get("pitch_offset", 0.0))
+
+    def _quellen_starten(self) -> None:
+        self._quellen_tasks = [asyncio.create_task(self.source.run())]
+        if self.imu is not None:
+            self._quellen_tasks.append(asyncio.create_task(self.imu.run()))
+
+    async def quelle_wechseln(self) -> dict:
+        """Empfänger und Sensor im laufenden Betrieb neu aus der Konfiguration bauen.
+
+        Die Reihenfolge ist Sicherheitssache: erst die Lenkung aus und eine
+        laufende Wende beendet - einer Maschine, die gerade lenkt, darf keine
+        andere Positionsquelle untergeschoben werden. Dann eine laufende
+        Aufzeichnung beenden, denn was danach hereinkommt, ist eine andere
+        Fahrt. Erst dann die alte Quelle anhalten und die neue starten.
+        """
+        self.steering.disarm("Positionsquelle gewechselt")
+        self.engine.stop_turn("Positionsquelle gewechselt")
+        if self.aufzeichnung.laeuft:
+            self.aufzeichnung.stop()
+            self.engine.note("Aufzeichnung beendet: Quelle gewechselt")
+        alte_quelle, alter_sensor = self.source, self.imu
+        for task in self._quellen_tasks:
+            task.cancel()
+        with contextlib.suppress(Exception):
+            await alte_quelle.stop()
+        if alter_sensor is not None:
+            with contextlib.suppress(Exception):
+                await alter_sensor.stop()
+        self._quellen_aufbauen()
+        # Der Lenkausgang hängt am Sensor (Drehrate als Rückmeldung): neu bauen.
+        await self.steering.stop()
+        self.steering = SteeringController(
+            self.config.steering, build_output(self.config, self.imu))
+        self.engine.steering = self.steering
+        await self.steering.start()
+        # Kurs und Nachlauf gehören zur alten Fahrt; der erste Schritt der neuen
+        # wird von der Plausibilitätsprüfung ohnehin verworfen.
+        self.engine.heading_filter.value = None
+        self.engine.implement_heading.reset(None)
+        self._quellen_starten()
+        self.engine.note(f"Quelle: {self.config.gnss.source}")
+        return {"gnss": self.config.gnss.source, "imu": self.config.imu.source}
+
     # -- lifecycle --------------------------------------------------------
 
     async def start(self) -> None:
@@ -90,16 +148,8 @@ class Application:
             cfg.network.device_id, cfg.network.device_name,
             cfg.network.role, VERSION,
         )
-        if self.imu is not None:
-            # Die Nullung des Sensors gehört zum Einbau und darf einen Neustart
-            # überleben - sonst muss nach jedem Ausschalten neu genullt werden.
-            offsets = self.store.get_setting("imu_offsets") or {}
-            self.imu.roll_offset = float(offsets.get("roll_offset", 0.0))
-            self.imu.pitch_offset = float(offsets.get("pitch_offset", 0.0))
         await self.steering.start()
-        self.tasks.append(asyncio.create_task(self.source.run()))
-        if self.imu is not None:
-            self.tasks.append(asyncio.create_task(self.imu.run()))
+        self._quellen_starten()
 
         if cfg.is_master:
             # The master owns the caster connection and re-serves it.
@@ -113,7 +163,9 @@ class Application:
             if cfg.network.use_master_rtcm:
                 host = _host_of(cfg.network.master_url)
                 self.rtcm_client = RtcmRelayClient(
-                    host, cfg.network.rtcm_relay_port, self.source.write_rtcm
+                    host, cfg.network.rtcm_relay_port,
+                    # nicht die gebundene Methode: die Quelle kann wechseln
+                    lambda daten: self.source.write_rtcm(daten)
                 )
                 self.tasks.append(asyncio.create_task(self.rtcm_client.run()))
             self.sync_client = sync.SyncClient(cfg, self.store)
@@ -137,7 +189,7 @@ class Application:
                 await component.stop()
         if self.relay is not None:
             await self.relay.stop()
-        for task in self.tasks:
+        for task in self.tasks + self._quellen_tasks:
             task.cancel()
         self.store.close()
 
@@ -251,6 +303,11 @@ class Application:
 def _host_of(url: str) -> str:
     from urllib.parse import urlparse
     return urlparse(url).hostname or url
+
+
+# Einstellungen an Empfänger und Sensor, die nur einen Wert ändern und keine
+# neue Verbindung brauchen - alle anderen gnss./imu.-Werte bauen die Quelle neu.
+NUR_WERT = ("imu.roll_sign", "imu.terrain_compensation", "imu.use_for_heading")
 
 
 def create_app(config=None) -> FastAPI:
@@ -666,7 +723,17 @@ def create_app(config=None) -> FastAPI:
             raise HTTPException(400, str(exc)) from exc
         if ergebnis["gespeichert"]:
             engine.note(f"Einstellungen geändert ({ergebnis['gespeichert']})")
+        # Empfänger und Sensor werden im Betrieb neu gebaut - ein Neustart
+        # dafür wäre auf dem Feld eine Zumutung und beim Abspielen ein Umweg.
+        if any(k.startswith(("gnss.", "imu.")) and k not in NUR_WERT
+               for k in aenderungen):
+            ergebnis["quelle"] = await application.quelle_wechseln()
         return ok({**ergebnis, "werte": settings_module.werte(config)})
+
+    @api.post("/api/quelle/neustart")
+    async def quelle_neustart():
+        """Empfänger und Sensor neu verbinden - etwa nach dem Umstecken."""
+        return ok(await application.quelle_wechseln())
 
     @api.post("/api/simulator")
     async def simulator(payload: dict = Body(...)):

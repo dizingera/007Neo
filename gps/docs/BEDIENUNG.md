@@ -323,11 +323,15 @@ damit eine vergessene Aufzeichnung dem Pi nicht die Karte vollschreibt.
 Sinnvoll ist, sie **vor** der Fahrt zu starten, bei der man etwas vermutet.
 Nachträglich lässt sich nichts aufzeichnen.
 
-**Abspielen:** in der Liste bei der Aufzeichnung auf *Abspielen*, dann das
-Programm neu starten. Danach läuft dieselbe Fahrt noch einmal – durch dieselbe
-Rechenkette, mit denselben Zeitabständen. Position und Neigung kommen aus
-derselben Datei und bleiben deshalb im selben Takt. Zurück auf den Empfänger
-geht es über Einstellungen → Empfänger → Quelle.
+**Abspielen:** in der Liste bei der Aufzeichnung auf *Abspielen*. Sofort, ohne
+Neustart, läuft dieselbe Fahrt noch einmal – durch dieselbe Rechenkette, mit
+denselben Zeitabständen. Position und Neigung kommen aus derselben Datei und
+bleiben deshalb im selben Takt. Die Lenkung geht dabei aus und eine laufende
+Aufzeichnung wird beendet: einer Maschine, die gerade lenkt, darf keine andere
+Positionsquelle untergeschoben werden. Zurück auf den Empfänger geht es über
+Einstellungen → Empfänger → Quelle – ebenfalls sofort. Das gilt für alle
+Einstellungen an Empfänger und Sensor: Anschluss, Baudrate, Adresse wirken ohne
+Neustart, die Verbindung wird neu aufgebaut.
 
 **Was aufgezeichnet wird, ist das Rohe, nicht das Errechnete.** Ein Protokoll
 der Ergebnisse würde jeden Auswertungsfehler mit aufzeichnen, den man gerade

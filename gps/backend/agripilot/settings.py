@@ -84,9 +84,11 @@ GRUPPEN: list[Gruppe] = [
         id="gnss",
         titel="Empfänger",
         hinweis="Woher die Position kommt. Ohne Konfigurationsdatei läuft das "
-                "System im Simulator - ein virtueller Traktor mit RTK-Fix.",
+                "System im Simulator - ein virtueller Traktor mit RTK-Fix. "
+                "Änderungen hier wirken sofort: Empfänger und Sensor werden neu "
+                "verbunden, die Lenkung geht dabei aus.",
         felder=[
-            Feld("gnss.source", "Quelle", "auswahl", auswahl=(
+            Feld("gnss.source", "Quelle", "auswahl", sofort=True, auswahl=(
                 ("serial", "Seriell/USB (F9P am Rechner)"),
                 ("tcp", "TCP (Empfänger im Netz)"),
                 ("udp", "UDP (Empfänger im Netz)"),
@@ -96,27 +98,27 @@ GRUPPEN: list[Gruppe] = [
                      "'Aufzeichnung abspielen' fährt eine mitgeschriebene Fahrt "
                      "noch einmal - zum Untersuchen am Schreibtisch, nicht zum "
                      "Arbeiten auf dem Feld."),
-            Feld("gnss.port", "Anschluss", hilfe="Windows z. B. COM3, Linux /dev/ttyACM0. "
+            Feld("gnss.port", "Anschluss", sofort=True, hilfe="Windows z. B. COM3, Linux /dev/ttyACM0. "
                                                  "Die Geräteerkennung findet ihn."),
-            Feld("gnss.baudrate", "Baudrate", "ganzzahl", minimum=4800, maximum=921600,
+            Feld("gnss.baudrate", "Baudrate", "ganzzahl", sofort=True, minimum=4800, maximum=921600,
                  hilfe="Beim F9P mit 10 Hz gehören 115200 dazu - langsamer reißen die Sätze ab."),
-            Feld("gnss.host", "Adresse", hilfe="Nur bei TCP/UDP."),
-            Feld("gnss.tcp_port", "Port", "ganzzahl", minimum=1, maximum=65535,
+            Feld("gnss.host", "Adresse", sofort=True, hilfe="Nur bei TCP/UDP."),
+            Feld("gnss.tcp_port", "Port", "ganzzahl", sofort=True, minimum=1, maximum=65535,
                  hilfe="Nur bei TCP/UDP."),
-            Feld("gnss.rtcm_out", "Korrekturen zum Empfänger", hilfe=
+            Feld("gnss.rtcm_out", "Korrekturen zum Empfänger", sofort=True, hilfe=
                  "Wohin die RTK-Korrekturen zurückgeschrieben werden. 'auto' nimmt "
                  "denselben Anschluss; leer lassen heißt: gar nicht einspeisen."),
-            Feld("gnss.replay_file", "Abzuspielende Aufzeichnung", hilfe=
+            Feld("gnss.replay_file", "Abzuspielende Aufzeichnung", sofort=True, hilfe=
                  "Nur beim Abspielen. Ein bloßer Dateiname meint eine eigene "
                  "Aufzeichnung (Menü → System → Rohdaten); ein vollständiger Pfad "
                  "wird genommen, wie er dasteht."),
-            Feld("gnss.replay_speed", "Abspieltempo", "zahl", einheit="×",
+            Feld("gnss.replay_speed", "Abspieltempo", "zahl", sofort=True, einheit="×",
                  minimum=0.05, maximum=20.0, hilfe=
                  "1,0 spielt die Fahrt in ihrem eigenen Takt ab - nur dort läuft "
                  "alles so wie im Feld. Schneller ist zum Durchspulen gedacht: "
                  "die Positionen rücken vor, während in den Sätzen weiterhin die "
                  "aufgezeichnete Geschwindigkeit steht."),
-            Feld("gnss.replay_loop", "Aufzeichnung wiederholen", "schalter",
+            Feld("gnss.replay_loop", "Aufzeichnung wiederholen", "schalter", sofort=True,
                  hilfe="Am Ende wieder von vorn, statt stehen zu bleiben."),
         ],
     ),
@@ -161,15 +163,15 @@ GRUPPEN: list[Gruppe] = [
                 "bei 4° Seitenhang sind das 21 cm. Ohne Ausgleich wandert die Spur, "
                 "ohne dass der Empfänger etwas davon merkt.",
         felder=[
-            Feld("imu.source", "Sensor", "auswahl", auswahl=(
+            Feld("imu.source", "Sensor", "auswahl", sofort=True, auswahl=(
                 ("aus", "Keiner"),
                 ("tinkerforge", "Tinkerforge IMU Brick"),
                 ("simulator", "Simulator"),
             )),
-            Feld("imu.host", "Brick Daemon", hilfe="Rechner, auf dem brickd läuft."),
-            Feld("imu.port", "Port des Brick Daemon", "ganzzahl", minimum=1, maximum=65535),
-            Feld("imu.uid", "UID des Bricks", hilfe="Leer = erstes gefundenes Gerät."),
-            Feld("imu.axis_map", "Einbaulage", "auswahl", auswahl=(
+            Feld("imu.host", "Brick Daemon", sofort=True, hilfe="Rechner, auf dem brickd läuft."),
+            Feld("imu.port", "Port des Brick Daemon", "ganzzahl", sofort=True, minimum=1, maximum=65535),
+            Feld("imu.uid", "UID des Bricks", sofort=True, hilfe="Leer = erstes gefundenes Gerät."),
+            Feld("imu.axis_map", "Einbaulage", "auswahl", sofort=True, auswahl=(
                 ("standard", "Standard"),
                 ("swapped", "Achsen vertauscht (quer eingebaut)"),
                 ("inverted", "Umgedreht"),

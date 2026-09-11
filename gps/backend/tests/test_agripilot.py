@@ -1314,8 +1314,11 @@ class SettingsTest(unittest.TestCase):
         from agripilot import settings
         sofort = settings.uebernehmen(self.config, {"steering.max_cross_track_m": 1.2})
         self.assertEqual(sofort["neustart_noetig"], [])
-        spaeter = settings.uebernehmen(self.config, {"gnss.baudrate": 57600})
-        self.assertIn("Baudrate", spaeter["neustart_noetig"])
+        spaeter = settings.uebernehmen(self.config, {"server.port": 8090})
+        self.assertIn("Port", spaeter["neustart_noetig"])
+        # Empfänger und Sensor werden im Betrieb neu verbunden - kein Neustart.
+        quelle = settings.uebernehmen(self.config, {"gnss.baudrate": 57600})
+        self.assertEqual(quelle["neustart_noetig"], [])
 
     def test_steering_cannot_be_enabled_before_the_motor_step_is_done(self):
         """Die eine Einstellung, die eine Maschine in Bewegung setzt."""
@@ -2384,6 +2387,71 @@ class RohdatenApiTest(unittest.TestCase):
                 antwort = client.post("/api/rohdaten/start")
                 self.assertEqual(antwort.status_code, 400)
                 self.assertIn("Kopie", antwort.json()["detail"])
+
+
+class QuellenwechselTest(unittest.TestCase):
+    """Empfänger und Sensor im Betrieb tauschen - ohne den Dienst durchzustarten."""
+
+    def test_switching_to_a_recording_and_back_without_a_restart(self):
+        from fastapi.testclient import TestClient
+        from agripilot import config as config_module, recorder
+        from agripilot.server import create_app
+
+        with tempfile.TemporaryDirectory() as ordner:
+            from pathlib import Path
+            rohdaten = Path(ordner) / "rohdaten"
+            rohdaten.mkdir()
+            datei = rohdaten / "rohdaten-20260911-120000.txt"
+            zeilen = [recorder.KOPFZEILE]
+            for i in range(30):
+                zeilen.append(f"{i * 0.1:.3f}\tI\t-4.000,0.000,,0.000,3")
+                zeilen.append(f"{i * 0.1:.3f}\tN\t" + nmea.build_gga(48.2 + i * 0.00002, 11.4, 500.0, 4, 22, 0.6))
+            datei.write_text("\n".join(zeilen) + "\n", encoding="ascii")
+
+            # Eine eigene Datei: die Einstellungen werden gespeichert, und das
+            # darf nicht in den Sentinel-Pfad der anderen Tests schreiben.
+            config = config_module.load(Path(ordner) / "config.yaml")
+            config.server.data_dir = ordner
+            config.gnss.source = "simulator"
+            config.imu.source = "simulator"
+            with TestClient(create_app(config)) as client:
+                app = client.app.state.app
+                app.steering.armed = True          # als wäre der Fahrer scharf
+                app.aufzeichnung.start()           # und eine Aufzeichnung liefe
+                alte_quelle = app.source
+
+                antwort = client.post("/api/settings", json={"aenderungen": {
+                    "gnss.source": "replay", "gnss.replay_file": datei.name,
+                    "gnss.replay_speed": 20.0, "gnss.replay_loop": True}})
+                self.assertEqual(antwort.status_code, 200)
+                daten = antwort.json()["data"]
+                self.assertEqual(daten["neustart_noetig"], [])
+                self.assertEqual(daten["quelle"]["gnss"], "replay")
+
+                # Die Quelle ist eine andere, die alte steht, die Lenkung ist aus,
+                # die Aufzeichnung beendet - nichts davon darf den Wechsel überleben.
+                self.assertIsNot(app.source, alte_quelle)
+                self.assertIsInstance(app.source, recorder.ReplaySource)
+                self.assertFalse(alte_quelle.running)
+                self.assertFalse(app.steering.armed)
+                self.assertFalse(app.aufzeichnung.laeuft)
+                self.assertIs(app.engine.imu, app.source.imu)
+
+                # Die aufgezeichnete Fahrt kommt an: Breitengrad aus der Datei.
+                time.sleep(1.0)
+                zustand = client.get("/api/state").json()
+                self.assertEqual(zustand["system"]["gnss"]["source"], "replay")
+                self.assertAlmostEqual(zustand["fix"]["lat"], 48.2, delta=0.001)
+                self.assertAlmostEqual(zustand["imu"]["roll_deg"], -4.0, places=2)
+
+                # Und zurück auf den Simulator - ebenfalls ohne Neustart.
+                self.assertEqual(client.post("/api/settings", json={"aenderungen": {
+                    "gnss.source": "simulator"}}).status_code, 200)
+                time.sleep(0.5)
+                zustand = client.get("/api/state").json()
+                self.assertEqual(zustand["system"]["gnss"]["source"], "simulator")
+                self.assertIsNotNone(app.engine.simulator)
+                self.assertEqual(client.post("/api/quelle/neustart").status_code, 200)
 
 
 class HeadlandApiTest(unittest.TestCase):
