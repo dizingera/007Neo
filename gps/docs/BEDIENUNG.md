@@ -16,17 +16,17 @@ darüber.
  │                    ╲    │    ╱                               │
  │                     ╲   │   ╱             ◀ 10 cm   10 cm ▶  │
  │   8,6  km/h          ╲  │  ╱             A setzen  A+  Kontur│
- │   5    0,09  −3,5°    ╲ │ ╱            Wende Kurve Grenze Menü│
+ │   5    0,09  −3,5°    ╲ │ ╱              Wende   Kurve   Menü│
  │   Ring ha    Hang      ▲                ● MARKIEREN  an      │
  │   [1][2][3][4]   bis Vorgewende 38 m   ● LENKUNG    aktiv    │
  └──────────────────────────────────────────────────────────────┘
 ```
 
 **Der Lichtbalken oben ist die eine Anzeige, die man im Augenwinkel lesen kann.**
-Leuchtet es rechts, ist der Traktor rechts der Spur – also nach links lenken.
-Eine Lampe sind 5 cm. Grün heißt unter 5 cm, gelb bis 20 cm, rot darüber. Die
-Zahl darunter sagt es genau; der Pfeil daneben zeigt dieselbe Seite wie der
-Balken.
+Er leuchtet auf der Seite, auf der die Spur liegt – **zum Licht hin lenken**, bis
+nur noch die Mitte brennt. Eine Lampe sind 5 cm. Grün heißt unter 5 cm, gelb bis
+20 cm, rot darüber. Die Zahl darunter sagt es genau; der Pfeil daneben zeigt in
+dieselbe Richtung: wohin zu lenken ist.
 
 **Links unten** die Fahrt: Geschwindigkeit, Spur- oder Ringnummer, bearbeitete
 Hektar, Hang mit Ausgleich. Die kleine Kurve darunter ist der Verlauf der
@@ -46,9 +46,9 @@ liegt die Hand am montierten Tablet ohnehin:
 |---|---|
 | **Lenkung** | der größte Knopf. Grün und leuchtend: die Automatik lenkt. Bernstein: scharf, aber gerade nicht am Lenken – der Grund steht darunter (zu langsam, kein RTK, zu weit von der Spur). Grau mit rotem Punkt: aus. Tippen schaltet um. |
 | **Markieren** | darüber. An = die bearbeitete Fläche wird gemalt, Hektar und Überlappung laufen mit, die Fahrt wird aufgezeichnet. Aus = nur Führung. Die Bezeichnung der Arbeit (Grubbern, Säen…) steht unter Menü → Aufträge. |
-| **A setzen / B setzen · A+ · Kontur** | eine Spur anlegen – siehe unten. |
+| **A setzen / B setzen · A+ · Kontur** | eine Spur anlegen – siehe unten. Kontur ist zugleich die Grenze: einmal um das Feld fahren, fertig. |
 | **◀ 10 cm · 10 cm ▶** | das ganze Spurmuster um zehn Zentimeter versetzen. |
-| **Wende · Kurve · Grenze · Menü** | klein, weil selten gebraucht. |
+| **Wende · Kurve · Menü** | klein, weil selten gebraucht. |
 
 **Oben rechts** unter den Statuschips: Näher, Weiter, Ansicht, Tag/Nacht. Die
 Ansicht wechselt zwischen **Perspektive** (Blick über die Haube), **Flach**
@@ -71,9 +71,15 @@ gerade spürbar.
 1. Auf das Feld fahren, **Menü → Felder**, Namen eingeben, *Feld hier anlegen*.
    Der Bezugspunkt wird an der aktuellen Position gesetzt und ändert sich nie
    wieder – daran hängt, dass zwei Traktoren dieselbe Fläche gleich sehen.
-2. **⬠ Grenze** drücken und einmal um das Feld fahren.
-3. Am Ausgangspunkt wieder **⬠ Grenze** drücken. Die Fläche in Hektar steht
-   sofort da und ist gespeichert.
+2. **⬠ Kontur** drücken und einmal um das Feld fahren (die Taste zeigt
+   währenddessen „Kontur fertig“).
+3. Am Ausgangspunkt wieder **⬠ Kontur** drücken. Die Fläche in Hektar steht
+   sofort da und ist gespeichert – und die Kontur ist aktiv: Ring 0 ist die eben
+   gefahrene Grenze, jeder weitere Ring liegt eine Arbeitsbreite weiter innen.
+   Grenze und Kontur sind dieselbe Linie, deshalb ein Knopf.
+
+Soll die Grenze später neu abgefahren werden: **Menü → Felder → Grenze neu
+abfahren**, dann um das Feld fahren und mit **Kontur** abschließen.
 
 Die Grenze ist nicht nur Buchhaltung: die Sektionen schalten außerhalb der
 Grenze automatisch ab.
@@ -118,9 +124,10 @@ oder vom letzten Jahr zu übernehmen.
 abfahren, wieder **∿ Kurve** drücken. Alle weiteren Spuren folgen dieser Form.
 
 **Kontur – die Feldgrenze selbst als Spur:** die Taste **Kontur** rechts.
-Ring 0 ist die Feldgrenze, jeder weitere Ring liegt eine Arbeitsbreite weiter
-innen. Kein A- und kein B-Punkt nötig, und nichts abzufahren, was ohnehin schon
-abgefahren wurde – die Grenze ist da. Gedacht für das Vorgewende und für krumme
+Gibt es noch keine Grenze, zeichnet der Druck sie auf (siehe oben); gibt es
+sie, wird sie zur Spur. Ring 0 ist die Feldgrenze, jeder weitere Ring liegt
+eine Arbeitsbreite weiter innen. Kein A- und kein B-Punkt nötig, und nichts
+abzufahren, was ohnehin schon abgefahren wurde – die Grenze ist da. Gedacht für das Vorgewende und für krumme
 Schläge. Wie herum die Grenze aufgezeichnet wurde, spielt keine Rolle: Ring 1
 liegt immer weiter innen, nie weiter außen.
 

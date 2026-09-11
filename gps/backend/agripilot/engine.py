@@ -404,6 +404,13 @@ class Engine:
             raise RuntimeError("Kein Feld ausgewählt")
         simplified = geo.simplify(points, 0.3)
         area_ha = geo.polygon_area(simplified) / 10_000.0
+        if len(simplified) < 3 or area_ha < 0.01:
+            # Eine Gerade oder ein Kringel von hundert Quadratmetern ist keine
+            # Feldgrenze. Sie zu speichern würde eine vorhandene Grenze durch
+            # Unsinn ersetzen - und die Kontur, das Vorgewende, die Sektionen
+            # gleich mit. Die alte Grenze bleibt, der Fahrer bekommt es gesagt.
+            raise RuntimeError(f"Grenze zu klein ({area_ha:.2f} ha) - einmal ganz um das "
+                               "Feld fahren, die alte Grenze bleibt")
         field = self.store.save_field({
             **{k: self.field[k] for k in
                ("id", "name", "datum_lat", "datum_lon", "note")},

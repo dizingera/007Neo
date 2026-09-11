@@ -151,7 +151,10 @@ function updateHud(s) {
     const acm = Math.abs(cm);
     xte.textContent = acm.toFixed(0);
     xte.className = acm < 5 ? 'ok' : acm < 20 ? 'warn' : 'bad';
-    pfeil.textContent = acm < 3 ? '●' : cm > 0 ? '▶' : '◀';
+    // Der Pfeil ist ein Befehl, kein Befund: er zeigt, wohin zu lenken ist.
+    // cm > 0 heißt rechts der Spur - also nach links. Andersherum las es
+    // jeder als „er geht in die falsche Richtung", sobald er 10 cm versetzte.
+    pfeil.textContent = acm < 3 ? '●' : cm > 0 ? '◀' : '▶';
     pfeil.className = 'pfeil' + (acm < 3 ? ' ok' : '');
   }
   el('speed').textContent = fix ? fix.speed_kmh.toFixed(1).replace('.', ',') : '--';
@@ -283,7 +286,9 @@ function updateHud(s) {
   // A/B ist ein Knopf mit zwei Schritten: erst A, dann B.
   el('btnAB').querySelector('span').textContent = s.recording && s.recording.pending_a ? 'B setzen' : 'A setzen';
   el('btnAB').classList.toggle('recording', !!(s.recording && s.recording.pending_a));
-  el('btnBoundary').classList.toggle('recording', !!(s.recording && s.recording.mode === 'boundary'));
+  const grenzeLaeuft = !!(s.recording && s.recording.mode === 'boundary');
+  el('btnContour').classList.toggle('recording', grenzeLaeuft);
+  el('btnContour').querySelector('span').textContent = grenzeLaeuft ? 'Kontur fertig' : 'Kontur';
   el('btnCurve').classList.toggle('recording', !!(s.recording && s.recording.mode === 'curve'));
 
   // Die Wende: klein, weil sie Nebensache ist. Der Text sagt, was der nächste Druck tut.
@@ -309,14 +314,17 @@ function drawLightbar(guidance) {
     }
   }
   const middle = (LEDS - 1) / 2;
-  const offset = guidance.active ? Math.max(-middle, Math.min(middle, guidance.lightbar)) : null;
+  // Zum Licht hin lenken: die Lampen leuchten auf der Seite, auf der die Spur
+  // liegt. guidance.lightbar ist positiv, wenn die Maschine rechts der Spur
+  // steht - dann muss es links leuchten.
+  const offset = guidance.active ? -Math.max(-middle, Math.min(middle, guidance.lightbar)) : null;
   for (let i = 0; i < LEDS; i++) {
     const led = bar.children[i];
     led.className = 'led' + (i === middle ? ' centre' : '');
     if (offset === null) continue;
     const position = i - middle;
-    // Die Lampen zwischen Mitte und Abweichung leuchten: man fährt dorthin,
-    // wo es dunkel ist.
+    // Die Lampen zwischen Mitte und Spur leuchten: man fährt dorthin, wo es
+    // leuchtet, bis nur noch die Mitte brennt.
     const lit = offset === 0 ? position === 0
       : (offset > 0 ? position > 0 && position <= offset
                     : position < 0 && position >= offset);
@@ -719,15 +727,6 @@ el('btnCurve').onclick = async () => {
     toast('Kurve aufzeichnen – jetzt die Linie abfahren');
   }
 };
-el('btnBoundary').onclick = async () => {
-  const recording = state.live && state.live.recording.mode === 'boundary';
-  if (recording) {
-    const result = await api('POST', '/api/record/stop', {});
-    if (result) toast(`Feldgrenze: ${result.data.area_ha.toFixed(2)} ha`);
-  } else if (await api('POST', '/api/record/start', { mode: 'boundary' })) {
-    toast('Grenze aufzeichnen – einmal um das Feld fahren');
-  }
-};
 /* Wende: planen, ansehen, starten. Bewusst zwei Druck – die Route liegt erst
  * sichtbar auf der Karte, bevor die Maschine ihr folgt. */
 el('btnTurn').onclick = async () => {
@@ -754,9 +753,35 @@ el('btnTurn').onclick = async () => {
   }
 };
 
+/* Kontur und Grenze sind dasselbe: die Grenze wird einmal abgefahren, und
+ * genau diese Linie ist die Kontur, auf der danach geführt wird. Ein Knopf,
+ * drei Zustände: Grenze aufzeichnen - Grenze abschließen (und sofort auf der
+ * Kontur fahren) - Kontur wieder aktivieren, wenn gerade eine andere Spur
+ * aktiv war. Neu abfahren geht über Menü → Felder → Grenze abfahren. */
 el('btnContour').onclick = async () => {
-  const result = await api('POST', '/api/guidance/contour');
-  if (result) { toast('Kontur aktiv – Ring 0 ist die Feldgrenze'); refreshLists(); }
+  const s = state.live || {};
+  if (s.recording && s.recording.mode === 'boundary') {
+    const result = await api('POST', '/api/record/stop', {});
+    if (!result) return;
+    const kontur = await api('POST', '/api/guidance/contour');
+    toast(`Grenze gespeichert: ${result.data.area_ha.toFixed(2)} ha` +
+          (kontur ? ' – Kontur aktiv, Ring 0 ist die Grenze' : ''));
+    refreshLists();
+    return;
+  }
+  if (!s.field) { toast('Erst ein Feld laden oder anlegen (Menü → Felder)', true); return; }
+  if (s.field.boundary && s.field.boundary.length >= 3) {
+    if (s.line && s.line.mode === 'contour') {
+      toast('Kontur ist aktiv. Grenze neu abfahren: Menü → Felder → Grenze abfahren');
+      return;
+    }
+    const result = await api('POST', '/api/guidance/contour');
+    if (result) { toast('Kontur aktiv – Ring 0 ist die Feldgrenze'); refreshLists(); }
+    return;
+  }
+  if (await api('POST', '/api/record/start', { mode: 'boundary' })) {
+    toast('Kontur aufzeichnen – einmal um das Feld fahren, dann wieder Kontur drücken');
+  }
 };
 
 // Zehn Zentimeter je Druck: das ist der Schritt, den man im Feld braucht -
@@ -1151,6 +1176,15 @@ function renderFields(fields, lines) {
         [offen ? 'Spuren ▴' : 'Spuren ▾', () => {
           if (offen) aufgeklappt.delete(field.id); else aufgeklappt.add(field.id);
           refreshLists();
+        }],
+        [field.boundary.length ? 'Grenze neu abfahren' : 'Grenze abfahren', async () => {
+          if (field.boundary.length && !confirm(`Die Grenze von "${field.name}" neu abfahren? ` +
+              'Die alte wird beim Abschließen ersetzt.')) return;
+          if (field.id !== currentId && !(await api('POST', `/api/fields/${field.id}/load`))) return;
+          if (await api('POST', '/api/record/start', { mode: 'boundary' })) {
+            toast('Grenze aufzeichnen – einmal um das Feld fahren, dann Kontur drücken');
+            el('sheet').hidden = true;
+          }
         }],
         ['Löschen', async () => {
           if (confirm(`Feld "${field.name}" löschen?`)) {

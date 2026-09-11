@@ -2999,6 +2999,28 @@ class SaisonspurTest(unittest.TestCase):
                          [neu["id"], alt["id"]])
 
 
+class GrenzeZuKleinTest(unittest.TestCase):
+    """Eine Gerade als Grenze abschließen darf die echte Grenze nicht ersetzen."""
+
+    def test_a_degenerate_boundary_is_refused_and_the_old_one_kept(self):
+        from agripilot import config as config_module
+        from agripilot.engine import Engine
+        with tempfile.TemporaryDirectory() as ordner:
+            store = Storage(os.path.join(ordner, "g.db"))
+            try:
+                motor = Engine(config_module.load("/kein-solcher-pfad.yaml"), store)
+                feld = store.save_field({"name": "Feld", "datum_lat": 48.0, "datum_lon": 11.0,
+                                         "boundary": [list(p) for p in QUADRAT], "area_ha": 1.0})
+                motor.load_field(feld["id"])
+                with self.assertRaises(RuntimeError) as fehler:
+                    motor.save_boundary([(0.0, 0.0), (0.0, 50.0), (0.0, 100.0), (0.1, 150.0)])
+                self.assertIn("zu klein", str(fehler.exception))
+                self.assertEqual(store.get_field(feld["id"])["boundary"], [list(p) for p in QUADRAT])
+                self.assertEqual(motor.field["boundary"], [list(p) for p in QUADRAT])
+            finally:
+                store.close()
+
+
 class VerwaisteArbeitTest(unittest.TestCase):
     """Zündung aus statt „Arbeit beenden": beim nächsten Start wird die offene
     Arbeit dieses Geräts abgeschlossen - die eines anderen Traktors nicht."""
