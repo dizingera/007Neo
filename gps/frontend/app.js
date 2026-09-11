@@ -113,6 +113,9 @@ function onState(data) {
   const before = previous && previous.field ? previous.field.id : null;
   const now = data.field ? data.field.id : null;
   if (previous && before !== now) { clearCells(); state.trail = []; refreshLists(); }
+  // Erstes Bild bei offenem Menü (Aufruf über #menu=…): die Listen wurden vor
+  // dem Zustand gefüllt und wussten noch nichts vom geladenen Feld.
+  if (!previous && !el('sheet').hidden) refreshLists();
 
   updateHud(data);
 }
@@ -1104,7 +1107,8 @@ async function refreshLists() {
   }
   if (active === 'lines') {
     const fieldId = state.live && state.live.field ? state.live.field.id : '';
-    renderLines(await (await fetch(`/api/lines?field_id=${fieldId}`)).json());
+    // Ohne Feld keine Liste: die Anfrage ohne field_id gäbe die Spuren aller Felder.
+    renderLines(fieldId ? await (await fetch(`/api/lines?field_id=${fieldId}`)).json() : []);
   }
   if (active === 'jobs') {
     const [jobs, fields] = await Promise.all([
@@ -1167,79 +1171,70 @@ function renderFields(fields, lines) {
 function spurenListe(field, spuren, jahr) {
   const box = document.createElement('div');
   box.className = 'unterliste';
-  const currentId = state.live && state.live.line ? state.live.line.id : null;
-  const feldGeladen = state.live && state.live.field && state.live.field.id === field.id;
-  spuren.forEach((line) => {
-    const saison = line.saison === jahr && line.fahrgasse_m > 0;
-    const row = item({
-      active: line.id === currentId,
-      title: line.name,
-      sub: `${line.mode === 'ab' ? 'AB-Linie' : 'Kurve'} · Abstand ${line.spacing_m.toFixed(2)} m` +
-           (line.fahrgasse_m > 0 ? ` · Fahrgassen alle ${line.fahrgasse_m.toFixed(0)} m` +
-             (line.saison ? ` (Saison ${line.saison})` : '') : '') +
-           (saison ? ' · Saisonspur' : ''),
-      actions: [
-        ['Laden', async () => {
-          // Die Spur gehört zu ihrem Feld: erst das Feld, dann die Spur.
-          if (!feldGeladen && !(await api('POST', `/api/fields/${field.id}/load`))) return;
-          if (await api('POST', `/api/lines/${line.id}/load`)) {
-            toast(`Spur "${line.name}" aktiv`); el('sheet').hidden = true;
-          }
-        }],
-        [saison ? 'Saisonspur ✓' : 'Als Saisonspur', async () => {
-          const vorgabe = line.fahrgasse_m > 0 ? line.fahrgasse_m : Math.max(line.spacing_m, 12);
-          const eingabe = prompt(
-            `Fahrgassenabstand in Metern für "${line.name}" (Saison ${jahr}).\n` +
-            `0 = keine Fahrgassen, Spur ist dann keine Saisonspur mehr.`, vorgabe.toFixed(0));
-          if (eingabe === null) return;
-          const abstand = parseFloat(eingabe.replace(',', '.'));
-          if (Number.isNaN(abstand) || abstand < 0) { toast('Bitte eine Zahl ab 0 eingeben', true); return; }
-          if (await api('POST', `/api/lines/${line.id}`, { fahrgasse_m: abstand, saison: jahr })) {
-            toast(abstand > 0 ? `Saisonspur ${jahr}: Fahrgassen alle ${abstand} m` : 'Keine Fahrgassen mehr');
-            refreshLists();
-          }
-        }],
-        ['Umbenennen', async () => {
-          const name = prompt('Neuer Name der Spur', line.name);
-          if (name === null || !name.trim()) return;
-          if (await api('POST', `/api/lines/${line.id}`, { name: name.trim() })) refreshLists();
-        }],
-        ['Löschen', async () => {
-          if (!confirm(`Spur "${line.name}" löschen?`)) return;
-          await api('DELETE', `/api/lines/${line.id}`); refreshLists();
-        }],
-      ],
-    });
-    if (saison) row.querySelectorAll('.actions button')[1].classList.add('an');
-    box.appendChild(row);
-  });
+  spuren.forEach((line) => box.appendChild(spurZeile(field.id, line, jahr)));
   if (!spuren.length) box.innerHTML = '<p class="note">Noch keine Spur für dieses Feld – A/B, A+ oder Kurve in der Kabine anlegen.</p>';
   return box;
 }
 
+/* Eine Spur als Zeile - dieselbe unter dem Feld wie im Reiter Spuren, damit
+ * die Saisonspur an beiden Stellen gesetzt werden kann. */
+function spurZeile(fieldId, line, jahr) {
+  const currentId = state.live && state.live.line ? state.live.line.id : null;
+  const feldGeladen = state.live && state.live.field && state.live.field.id === fieldId;
+  const saison = line.saison === jahr && line.fahrgasse_m > 0;
+  const row = item({
+    active: line.id === currentId,
+    title: line.name,
+    sub: `${line.mode === 'ab' ? 'AB-Linie' : 'Kurve'} · Abstand ${line.spacing_m.toFixed(2)} m` +
+         (line.fahrgasse_m > 0 ? ` · Fahrgassen alle ${line.fahrgasse_m.toFixed(0)} m` +
+           (line.saison ? ` (Saison ${line.saison})` : '') : '') +
+         (saison ? ' · Saisonspur' : ''),
+    actions: [
+      ['Laden', async () => {
+        // Die Spur gehört zu ihrem Feld: erst das Feld, dann die Spur.
+        if (!feldGeladen && !(await api('POST', `/api/fields/${fieldId}/load`))) return;
+        if (await api('POST', `/api/lines/${line.id}/load`)) {
+          toast(`Spur "${line.name}" aktiv`); el('sheet').hidden = true;
+        }
+      }],
+      [saison ? 'Saisonspur ✓' : 'Als Saisonspur', async () => {
+        const vorgabe = line.fahrgasse_m > 0 ? line.fahrgasse_m : Math.max(line.spacing_m, 12);
+        const eingabe = prompt(
+          `Fahrgassenabstand in Metern für "${line.name}" (Saison ${jahr}).
+` +
+          `0 = keine Fahrgassen, Spur ist dann keine Saisonspur mehr.`, vorgabe.toFixed(0));
+        if (eingabe === null) return;
+        const abstand = parseFloat(eingabe.replace(',', '.'));
+        if (Number.isNaN(abstand) || abstand < 0) { toast('Bitte eine Zahl ab 0 eingeben', true); return; }
+        if (await api('POST', `/api/lines/${line.id}`, { fahrgasse_m: abstand, saison: jahr })) {
+          toast(abstand > 0 ? `Saisonspur ${jahr}: Fahrgassen alle ${abstand} m` : 'Keine Fahrgassen mehr');
+          refreshLists();
+        }
+      }],
+      ['Umbenennen', async () => {
+        const name = prompt('Neuer Name der Spur', line.name);
+        if (name === null || !name.trim()) return;
+        if (await api('POST', `/api/lines/${line.id}`, { name: name.trim() })) refreshLists();
+      }],
+      ['Löschen', async () => {
+        if (!confirm(`Spur "${line.name}" löschen?`)) return;
+        await api('DELETE', `/api/lines/${line.id}`); refreshLists();
+      }],
+    ],
+  });
+  if (saison) row.querySelectorAll('.actions button')[1].classList.add('an');
+  return row;
+}
+
 function renderLines(lines) {
   const host = el('lineList');
-  const currentId = state.live && state.live.line ? state.live.line.id : null;
+  const fieldId = state.live && state.live.field ? state.live.field.id : null;
+  const jahr = new Date().getFullYear();
   host.innerHTML = '';
-  lines.forEach((line) => {
-    host.appendChild(item({
-      active: line.id === currentId,
-      title: line.name,
-      sub: `${line.mode === 'ab' ? 'AB-Linie' : 'Kurve'} · Abstand ${line.spacing_m.toFixed(2)} m`,
-      actions: [
-        ['Laden', async () => {
-          if (await api('POST', `/api/lines/${line.id}/load`)) {
-            toast(`Spur "${line.name}" aktiv`); el('sheet').hidden = true;
-          }
-        }],
-        ['Löschen', async () => {
-          await api('DELETE', `/api/lines/${line.id}`); refreshLists();
-        }],
-      ],
-    }));
-  });
-  if (!lines.length) host.innerHTML =
-    '<p class="note">Für dieses Feld gibt es noch keine Spur.</p>';
+  lines.forEach((line) => host.appendChild(spurZeile(fieldId, line, jahr)));
+  if (!lines.length) host.innerHTML = fieldId
+    ? '<p class="note">Für dieses Feld gibt es noch keine Spur.</p>'
+    : '<p class="note">Kein Feld geladen – Spuren gehören zu ihrem Feld (Menü → Felder).</p>';
 }
 
 function renderJobs(jobs, fields) {

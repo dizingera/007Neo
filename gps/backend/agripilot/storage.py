@@ -290,6 +290,23 @@ class Storage:
             ).fetchall()
         return [_job_row(r) for r in rows]
 
+    def close_orphan_jobs(self, device_id: str) -> int:
+        """Arbeiten dieses Geräts ohne Ende abschließen - Stromausfall, Neustart.
+
+        Der Traktor wird mit dem Zündschlüssel ausgeschaltet, nicht mit „Arbeit
+        beenden". Was dann offen bleibt, stünde ewig als „läuft" in der Liste.
+        Als Ende gilt die letzte Änderung; die Fläche ist, was bis dahin
+        gespeichert war (der Motor sichert unterwegs). Fremde Geräte werden
+        nicht angefasst: deren laufende Arbeit ist vielleicht wirklich am Laufen.
+        """
+        cursor = self.db.execute(
+            """UPDATE jobs SET ended_at=updated_at, updated_at=?
+               WHERE ended_at IS NULL AND deleted=0 AND device_id=?""",
+            (time.time(), device_id),
+        )
+        self.db.commit()
+        return cursor.rowcount
+
     def delete_job(self, job_id: str) -> None:
         self._soft_delete("jobs", job_id)
 

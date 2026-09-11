@@ -92,6 +92,11 @@ class Engine:
         self.working_time_s = 0.0
         self.session_started_at = time.time()
         self.messages: list[str] = []
+        # Was beim letzten Mal offen blieb (Zündung aus statt „Arbeit beenden"),
+        # wird jetzt abgeschlossen - sonst steht es ewig als „läuft" in der Liste.
+        verwaist = store.close_orphan_jobs(config.network.device_id)
+        if verwaist:
+            self.note(f"{verwaist} unterbrochene Arbeit(en) vom letzten Mal abgeschlossen")
         self.auto_sections = True
 
         self._track_buffer: list[tuple] = []

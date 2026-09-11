@@ -2999,6 +2999,30 @@ class SaisonspurTest(unittest.TestCase):
                          [neu["id"], alt["id"]])
 
 
+class VerwaisteArbeitTest(unittest.TestCase):
+    """Zündung aus statt „Arbeit beenden": beim nächsten Start wird die offene
+    Arbeit dieses Geräts abgeschlossen - die eines anderen Traktors nicht."""
+
+    def test_open_jobs_of_this_device_are_closed_at_start(self):
+        from agripilot import config as config_module
+        from agripilot.engine import Engine
+        with tempfile.TemporaryDirectory() as ordner:
+            store = Storage(os.path.join(ordner, "j.db"))
+            try:
+                eigene = store.start_job("feld", "pi-test", "Traktor", "Grubbern")
+                fremde = store.start_job("feld", "pi-anderer", "Fendt", "Säen")
+                config = config_module.load("/kein-solcher-pfad.yaml")
+                config.network.device_id = "pi-test"
+                motor = Engine(config, store)
+                self.assertIsNotNone(store.get_job(eigene["id"])["ended_at"])
+                self.assertIsNone(store.get_job(fremde["id"])["ended_at"])
+                self.assertIn("abgeschlossen", motor.messages[-1])
+                # Beim zweiten Start gibt es nichts mehr zu schließen.
+                self.assertEqual(store.close_orphan_jobs("pi-test"), 0)
+            finally:
+                store.close()
+
+
 # --------------------------------------------------------------- Maschinen
 
 

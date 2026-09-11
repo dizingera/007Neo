@@ -80,3 +80,6 @@ agenthub/agents/youtube/db
 android-sdk/ 
 # AgriPilot: Simulatorlauf am Schreibtisch (Konfiguration und Datenbank)
 gps/.simulator/
+
+# Wissensgraph (lokal erzeugt)
+graphify-out/

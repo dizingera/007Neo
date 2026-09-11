@@ -259,7 +259,7 @@ button, .button {
   min-height: 44px;
 }
 button.primary, .button.primary { background: var(--blue-solid); border-color: var(--blue-solid); color: #fff; }
-button.danger { background: #3a1416; border-color: var(--red); color: #ff7b72; }
+button.danger { background: color-mix(in srgb, var(--red) 16%, var(--panel)); border-color: var(--red); color: var(--red); }
 .note { color: var(--muted); font-size: 13px; line-height: 1.5; margin: 6px 0 14px; }
 
 .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 10px; }
@@ -267,7 +267,7 @@ button.danger { background: #3a1416; border-color: var(--red); color: #ff7b72; }
 .switch { display: flex; flex-direction: row; align-items: center; gap: 8px; font-size: 14px; color: var(--text); }
 /* Zwischenüberschrift in einem Reiter, der zwei Dinge nebeneinander zeigt. */
 .abschnitt { margin: 22px 0 8px; font-size: 15px; color: var(--muted);
-             font-weight: 600; border-top: 1px solid #232c38; padding-top: 16px; }
+             font-weight: 600; border-top: 1px solid var(--line); padding-top: 16px; }
 .switch input { width: 22px; height: 22px; }
 
 .list { display: flex; flex-direction: column; gap: 8px; }
@@ -275,7 +275,9 @@ button.danger { background: #3a1416; border-color: var(--red); color: #ff7b72; }
   display: flex; align-items: center; gap: 12px; padding: 12px 14px;
   background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
 }
-.item.active { border-color: var(--green); background: #12241a; }
+/* Tag wie Nacht: der Grünstich kommt aus dem Grün des Themas, nicht aus einer
+   festen Nachtfarbe - sonst steht am Tag dunkle Schrift auf dunklem Grün. */
+.item.active { border-color: var(--green); background: color-mix(in srgb, var(--green) 12%, var(--panel)); }
 .item .main { flex: 1; min-width: 0; }
 .item .title { font-size: 16px; font-weight: 600; }
 .item .sub { font-size: 12px; color: var(--muted); margin-top: 2px; }
@@ -316,10 +318,10 @@ label.button { display: inline-flex; align-items: center; cursor: pointer; }
   margin-bottom: 6px; }
 .setting-field .unit { color: var(--muted); font-size: 12px; margin-left: 6px; }
 .setting-field .help { color: var(--muted); font-size: 12px; line-height: 1.5; margin-top: 6px; }
-.setting-field .warn { color: #ff7b72; font-size: 12px; line-height: 1.5; margin-top: 6px; }
-.setting-field .restart { color: #e3b341; font-size: 12px; margin-top: 6px; }
-.setting-field.changed { background: #10243d; }
-.setting-field.changed > label { color: #79c0ff; }
+.setting-field .warn { color: var(--red); font-size: 12px; line-height: 1.5; margin-top: 6px; }
+.setting-field .restart { color: var(--amber); font-size: 12px; margin-top: 6px; }
+.setting-field.changed { background: color-mix(in srgb, var(--blue) 12%, var(--panel)); }
+.setting-field.changed > label { color: var(--blue); }
 
 /* --- Inbetriebnahme --- */
 .progress {
@@ -336,13 +338,13 @@ label.button { display: inline-flex; align-items: center; cursor: pointer; }
   display: flex; align-items: center; justify-content: center;
   font-size: 14px; font-weight: 700; color: var(--muted);
 }
-.step.done .nr { background: #12331d; border-color: var(--green); color: var(--green-bright); }
+.step.done .nr { background: color-mix(in srgb, var(--green) 15%, var(--panel)); border-color: var(--green); color: var(--green-bright); }
 .step.now { border-color: var(--blue); }
-.step.now .nr { background: #10243d; border-color: var(--blue); color: #79c0ff; }
+.step.now .nr { background: color-mix(in srgb, var(--blue) 15%, var(--panel)); border-color: var(--blue); color: var(--blue); }
 .step .why { font-size: 13px; color: var(--muted); line-height: 1.5; margin: 8px 0 0 42px; }
 .step .check { font-size: 13px; margin: 8px 0 0 42px; }
 .step .check.good { color: var(--green-bright); }
-.step .check.bad { color: #ff7b72; }
+.step .check.bad { color: var(--red); }
 .step .check.unknown { color: var(--muted); }
 .step .foot { display: flex; align-items: center; gap: 10px; margin: 10px 0 0 42px; }
 .step .foot .quittung { font-size: 13px; color: var(--text); flex: 1; }
