@@ -1,6 +1,6 @@
-/* AgriPilot – Kabinen-Oberfläche.
+/* AgriPilot – Kabinen-Oberfläche: der Blick über die Haube.
  *
- * Zwei Dinge bestimmen den Aufbau:
+ * Drei Dinge bestimmen den Aufbau:
  *
  * 1. Die Verbindung kann abreißen (WLAN im Feld, Master aus). Die Oberfläche
  *    verbindet sich deshalb selbst neu und zeigt in der Zwischenzeit weiter das
@@ -8,13 +8,18 @@
  * 2. Die bearbeitete Fläche wächst auf Hunderttausende Rasterzellen. Sie wird
  *    einmal in eine Hintergrund-Leinwand gezeichnet und danach nur noch als
  *    Bild verschoben – neue Zellen kommen als kleine Nachlieferung dazu.
+ * 3. Die Perspektive ist keine 3D-Grafik. Die Karte wird flach und in
+ *    Fahrtrichtung gezeichnet, wie bisher; das Kippen zum Horizont macht eine
+ *    CSS-Transformation auf der Ebene darüber. Das kostet die Grafikkarte des
+ *    Tablets fast nichts und läuft auf jedem Browser, der die Kachel kann.
  */
 
 const state = {
   live: null,
   cellSize: 0.5,
-  view: { scale: 6, rotate: true, follow: true },
+  view: { scale: 0, rotate: true, mode: 'perspektive' },   // scale wird beim ersten resize gesetzt
   trail: [],
+  xteVerlauf: [],
   fields: [], lines: [], jobs: [],
   connected: false,
 };
@@ -22,6 +27,17 @@ const state = {
 const el = (id) => document.getElementById(id);
 const canvas = el('map');
 const ctx = canvas.getContext('2d');
+const stage = el('stage');
+
+/* Farben kommen aus dem Stylesheet, damit Tag und Nacht dieselbe Zeichnung
+ * teilen und niemand in zwei Dateien dieselbe Farbe pflegen muss. */
+let F = {};
+function farbenLesen() {
+  const cs = getComputedStyle(document.body);
+  F = Object.fromEntries(['boden', 'raster', 'grenze', 'vg', 'pass', 'aktiv', 'flaeche', 'wende', 'spur', 'traktor']
+    .map((k) => [k, cs.getPropertyValue('--f-' + k).trim()]));
+  coverCtx.fillStyle = F.flaeche;
+}
 
 /* ---------------------------------------------------------------- Bedeckung */
 
@@ -29,19 +45,26 @@ const COVER_SIZE = 4096;            // Zellen; bei 0,5 m sind das gut 2 x 2 km
 const coverLayer = document.createElement('canvas');
 coverLayer.width = coverLayer.height = COVER_SIZE;
 const coverCtx = coverLayer.getContext('2d');
-coverCtx.fillStyle = '#1d6b3a';
+const coverCells = [];              // alle Zellen, damit ein Farbwechsel neu malen kann
 
-function paintCells(cells) {
+function paintCells(cells, merken = true) {
   const half = COVER_SIZE / 2;
   for (const [ix, iy] of cells) {
     const px = ix + half, py = half - iy;
     if (px < 0 || py < 0 || px >= COVER_SIZE || py >= COVER_SIZE) continue;
     coverCtx.fillRect(px, py, 1, 1);
+    if (merken) coverCells.push([ix, iy]);
   }
 }
 
 function clearCells() {
   coverCtx.clearRect(0, 0, COVER_SIZE, COVER_SIZE);
+  coverCells.length = 0;
+}
+
+function repaintCells() {
+  coverCtx.clearRect(0, 0, COVER_SIZE, COVER_SIZE);
+  paintCells(coverCells, false);
 }
 
 /* ------------------------------------------------------------- Verbindung */
@@ -94,23 +117,43 @@ function onState(data) {
 
 /* -------------------------------------------------------------------- HUD */
 
+/* Ein Chip mit Leuchtpunkt: Text und Farbe, der Punkt bleibt. */
+function chip(id, text, klasse) {
+  const node = el(id);
+  if (!node.dataset.aufgebaut) {
+    // Einmal aufbauen: Leuchtpunkt und Textfeld. Der Platzhaltertext aus dem
+    // HTML fliegt dabei raus, sonst stünde er neben dem echten.
+    node.textContent = '';
+    node.appendChild(document.createElement('i'));
+    node.appendChild(document.createElement('span'));
+    node.dataset.aufgebaut = '1';
+  }
+  node.lastElementChild.textContent = text;
+  node.className = 'chip' + (node.classList.contains('titel') ? ' titel' : '') + (klasse ? ' ' + klasse : '');
+}
+
 function updateHud(s) {
   const guidance = s.guidance || {};
   const fix = s.fix;
   const cm = guidance.active ? guidance.cross_track_cm : null;
 
-  const xte = el('xte');
+  // Die Abweichung: Zahl, Pfeil, Farbe. Der Pfeil zeigt wie der Balken die
+  // Seite, auf der die Maschine steht - dorthin ist es hell, weg davon lenkt man.
+  const xte = el('xte'), pfeil = el('xtePfeil');
   if (cm === null || cm === undefined) {
-    xte.textContent = '--'; xte.className = 'readout-value';
+    xte.textContent = '--'; xte.className = ''; pfeil.textContent = '●'; pfeil.className = 'pfeil';
   } else {
-    xte.textContent = Math.abs(cm).toFixed(0);
-    xte.className = 'readout-value ' +
-      (Math.abs(cm) < 5 ? 'centre' : (cm > 0 ? 'right' : 'left'));
+    const acm = Math.abs(cm);
+    xte.textContent = acm.toFixed(0);
+    xte.className = acm < 5 ? 'ok' : acm < 20 ? 'warn' : 'bad';
+    pfeil.textContent = acm < 3 ? '●' : cm > 0 ? '▶' : '◀';
+    pfeil.className = 'pfeil' + (acm < 3 ? ' ok' : '');
   }
-  el('speed').textContent = fix ? (fix.speed_kmh).toFixed(1) : '--';
-  el('pass').textContent = guidance.active ? guidance.pass_number : '--';
-  el('area').textContent = s.job ? s.job.area_ha.toFixed(2)
-                                 : (s.coverage ? s.coverage.area_ha.toFixed(2) : '--');
+  el('speed').textContent = fix ? fix.speed_kmh.toFixed(1).replace('.', ',') : '--';
+  const kontur = s.line && s.line.mode === 'contour';
+  el('pass').textContent = guidance.active ? String(guidance.pass_number) : '--';
+  el('passLabel').textContent = kontur ? 'Ring' : 'Spur';
+  el('area').textContent = (s.job ? s.job.area_ha : (s.coverage ? s.coverage.area_ha : 0)).toFixed(2).replace('.', ',');
 
   // Hang und Ausgleich: die Zahl, die erklärt, warum die Spur am Hang sonst
   // wandert - der Ausgleich steht daneben, damit man ihm ansieht, dass er wirkt.
@@ -118,88 +161,85 @@ function updateHud(s) {
   el('tiltBox').hidden = !imu;
   if (imu) {
     const correction = Math.abs(imu.terrain_offset_cm ? imu.terrain_offset_cm[0] : 0);
-    el('tilt').textContent = imu.roll_deg.toFixed(1);
-    el('tilt').className = 'readout-value' +
-      (!imu.fresh ? '' : correction > 15 ? ' left' : ' centre');
-    el('tiltBox').title = `Hangausgleich ${correction.toFixed(0)} cm`;
+    el('tilt').textContent = imu.roll_deg.toFixed(1).replace('.', ',') + '°';
+    el('tilt').className = imu.fresh && correction > 15 ? 'warn' : '';
+    el('tiltLabel').textContent = `Hang · ${correction.toFixed(0)} cm`;
   }
+
+  // Verlauf der Abweichung: sieht man, ob der Regler ruhig arbeitet oder pendelt.
+  state.xteVerlauf.push(cm === null ? 0 : Math.max(-30, Math.min(30, cm)));
+  if (state.xteVerlauf.length > 200) state.xteVerlauf.shift();
+  const n = state.xteVerlauf.length;
+  el('spark').setAttribute('d', state.xteVerlauf.map((v, i) =>
+    (i ? 'L' : 'M') + (i * 200 / Math.max(1, n - 1)).toFixed(1) + ' ' + (20 - v / 30 * 18).toFixed(1)).join(''));
 
   // Restdistanz bis zum Vorgewende. Gezählt wird bis zum Beginn des
   // Vorgewendes, nicht bis zur Grenze – dort endet die Arbeit.
   const headland = s.headland;
-  const zeigen = !!(headland && headland.aktiv && headland.rest_m != null
-                    && headland.tiefe_m > 0);
+  const turn = s.turn || {};
+  const zeigen = !!(headland && headland.aktiv && headland.rest_m != null && headland.tiefe_m > 0) || !!turn.aktiv;
   el('restBox').hidden = !zeigen;
-  if (zeigen) {
+  const ruf = el('ruf');
+  if (turn.aktiv) {
+    const anteil = turn.punkte && turn.punkte.length > 1 && turn.index != null
+      ? Math.min(1, turn.index / (turn.punkte.length - 1)) : 0;
+    el('restLabel').textContent = 'Wende läuft';
+    el('rest').textContent = Math.round(anteil * 100) + ' %'; el('rest').className = 'turn';
+    el('restBar').style.transform = `scaleX(${anteil.toFixed(3)})`; el('restBar').className = 'turn';
+    ruf.classList.remove('an');
+  } else if (zeigen) {
     const rest = headland.rest_m;
-    el('rest').textContent = rest >= 0 ? rest.toFixed(0) : `−${Math.abs(rest).toFixed(0)}`;
-    el('rest').className = 'readout-value' +
-      (headland.alarm ? ' left' : rest < 0 ? '' : ' centre');
-    el('restBox').title = headland.im_vorgewende
-      ? 'Im Vorgewende' : `Vorgewendetiefe ${headland.tiefe_m.toFixed(1)} m`;
+    el('restLabel').textContent = headland.im_vorgewende ? 'im Vorgewende' : 'bis Vorgewende';
+    el('rest').textContent = (rest >= 0 ? '' : '−') + Math.abs(rest).toFixed(0) + ' m';
+    el('rest').className = headland.alarm ? 'warn' : '';
+    // Der Balken zeigt die letzten 100 m - weiter voraus ist er voll.
+    el('restBar').style.transform = `scaleX(${Math.max(0, Math.min(1, rest / 100)).toFixed(3)})`;
+    el('restBar').className = headland.alarm ? 'warn' : '';
+    ruf.textContent = `Vorgewende in ${Math.max(0, rest).toFixed(0)} m`;
+    ruf.classList.toggle('an', !!headland.alarm && rest > 0);
+  } else {
+    ruf.classList.remove('an');
   }
 
   // Genauigkeit ist die Zahl, an der alles hängt – deshalb immer sichtbar.
-  const fixChip = el('fixChip');
-  if (!fix) { fixChip.textContent = 'kein GPS'; fixChip.className = 'chip bad'; }
+  if (!fix) chip('fixChip', 'kein GPS', 'bad');
   else {
     const accuracy = fix.accuracy_m != null ? ` ±${(fix.accuracy_m * 100).toFixed(0)} cm` : '';
-    fixChip.textContent = `${fix.fix_label}${accuracy} · ${fix.satellites} Sat`;
-    fixChip.className = 'chip ' + (fix.rank >= 4 ? 'good' : fix.rank >= 2 ? 'warn' : 'bad');
-  }
-
-  const steering = s.steering;
-  const steerChip = el('steerChip');
-  if (!steering || !steering.configured) {
-    steerChip.textContent = 'Lenkhilfe'; steerChip.className = 'chip';
-  } else if (steering.command.engaged) {
-    steerChip.textContent = 'Lenkung aktiv'; steerChip.className = 'chip good';
-  } else {
-    steerChip.textContent = steering.command.reason; steerChip.className = 'chip warn';
+    chip('fixChip', `${fix.fix_label}${accuracy} · ${fix.satellites} Sat`,
+         fix.rank >= 4 ? 'good' : fix.rank >= 2 ? 'warn' : 'bad');
   }
 
   const system = s.system;
-  const netChip = el('netChip');
   if (system) {
     const parts = [system.role === 'master' ? 'Master' : 'Client'];
-    if (system.relay && system.relay.running) {
-      parts.push(`${system.relay.clients} Traktor(en)`);
-    }
+    if (system.relay && system.relay.running) parts.push(`${system.relay.clients} Traktor(en)`);
     // Der Abgleichstatus sagt nur auf einem Client etwas aus - der Master
     // gleicht sich nicht mit sich selbst ab.
-    if (system.role !== 'master' && system.sync && system.sync.status) {
-      parts.push(system.sync.status);
-    }
-    netChip.textContent = parts.join(' · ');
-    netChip.className = 'chip ' + (state.connected ? '' : 'bad');
+    if (system.role !== 'master' && system.sync && system.sync.status) parts.push(system.sync.status);
+    if (system.gnss && system.gnss.source === 'replay') parts.push('Abspielen');
+    chip('netChip', parts.join(' · '), state.connected ? '' : 'bad');
   }
 
-  el('fieldLabel').textContent = s.field ? s.field.name : 'Kein Feld';
-  el('lineLabel').textContent = s.line
-    ? `${s.line.name} · ${s.line.spacing_m.toFixed(2)} m` +
+  chip('fieldLabel', s.field ? s.field.name : 'Kein Feld', '');
+  chip('lineLabel', s.line
+    ? `${s.line.name} · ${s.line.spacing_m.toFixed(2).replace('.', ',')} m` +
       (s.line.nudge_m ? ` · Versatz ${(s.line.nudge_m * 100).toFixed(0)} cm` : '')
-    : 'Keine Spur – A und B setzen';
+    : 'Keine Spur – A und B setzen', s.line ? 'good' : '');
 
   const hint = [];
   if (s.recording && s.recording.mode === 'boundary') {
-    hint.push(`Grenze wird aufgezeichnet · ${s.recording.points} Punkte · ` +
-              `${s.recording.area_ha.toFixed(2)} ha`);
+    hint.push(`Grenze wird aufgezeichnet · ${s.recording.points} Punkte · ${s.recording.area_ha.toFixed(2)} ha`);
   }
   if (s.recording && s.recording.mode === 'curve') hint.push('Kurve wird aufgezeichnet');
-  if (s.recording && s.recording.pending_a) hint.push('A gesetzt – jetzt B setzen');
-  const turn = s.turn || {};
+  if (s.recording && s.recording.pending_a) hint.push('A gesetzt – bis zum Ende fahren, dann B');
   if (turn.aktiv) hint.push('Wende läuft – Hand am Lenkrad');
   else if (turn.geplant) {
-    hint.push(turn.im_feld
-      ? 'Wende geplant – ↻ noch einmal drücken zum Starten'
-      : 'Wende geplant, liegt aber nicht im Feld – Richtung oder Wendekreis ändern');
-  }
-  if (headland && headland.alarm && !turn.aktiv) {
-    hint.push(`Vorgewende in ${Math.max(0, headland.rest_m).toFixed(0)} m`);
+    hint.push(turn.im_feld ? 'Wende geplant – Wende noch einmal drücken'
+                           : 'Wende geplant, liegt aber nicht im Feld – Richtung oder Wendekreis ändern');
   }
   if (!state.connected) hint.push('Keine Verbindung zum Gerät');
   el('hint').textContent = hint.join('\n');
-  el('hint').classList.toggle('alarm', !!(headland && headland.alarm && !turn.aktiv));
+  el('hint').classList.toggle('alarm', !state.connected);
 
   drawLightbar(guidance);
   drawSections(s.sections || []);
@@ -207,20 +247,44 @@ function updateHud(s) {
   // aber nicht zehnmal je Sekunde in ein verstecktes Feld schreiben.
   if (!el('sheet').hidden) rohdatenStatus();
 
-  el('btnJob').classList.toggle('active', !!s.job);
-  el('btnJob').querySelector('span').textContent = s.job ? 'Arbeit beenden' : 'Arbeit starten';
-  el('btnBoundary').classList.toggle('recording',
-      s.recording && s.recording.mode === 'boundary');
-  el('btnCurve').classList.toggle('recording', s.recording && s.recording.mode === 'curve');
-  el('btnSteer').classList.toggle('armed', steering && steering.armed);
+  // Die beiden Schalter sagen, was ist - nicht, was man drücken kann.
+  const job = el('btnJob');
+  job.classList.toggle('an', !!s.job);
+  job.setAttribute('aria-checked', String(!!s.job));
+  el('jobText').textContent = s.job
+    ? `an · ${s.job.operation || 'Arbeit'} · ${(s.job.area_ha || 0).toFixed(2).replace('.', ',')} ha`
+    : 'aus · Fläche wird nicht gemalt';
 
-  // Ein Knopf, drei Zustände: planen, starten, abbrechen. Was er als Nächstes
-  // tut, steht drauf – eine Wende soll niemand aus Versehen starten.
+  const steering = s.steering;
+  const steer = el('btnSteer');
+  steer.classList.remove('an', 'scharf');
+  if (!steering || !steering.configured) {
+    steer.setAttribute('aria-checked', 'false');
+    el('steerText').textContent = 'Lenkhilfe · kein Motor freigegeben';
+  } else if (steering.command.engaged) {
+    steer.classList.add('an'); steer.setAttribute('aria-checked', 'true');
+    el('steerText').textContent = 'aktiv · tippen schaltet ab';
+  } else if (steering.armed) {
+    steer.classList.add('scharf'); steer.setAttribute('aria-checked', 'true');
+    el('steerText').textContent = `scharf · ${steering.command.reason}`;
+  } else {
+    steer.setAttribute('aria-checked', 'false');
+    el('steerText').textContent = 'aus · tippen schaltet scharf';
+  }
+
+  // A/B ist ein Knopf mit zwei Schritten: erst A, dann B.
+  el('btnAB').querySelector('span').textContent = s.recording && s.recording.pending_a ? 'B setzen' : 'A setzen';
+  el('btnAB').classList.toggle('recording', !!(s.recording && s.recording.pending_a));
+  el('btnBoundary').classList.toggle('recording', !!(s.recording && s.recording.mode === 'boundary'));
+  el('btnCurve').classList.toggle('recording', !!(s.recording && s.recording.mode === 'curve'));
+
+  // Die Wende: klein, weil sie Nebensache ist. Der Text sagt, was der nächste Druck tut.
   const turnBtn = el('btnTurn');
-  turnBtn.querySelector('span').textContent =
-    turn.aktiv ? 'Abbrechen' : turn.geplant ? 'Wende starten' : 'Wende';
-  turnBtn.classList.toggle('active', !!turn.aktiv);
-  turnBtn.classList.toggle('recording', !!turn.geplant && !turn.aktiv);
+  turnBtn.querySelector('span:last-child').textContent = turn.aktiv ? 'Ω Stopp' : turn.geplant ? 'Ω los' : 'Wende';
+  turnBtn.classList.toggle('aktiv', !!turn.aktiv);
+  turnBtn.classList.toggle('geplant', !!turn.geplant && !turn.aktiv);
+  el('turnFill').style.width = turn.aktiv && turn.punkte && turn.index != null
+    ? `${Math.min(100, 100 * turn.index / Math.max(1, turn.punkte.length - 1)).toFixed(0)}%` : '0';
 }
 
 const LEDS = 21;
@@ -231,6 +295,8 @@ function drawLightbar(guidance) {
     for (let i = 0; i < LEDS; i++) {
       const led = document.createElement('div');
       led.className = 'led' + (i === (LEDS - 1) / 2 ? ' centre' : '');
+      // Ein leichter Bogen: die Mitte sitzt etwas höher als die Ränder.
+      led.style.setProperty('--h', (0.35 * (1 - Math.abs(i - (LEDS - 1) / 2) / ((LEDS - 1) / 2))).toFixed(2));
       bar.appendChild(led);
     }
   }
@@ -275,11 +341,21 @@ function drawSections(sections) {
 
 /* ----------------------------------------------------------------- Karte */
 
+/* Die Leinwand ist größer als der Bildschirm (140 % der Breite, quadratisch),
+ * damit sie gekippt den ganzen Blick füllt. Die Pixelzahl ist gedeckelt: ein
+ * Tablet soll zehn Bilder je Sekunde schaffen, nicht Rekorde aufstellen. */
+const MAX_PIXEL = 1600;
+const ANKER_Y = 0.78;              // wo der Traktor auf der Leinwand sitzt
+
 function resize() {
   const ratio = window.devicePixelRatio || 1;
-  canvas.width = canvas.clientWidth * ratio;
-  canvas.height = canvas.clientHeight * ratio;
-  ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+  const px = Math.min(MAX_PIXEL, Math.round(canvas.clientWidth * ratio));
+  canvas.width = canvas.height = px;
+  const k = px / canvas.clientWidth;
+  ctx.setTransform(k, 0, 0, k, 0, 0);
+  // Grundmaßstab: 1 m ist knapp ein Prozent der Leinwandbreite - genug, um
+  // die Nachbarspuren zu sehen, nah genug für Zentimeter auf der eigenen.
+  if (!state.view.scale) state.view.scale = canvas.clientWidth / 155;
 }
 window.addEventListener('resize', resize);
 
@@ -290,25 +366,27 @@ function viewCentre() {
 
 function viewRotation() {
   const s = state.live;
-  if (!state.view.rotate || !s || s.heading == null) return 0;
+  if (state.view.mode === 'nord' || !s || s.heading == null) return 0;
   return -s.heading * Math.PI / 180;
 }
 
+function ankerY() { return canvas.clientHeight * (state.view.mode === 'nord' ? 0.5 : ANKER_Y); }
+
 function applyWorldTransform() {
-  const width = canvas.clientWidth, height = canvas.clientHeight;
+  const width = canvas.clientWidth;
   const scale = state.view.scale;
   const [cx, cy] = viewCentre();
-  ctx.translate(width / 2, height * 0.62);   // Traktor sitzt im unteren Drittel
+  ctx.translate(width / 2, ankerY());
   ctx.rotate(viewRotation());
   ctx.scale(scale, -scale);
   ctx.translate(-cx, -cy);
 }
 
 function screenToWorld(x, y) {
-  const width = canvas.clientWidth, height = canvas.clientHeight;
+  const width = canvas.clientWidth;
   const scale = state.view.scale, rotation = viewRotation();
   const [cx, cy] = viewCentre();
-  let dx = x - width / 2, dy = y - height * 0.62;
+  let dx = x - width / 2, dy = y - ankerY();
   const cos = Math.cos(-rotation), sin = Math.sin(-rotation);
   const rx = dx * cos - dy * sin, ry = dx * sin + dy * cos;
   return [cx + rx / scale, cy - ry / scale];
@@ -317,11 +395,12 @@ function screenToWorld(x, y) {
 function render() {
   const width = canvas.clientWidth, height = canvas.clientHeight;
   ctx.save();
-  ctx.fillStyle = '#0d1117';
+  ctx.fillStyle = F.boden;
   ctx.fillRect(0, 0, width, height);
 
   ctx.save();
   applyWorldTransform();
+  drawGrid();
   drawCoverage();
   drawBoundary();
   drawHeadland();
@@ -329,11 +408,25 @@ function render() {
   drawTrail();
   drawRecording();
   drawTurn();
-  ctx.restore();
-
   drawVehicle();
   ctx.restore();
+
+  ctx.restore();
   requestAnimationFrame(render);
+}
+
+/* Ein Raster als Boden: ohne Bezug wirkt eine leere Fläche wie Stillstand. */
+function drawGrid() {
+  const [cx, cy] = viewCentre();
+  const step = 10, reach = 400;
+  const x0 = Math.floor((cx - reach) / step) * step, x1 = cx + reach;
+  const y0 = Math.floor((cy - reach) / step) * step, y1 = cy + reach;
+  ctx.beginPath();
+  for (let x = x0; x <= x1; x += step) { ctx.moveTo(x, y0); ctx.lineTo(x, y1); }
+  for (let y = y0; y <= y1; y += step) { ctx.moveTo(x0, y); ctx.lineTo(x1, y); }
+  ctx.strokeStyle = F.raster;
+  ctx.lineWidth = 1 / state.view.scale;
+  ctx.stroke();
 }
 
 function drawCoverage() {
@@ -362,15 +455,18 @@ function drawCoverage() {
   ctx.restore();
 }
 
+function polyline(points, close) {
+  ctx.beginPath();
+  points.forEach(([x, y], index) => index ? ctx.lineTo(x, y) : ctx.moveTo(x, y));
+  if (close) ctx.closePath();
+}
+
 function drawBoundary() {
   const field = state.live && state.live.field;
   if (!field || !field.boundary || field.boundary.length < 3) return;
-  ctx.beginPath();
-  field.boundary.forEach(([x, y], index) =>
-    index ? ctx.lineTo(x, y) : ctx.moveTo(x, y));
-  ctx.closePath();
-  ctx.strokeStyle = '#e3b341';
-  ctx.lineWidth = 2 / state.view.scale;
+  polyline(field.boundary, true);
+  ctx.strokeStyle = F.grenze;
+  ctx.lineWidth = 2.5 / state.view.scale;
   ctx.stroke();
 }
 
@@ -379,14 +475,12 @@ function drawBoundary() {
 function drawHeadland() {
   const headland = state.live && state.live.headland;
   if (!headland || !headland.ring || headland.ring.length < 3) return;
-  ctx.beginPath();
-  headland.ring.forEach(([x, y], index) =>
-    index ? ctx.lineTo(x, y) : ctx.moveTo(x, y));
-  ctx.closePath();
+  polyline(headland.ring, true);
   ctx.save();
-  ctx.setLineDash([6 / state.view.scale, 5 / state.view.scale]);
-  ctx.strokeStyle = headland.alarm ? '#f85149' : '#e3b34188';
-  ctx.lineWidth = (headland.alarm ? 2.5 : 1.5) / state.view.scale;
+  ctx.setLineDash([8 / state.view.scale, 6 / state.view.scale]);
+  ctx.strokeStyle = F.vg;
+  ctx.globalAlpha = headland.alarm ? 1 : 0.55;
+  ctx.lineWidth = (headland.alarm ? 2.5 : 1.8) / state.view.scale;
   ctx.stroke();
   ctx.restore();
 }
@@ -397,15 +491,15 @@ function drawTurn() {
   const turn = state.live && state.live.turn;
   if (!turn || !turn.punkte || turn.punkte.length < 2) return;
   ctx.save();
-  ctx.beginPath();
-  turn.punkte.forEach(([x, y], index) => index ? ctx.lineTo(x, y) : ctx.moveTo(x, y));
+  polyline(turn.punkte);
   if (turn.aktiv) {
-    ctx.strokeStyle = '#58a6ff';
-    ctx.lineWidth = 3 / state.view.scale;
+    ctx.strokeStyle = F.wende;
+    ctx.lineWidth = 3.2 / state.view.scale;
   } else {
-    ctx.setLineDash([4 / state.view.scale, 4 / state.view.scale]);
-    ctx.strokeStyle = turn.im_feld ? '#58a6ffcc' : '#f85149';
-    ctx.lineWidth = 2 / state.view.scale;
+    ctx.setLineDash([5 / state.view.scale, 5 / state.view.scale]);
+    ctx.strokeStyle = turn.im_feld ? F.wende : F.vg;
+    ctx.globalAlpha = 0.7;
+    ctx.lineWidth = 2.2 / state.view.scale;
   }
   ctx.stroke();
   ctx.restore();
@@ -422,13 +516,18 @@ function drawPasses() {
     if (ring && offset < 0) continue;
     const points = shiftLine(line, offset * line.spacing_m + line.nudge_m);
     if (!points.length) continue;
-    ctx.beginPath();
-    points.forEach(([x, y], index) => index ? ctx.lineTo(x, y) : ctx.moveTo(x, y));
-    if (ring) ctx.closePath();
+    polyline(points, ring);
     const active = offset === current;
-    ctx.strokeStyle = active ? '#3fb950' : '#3d4b5c';
-    ctx.lineWidth = (active ? 3 : 1.4) / state.view.scale;
-    ctx.stroke();
+    if (active) {
+      // Die aktive Spur leuchtet: ein breiter, blasser Schein und die Linie darin.
+      ctx.strokeStyle = F.aktiv;
+      ctx.globalAlpha = 0.22; ctx.lineWidth = 9 / state.view.scale; ctx.stroke();
+      ctx.globalAlpha = 1; ctx.lineWidth = 2.8 / state.view.scale; ctx.stroke();
+    } else {
+      ctx.strokeStyle = F.pass;
+      ctx.lineWidth = 1.4 / state.view.scale;
+      ctx.stroke();
+    }
   }
 }
 
@@ -477,9 +576,8 @@ function shiftLine(line, shift) {
 
 function drawTrail() {
   if (state.trail.length < 2) return;
-  ctx.beginPath();
-  state.trail.forEach(([x, y], index) => index ? ctx.lineTo(x, y) : ctx.moveTo(x, y));
-  ctx.strokeStyle = '#58a6ff88';
+  polyline(state.trail);
+  ctx.strokeStyle = F.spur;
   ctx.lineWidth = 1.5 / state.view.scale;
   ctx.stroke();
 }
@@ -491,71 +589,66 @@ function drawRecording() {
     const [x, y] = s.recording.pending_a;
     ctx.beginPath();
     ctx.arc(x, y, 6 / state.view.scale, 0, Math.PI * 2);
-    ctx.fillStyle = '#f85149';
+    ctx.fillStyle = F.vg;
     ctx.fill();
   }
 }
 
+/* Traktor und Gerät im Weltmaßstab, damit die Perspektive mitspielt: was drei
+ * Meter breit ist, ist auch auf dem Bildschirm drei Meter breit - und wird
+ * nach vorn hin kleiner wie alles andere. */
 function drawVehicle() {
   const s = state.live;
-  if (!s || !s.tool_position) return;
-  const width = canvas.clientWidth, height = canvas.clientHeight;
-  const scale = state.view.scale;
+  if (!s || !s.tool_position || s.heading == null) return;
   const profile = s.profile || { width_m: 3 };
   const sections = s.sections || [];
-
-  ctx.save();
-  ctx.translate(width / 2, height * 0.62);
-  if (!state.view.rotate && s.heading != null) {
-    ctx.rotate(s.heading * Math.PI / 180);
-  }
-
-  // Arbeitsbreite mit dem Schaltzustand jeder Sektion
-  const bar = (profile.width_m || 3) * scale;
   const implement = s.implement || {};
+  const h = s.heading * Math.PI / 180;
+  // Nie kleiner als eine Fingerkuppe, egal wie weit herausgezoomt wird.
+  const mind = 26 / state.view.scale;
+  const laenge = Math.max(3.2, mind);
+
   ctx.save();
-  if (implement.trailed && implement.heading != null && s.heading != null) {
-    // Das gezogene Gerät hängt am Zugpunkt und steht in seiner eigenen
-    // Ausrichtung – in der Kurve sichtbar innerhalb der Fahrspur. Genau das
-    // soll man sehen, sonst glaubt man dem starren Balken.
-    const lag = (implement.heading - s.heading + 540) % 360 - 180;
-    ctx.rotate(lag * Math.PI / 180);
-    ctx.translate(0, (implement.hitch_length_m || 4) * scale);
-    ctx.save();
-    ctx.beginPath();
-    ctx.moveTo(0, -(implement.hitch_length_m || 4) * scale);
-    ctx.lineTo(0, 0);
-    ctx.strokeStyle = '#8b949e';
-    ctx.lineWidth = 2;
-    ctx.stroke();
-    ctx.restore();
+  ctx.translate(s.tool_position[0], s.tool_position[1]);
+  ctx.rotate(-h);          // Welt ist y-oben: Kurs im Uhrzeigersinn = negative Drehung
+
+  // Gerät: beim gezogenen Gerät in seiner eigenen Ausrichtung am Zugpunkt.
+  ctx.save();
+  if (implement.trailed && implement.heading != null) {
+    const lag = (implement.heading - s.heading) * Math.PI / 180;
+    const hitch = implement.hitch_length_m || 4;
+    ctx.rotate(-lag);
+    ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(0, -hitch);
+    ctx.strokeStyle = F.traktor; ctx.globalAlpha = 0.6; ctx.lineWidth = 2 / state.view.scale; ctx.stroke();
+    ctx.globalAlpha = 1;
+    ctx.translate(0, -hitch);
   } else {
-    ctx.translate(0, 12);
+    ctx.translate(0, -laenge * 0.55);
   }
+  const bar = profile.width_m || 3, dicke = Math.max(0.6, mind * 0.35);
   if (sections.length) {
     sections.forEach((section) => {
-      const x0 = section.left_m * scale, x1 = section.right_m * scale;
-      ctx.fillStyle = section.forced_off ? '#f8514966'
-        : section.enabled ? '#3fb950cc' : '#6e7681aa';
-      ctx.fillRect(x0, -5, x1 - x0, 10);
+      ctx.fillStyle = section.forced_off ? F.vg : section.enabled ? F.aktiv : F.pass;
+      ctx.globalAlpha = section.enabled && !section.forced_off ? 0.9 : 0.6;
+      ctx.fillRect(section.left_m, -dicke / 2, section.right_m - section.left_m, dicke);
     });
+    ctx.globalAlpha = 1;
   } else {
-    ctx.fillStyle = '#3fb950cc';
-    ctx.fillRect(-bar / 2, -5, bar, 10);
+    ctx.fillStyle = F.aktiv; ctx.globalAlpha = 0.9;
+    ctx.fillRect(-bar / 2, -dicke / 2, bar, dicke);
+    ctx.globalAlpha = 1;
   }
-  ctx.strokeStyle = '#0d1117';
-  ctx.lineWidth = 1;
-  ctx.strokeRect(-bar / 2, -5, bar, 10);
   ctx.restore();
 
-  // Traktor
+  // Traktor: eine Pfeilspitze in Fahrtrichtung
+  const w = laenge * 0.42;
   ctx.beginPath();
-  ctx.moveTo(0, -22);
-  ctx.lineTo(13, 14);
-  ctx.lineTo(0, 7);
-  ctx.lineTo(-13, 14);
+  ctx.moveTo(0, laenge * 0.55);
+  ctx.lineTo(w, -laenge * 0.4);
+  ctx.lineTo(0, -laenge * 0.22);
+  ctx.lineTo(-w, -laenge * 0.4);
   ctx.closePath();
-  ctx.fillStyle = '#e6edf3';
+  ctx.fillStyle = F.traktor;
   ctx.fill();
   ctx.restore();
 }
@@ -591,10 +684,13 @@ function toast(message, isError) {
   toastTimer = setTimeout(() => { box.hidden = true; }, 3500);
 }
 
-el('btnA').onclick = async () => {
-  if (await api('POST', '/api/guidance/a')) toast('Punkt A gesetzt');
-};
-el('btnB').onclick = async () => {
+/* A/B in einem Knopf: erst A, bis zum Ende fahren, dann B. */
+el('btnAB').onclick = async () => {
+  const offen = state.live && state.live.recording && state.live.recording.pending_a;
+  if (!offen) {
+    if (await api('POST', '/api/guidance/a')) toast('Punkt A gesetzt – jetzt bis zum Ende fahren');
+    return;
+  }
   const result = await api('POST', '/api/guidance/b', {});
   if (result) { toast(`Spur "${result.data.name}" angelegt`); refreshLists(); }
 };
@@ -647,17 +743,22 @@ el('btnContour').onclick = async () => {
   if (result) { toast('Kontur aktiv – Ring 0 ist die Feldgrenze'); refreshLists(); }
 };
 
-el('btnNudgeLeft').onclick = () => api('POST', '/api/guidance/nudge', { metres: -0.01 });
-el('btnNudgeRight').onclick = () => api('POST', '/api/guidance/nudge', { metres: 0.01 });
+// Zehn Zentimeter je Druck: das ist der Schritt, den man im Feld braucht -
+// die Nachbarspur liegt einen Meter daneben, nicht einen Zentimeter.
+el('btnNudgeLeft').onclick = () => api('POST', '/api/guidance/nudge', { metres: -0.10 });
+el('btnNudgeRight').onclick = () => api('POST', '/api/guidance/nudge', { metres: 0.10 });
 
+/* Markieren an/aus - das ist der Auftrag. Die Bezeichnung (Grubbern, Säen...)
+ * steht unter Menü → Aufträge und wird für den nächsten Start gemerkt. */
+function arbeitBezeichnung() {
+  try { return localStorage.getItem('agripilot.arbeit') || 'Arbeit'; } catch (e) { return 'Arbeit'; }
+}
 el('btnJob').onclick = async () => {
   if (state.live && state.live.job) {
     const result = await api('POST', '/api/job/stop');
-    if (result) toast(`Fertig: ${result.data.area_ha.toFixed(2)} ha`);
-  } else {
-    const operation = prompt('Welche Arbeit? (z.B. Grubbern, Säen, Spritzen)', '');
-    if (operation === null) return;
-    if (await api('POST', '/api/job/start', { operation })) toast('Arbeit läuft');
+    if (result) toast(`Markieren aus – ${result.data.area_ha.toFixed(2)} ha`);
+  } else if (await api('POST', '/api/job/start', { operation: arbeitBezeichnung() })) {
+    toast(`Markieren an – ${arbeitBezeichnung()}`);
   }
 };
 
@@ -673,12 +774,33 @@ el('btnSteer').onclick = async () => {
   }
 };
 
-el('zoomIn').onclick = () => { state.view.scale = Math.min(40, state.view.scale * 1.4); };
-el('zoomOut').onclick = () => { state.view.scale = Math.max(0.4, state.view.scale / 1.4); };
-el('viewMode').onclick = () => {
-  state.view.rotate = !state.view.rotate;
-  el('viewMode').textContent = state.view.rotate ? '↑' : 'N';
-};
+/* ------------------------------------------------------------- Ansicht */
+
+function merken(key, wert) { try { localStorage.setItem(key, wert); } catch (e) { /* privater Modus */ } }
+function gemerkt(key) { try { return localStorage.getItem(key); } catch (e) { return null; } }
+
+el('zoomIn').onclick = () => { state.view.scale = Math.min(state.view.scale * 1.4, canvas.clientWidth / 20); };
+el('zoomOut').onclick = () => { state.view.scale = Math.max(state.view.scale / 1.4, canvas.clientWidth / 1200); };
+
+const ANSICHTEN = ['perspektive', 'flach', 'nord'];
+function ansichtSetzen(mode) {
+  state.view.mode = ANSICHTEN.includes(mode) ? mode : 'perspektive';
+  stage.classList.toggle('flach', state.view.mode === 'flach');
+  stage.classList.toggle('nord', state.view.mode === 'nord');
+  el('viewMode').title = { perspektive: 'Perspektive', flach: 'Flach, Fahrtrichtung oben', nord: 'Norden oben' }[state.view.mode];
+  merken('agripilot.ansicht', state.view.mode);
+}
+el('viewMode').onclick = () => ansichtSetzen(ANSICHTEN[(ANSICHTEN.indexOf(state.view.mode) + 1) % ANSICHTEN.length]);
+
+function tagSetzen(tag) {
+  document.body.classList.toggle('tag', tag);
+  el('tagNacht').classList.toggle('an', tag);
+  document.querySelector('meta[name=theme-color]').setAttribute('content', tag ? '#dfe6dc' : '#05090c');
+  merken('agripilot.tag', tag ? '1' : '0');
+  farbenLesen();
+  repaintCells();
+}
+el('tagNacht').onclick = () => tagSetzen(!document.body.classList.contains('tag'));
 
 // Zwei-Finger-Zoom, weil in der Kabine nicht immer eine Maus liegt
 let pinchStart = null;
@@ -691,13 +813,13 @@ canvas.addEventListener('touchmove', (event) => {
   if (pinchStart && event.touches.length === 2) {
     event.preventDefault();
     const factor = touchDistance(event) / pinchStart.distance;
-    state.view.scale = Math.max(0.4, Math.min(40, pinchStart.scale * factor));
+    state.view.scale = Math.max(canvas.clientWidth / 1200, Math.min(canvas.clientWidth / 20, pinchStart.scale * factor));
   }
 }, { passive: false });
 canvas.addEventListener('touchend', () => { pinchStart = null; });
 canvas.addEventListener('wheel', (event) => {
   event.preventDefault();
-  state.view.scale = Math.max(0.4, Math.min(40,
+  state.view.scale = Math.max(canvas.clientWidth / 1200, Math.min(canvas.clientWidth / 20,
     state.view.scale * (event.deltaY < 0 ? 1.15 : 1 / 1.15)));
 }, { passive: false });
 
@@ -730,6 +852,13 @@ el('btnNewField').onclick = async () => {
 el('btnAPlus').onclick = async () => {
   const result = await api('POST', '/api/guidance/a-plus', {});
   if (result) { toast(`Spur "${result.data.name}" angelegt`); refreshLists(); }
+};
+
+el('arbeitName').value = arbeitBezeichnung();
+el('arbeitName').onchange = (event) => {
+  const name = event.target.value.trim() || 'Arbeit';
+  merken('agripilot.arbeit', name);
+  toast(`Nächste Arbeit: ${name}`);
 };
 
 el('btnSaveProfile').onclick = async () => {
@@ -1311,6 +1440,9 @@ document.addEventListener('visibilitychange', () => {
 
 /* ------------------------------------------------------------------ Start */
 
+farbenLesen();
+tagSetzen(gemerkt('agripilot.tag') === '1');
+ansichtSetzen(gemerkt('agripilot.ansicht') || 'perspektive');
 resize();
 connect();
 bildschirmWachhalten();

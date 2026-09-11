@@ -2,38 +2,61 @@
 
 ## Der Bildschirm
 
+Die Anzeige ist der Blick über die Haube: das Feld liegt in Perspektive vor dem
+Traktor, die Spur läuft zum Horizont. Alles Wichtige liegt als Glasfläche
+darüber.
+
 ```
  ┌──────────────────────────────────────────────────────────────┐
- │ ▓▓▓▓▓▓▓▓▓░░░░░░░░░░░░░░░░░░░░░░░  Lichtbalken               │
- ├──────────────────────────────────────────────────────────────┤
- │   12    8.4    3    2.41   4.1    38   [RTK fix ±2 cm]       │
- │ cm ABW. km/h  SPUR   ha   ° Hang  m VG [Lenkung] [Master]    │
- ├──────────────────────────────────────────────────────────────┤
- │ Oberes Feld                                            + − ↑ │
- │ AB Nord · 6,00 m                                             │
- │                                                              │
- │              Karte: bearbeitete Fläche, Spuren,              │
- │              Feldgrenze, Traktor mit Arbeitsbreite           │
- │                                                              │
- │                     [1][2][3][4][5]  Sektionen               │
- ├──────────────────────────────────────────────────────────────┤
- │  A    B    ∿    ⬠    ↻    ◀    ▶   Arbeit  Lenkung  Menü    │
+ │ Oberes Feld     ▓▓▓▓▓░░░░░░░│░░░░░░░░░░       RTK fix ±1 cm │
+ │ Kontur · 6,00 m        ◀ 12 cm                 Master       │
+ │                                                       + − ⛰ ☼│
+ │                    ╲    │    ╱                               │
+ │                     ╲   │   ╱             ◀ 10 cm   10 cm ▶  │
+ │   8,6  km/h          ╲  │  ╱             A setzen  A+  Kontur│
+ │   5    0,09  −3,5°    ╲ │ ╱            Wende Kurve Grenze Menü│
+ │   Ring ha    Hang      ▲                ● MARKIEREN  an      │
+ │   [1][2][3][4]   bis Vorgewende 38 m   ● LENKUNG    aktiv    │
  └──────────────────────────────────────────────────────────────┘
 ```
 
-**Der Lichtbalken ist die eine Anzeige, die man im Augenwinkel lesen kann.**
+**Der Lichtbalken oben ist die eine Anzeige, die man im Augenwinkel lesen kann.**
 Leuchtet es rechts, ist der Traktor rechts der Spur – also nach links lenken.
-Eine Lampe sind 5 cm. Grün heißt unter 5 cm, gelb bis 20 cm, rot darüber.
+Eine Lampe sind 5 cm. Grün heißt unter 5 cm, gelb bis 20 cm, rot darüber. Die
+Zahl darunter sagt es genau; der Pfeil daneben zeigt dieselbe Seite wie der
+Balken.
 
-Die Zahl links daneben nennt die Abweichung in Zentimetern, die Farbe sagt
-dasselbe wie der Balken.
+**Links unten** die Fahrt: Geschwindigkeit, Spur- oder Ringnummer, bearbeitete
+Hektar, Hang mit Ausgleich. Die kleine Kurve darunter ist der Verlauf der
+Abweichung der letzten Sekunden – man sieht, ob die Führung ruhig arbeitet oder
+pendelt. Bei mehreren Teilbreiten steht der Sektionsbalken darunter.
 
-![Aufträge](bilder/auftraege.png)
+**Unten Mitte** die Strecke bis zum Vorgewende – bis zum *Beginn* des
+Vorgewendes, nicht bis zur Grenze. Sie erscheint nur, wenn eine Feldgrenze
+gespeichert und eine Vorgewendetiefe eingestellt ist. Unter 20 m wird sie
+bernsteinfarben und ruft es über der Karte aus. Während einer Wende zeigt
+dieselbe Fläche den Fortschritt der Wende.
 
-**„m VG"** ist die Strecke bis zum Beginn des Vorgewendes – nicht bis zur
-Feldgrenze. Sie erscheint nur, wenn eine Feldgrenze gespeichert und eine
-Vorgewendetiefe eingestellt ist, und wird negativ, sobald man im Vorgewende
-steht. Siehe [Vorgewende und Wenden](#vorgewende-und-wenden-menü--vorgewende).
+**Rechts** die Handlungsspalte, nach Wichtigkeit von unten nach oben – unten
+liegt die Hand am montierten Tablet ohnehin:
+
+| | |
+|---|---|
+| **Lenkung** | der größte Knopf. Grün und leuchtend: die Automatik lenkt. Bernstein: scharf, aber gerade nicht am Lenken – der Grund steht darunter (zu langsam, kein RTK, zu weit von der Spur). Grau mit rotem Punkt: aus. Tippen schaltet um. |
+| **Markieren** | darüber. An = die bearbeitete Fläche wird gemalt, Hektar und Überlappung laufen mit, die Fahrt wird aufgezeichnet. Aus = nur Führung. Die Bezeichnung der Arbeit (Grubbern, Säen…) steht unter Menü → Aufträge. |
+| **A setzen / B setzen · A+ · Kontur** | eine Spur anlegen – siehe unten. |
+| **◀ 10 cm · 10 cm ▶** | das ganze Spurmuster um zehn Zentimeter versetzen. |
+| **Wende · Kurve · Grenze · Menü** | klein, weil selten gebraucht. |
+
+**Oben rechts** unter den Statuschips: Näher, Weiter, Ansicht, Tag/Nacht. Die
+Ansicht wechselt zwischen **Perspektive** (Blick über die Haube), **Flach**
+(Fahrtrichtung oben, wie eine Karte) und **Norden oben**. **Tag** schaltet auf
+hellen Grund – ein schwarzer Bildschirm hat in praller Sonne die wenigsten
+Reserven. Beides wird auf dem Tablet gemerkt.
+
+Zwei Finger auf der Karte zoomen. Die Perspektive ist keine 3D-Grafik: die
+Karte wird flach gezeichnet und vom Browser gekippt, das kostet das Tablet fast
+nichts.
 
 **Der Hang-Wert** erscheint nur, wenn ein Neigungssensor eingerichtet ist. Er
 zeigt die Schräglage, und der Ausgleich dazu läuft im Hintergrund: bei 3 m
@@ -57,20 +80,20 @@ Grenze automatisch ab.
 
 **Gerade Spuren (AB-Linie)** – der Normalfall:
 
-1. Am Feldrand in Arbeitsrichtung ausrichten, **A** drücken.
-2. Bis zum anderen Ende fahren, **B** drücken.
+1. Am Feldrand in Arbeitsrichtung ausrichten, **A setzen** drücken.
+2. Bis zum anderen Ende fahren – derselbe Knopf heißt jetzt **B setzen**, drücken.
 
 Fertig. Alle weiteren Spuren liegen im Abstand der Arbeitsbreite parallel dazu.
 
-**A+ – wenn kein Platz für einen B-Punkt ist:** **Menü → Spuren →
-*A+ Spur in aktueller Fahrtrichtung***. Die Spur läuft dann genau in die
+**A+ – wenn kein Platz für einen B-Punkt ist:** die Taste **A+** rechts. Die
+Spur läuft dann genau in die
 Richtung, in die der Traktor gerade zeigt. Gut, um die Richtung vom Nachbarfeld
 oder vom letzten Jahr zu übernehmen.
 
 **Kurven** – für krumme Felder: **∿ Kurve** drücken, die gewünschte Linie
 abfahren, wieder **∿ Kurve** drücken. Alle weiteren Spuren folgen dieser Form.
 
-**Kontur – die Feldgrenze selbst als Spur:** **Menü → Spuren → *◎ Kontur***.
+**Kontur – die Feldgrenze selbst als Spur:** die Taste **Kontur** rechts.
 Ring 0 ist die Feldgrenze, jeder weitere Ring liegt eine Arbeitsbreite weiter
 innen. Kein A- und kein B-Punkt nötig, und nichts abzufahren, was ohnehin schon
 abgefahren wurde – die Grenze ist da. Gedacht für das Vorgewende und für krumme
@@ -87,22 +110,22 @@ laden. Die Kontur steht nicht in dieser Liste; sie wird über den Knopf geholt.
 
 ## Arbeiten
 
-**Arbeit starten** drücken und eintragen, was gemacht wird (Grubbern, Säen,
-Spritzen). Ab jetzt:
+**Markieren** drücken. Die Bezeichnung (Grubbern, Säen, Spritzen) steht unter
+**Menü → Aufträge** und bleibt, bis eine andere eingetragen wird. Ab jetzt:
 
 * wird die bearbeitete Fläche grün mitgezeichnet,
 * laufen Hektar, Strecke und Überlappung mit,
 * wird die Fahrspur für den Nachweis aufgezeichnet.
 
-Am Ende **Arbeit beenden**. Der Auftrag steht unter **Menü → Aufträge** mit
+Am Ende wieder **Markieren** drücken. Der Auftrag steht unter **Menü → Aufträge** mit
 Datum, Dauer, Strecke, Fläche und doppelt bearbeiteter Fläche – als GPX,
 GeoJSON oder CSV herunterladbar. *Alle Arbeiten als CSV* gibt die Liste für das
 Büro.
 
 ## Spurversatz (Nudge)
 
-Die Tasten **◀** und **▶** verschieben das **ganze Spurmuster** um einen
-Zentimeter. Dafür gibt es zwei gute Gründe:
+Die Tasten **◀ 10 cm** und **10 cm ▶** verschieben das **ganze Spurmuster** um
+zehn Zentimeter – das ist der Schritt, den man im Feld braucht. Dafür gibt es zwei gute Gründe:
 
 * Zwei Traktoren stehen minimal verschieden auf derselben Spur.
 * Nach einer Pause hat sich die RTK-Lösung um ein paar Zentimeter verschoben.
@@ -147,13 +170,13 @@ Maschine; sonst bleibt dort die Null stehen.
 
 ### Wenden
 
-Die Taste **↻** hat drei Zustände, und sie sagt jedes Mal, was sie als Nächstes
-tut:
+Die kleine Taste **Wende** rechts hat drei Zustände, und sie sagt jedes Mal,
+was sie als Nächstes tut:
 
 1. **„Wende"** – planen. Die Route erscheint gestrichelt auf der Karte, blau
    wenn sie im Feld liegt, rot wenn nicht.
-2. **„Wende starten"** – die Maschine folgt der Route.
-3. **„Abbrechen"** – zurück an den Fahrer.
+2. **„Ω los"** – die Maschine folgt der Route.
+3. **„Ω Stopp"** – zurück an den Fahrer.
 
 Zwei Druck, nicht einer: eine Wende, die auf Knopfdruck losfährt, hat niemand
 vorher angesehen.

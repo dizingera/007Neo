@@ -20,7 +20,7 @@ gleichen Netz.
 
 | | |
 |---|---|
-| **Spurführung** | AB-Linien, A+ (Punkt und Himmelsrichtung), aufgezeichnete Kurven, Kontur (die Feldgrenze als Ringspur). Lichtbalken und Abweichung in Zentimetern. Spurversatz („Nudge") in 1-cm-Schritten. |
+| **Spurführung** | AB-Linien, A+ (Punkt und Himmelsrichtung), aufgezeichnete Kurven, Kontur (die Feldgrenze als Ringspur). Lichtbalken und Abweichung in Zentimetern. Spurversatz („Nudge") in 10-cm-Schritten. Blick über die Haube in Perspektive, wahlweise flach oder Norden oben; Tag- und Nachtseite. |
 | **Vorgewende** | Tiefe in Arbeitsbreiten aus der Feldgrenze, Restdistanz in Metern, Annäherungsalarm. Zwei Wendemuster – Ω-Wende (weiter Bogen) und U-Wende (kompakt) – jeweils geplant, angesehen und erst dann gefahren. Geprüft wird jeder Punkt der Route gegen die Feldgrenze. |
 | **Bearbeitete Fläche** | Wird live mitgezeichnet. Hektar, Überlappung in Prozent, Lücken sofort sichtbar. |
 | **Sektionen** | Bis zu 24 Teilbreiten, automatisch aus über bereits bearbeitetem Boden und außerhalb der Feldgrenze. |
@@ -137,7 +137,9 @@ gps/
 │   ├── settings.py   Alle Einstellungen: Bereiche, Erklärung, Wirkzeitpunkt
 │   ├── yamlfile.py   Konfigurationsdatei lesen und schreiben, auch ohne PyYAML
 │   └── server.py     Weboberfläche, Live-Verbindung, Schnittstelle
-├── frontend/         Kabinenanzeige (kein Bauschritt nötig)
+├── frontend/         Kabinenanzeige: Blick über die Haube, Tag und Nacht
+│                     (kein Bauschritt nötig; Schriften liegen bei, weil der
+│                     Pi im Feld kein Internet hat)
 ├── scripts/          Installation (Pi und Windows), Dienst, Gerätesuche,
 │                     Empfänger- und Lenkung einmessen
 └── docs/             Hardware, Installation, Bedienung, deine Anlage,
