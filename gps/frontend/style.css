@@ -111,10 +111,10 @@ body.tag .hint { text-shadow: none; }
 @keyframes alarm { 50% { opacity: .35; } }
 
 /* --- Ansicht --- */
-.ansicht { position: absolute; right: calc(2.2 * var(--u)); top: calc(9.5 * var(--u)); display: flex; flex-direction: column; gap: calc(.7 * var(--u)); z-index: 3; }
+.ansicht { position: absolute; right: calc(2.2 * var(--u)); top: calc(9.8 * var(--u)); display: flex; flex-direction: row; gap: calc(.7 * var(--u)); z-index: 3; }
 .rund { width: calc(4.6 * var(--u)); height: calc(4.6 * var(--u)); min-width: 44px; min-height: 44px; border-radius: 50%; display: grid; place-items: center;
   background: var(--glas); color: var(--text); border: 1px solid var(--haar); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); font-size: calc(2.2 * var(--u)); font-weight: 600; cursor: pointer; }
-.rund svg { width: 55%; height: 55%; stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.rund svg { width: calc(2.4 * var(--u)); height: calc(2.4 * var(--u)); min-width: 22px; min-height: 22px; stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 .rund.an { color: var(--leucht); border-color: color-mix(in srgb, var(--leucht) 40%, transparent); }
 
 /* --- Fahrt-Cluster --- */
@@ -207,7 +207,7 @@ body.tag .hint { text-shadow: none; }
   /* Die Chips rücken unter den Balken - nebeneinander ist hochkant kein Platz. */
   .chips { top: calc(13 * var(--u)); }
   .cluster { top: calc(25 * var(--u)); }   /* unter den Chips samt Hinweiszeile */
-  .ansicht { top: calc(25 * var(--u)); }
+  .ansicht { top: calc(19 * var(--u)); }
 }
 
 /* --- Menü --- */

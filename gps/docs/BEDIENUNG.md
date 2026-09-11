@@ -2,6 +2,8 @@
 
 ## Der Bildschirm
 
+![Die Kabine](bilder/kabine.png)
+
 Die Anzeige ist der Blick über die Haube: das Feld liegt in Perspektive vor dem
 Traktor, die Spur läuft zum Horizont. Alles Wichtige liegt als Glasfläche
 darüber.
@@ -109,6 +111,8 @@ Angelegte Spuren stehen unter **Menü → Spuren** und lassen sich jederzeit wie
 laden. Die Kontur steht nicht in dieser Liste; sie wird über den Knopf geholt.
 
 ## Arbeiten
+
+![Aufträge](bilder/auftraege.png)
 
 **Markieren** drücken. Die Bezeichnung (Grubbern, Säen, Spritzen) steht unter
 **Menü → Aufträge** und bleibt, bis eine andere eingetragen wird. Ab jetzt:

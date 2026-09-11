@@ -107,10 +107,12 @@ function onState(data) {
       if (state.trail.length > 900) state.trail.shift();
     }
   }
-  // Feldwechsel: alte Bedeckung gehört nicht auf das neue Feld
+  // Feldwechsel: alte Bedeckung gehört nicht auf das neue Feld. Aber erst ab
+  // dem zweiten Bild - das erste ist kein Wechsel, sondern der Anfang, und
+  // die eben im 'init' gemalte Fläche wäre sonst sofort wieder weg.
   const before = previous && previous.field ? previous.field.id : null;
   const now = data.field ? data.field.id : null;
-  if (before !== now) { clearCells(); state.trail = []; refreshLists(); }
+  if (previous && before !== now) { clearCells(); state.trail = []; refreshLists(); }
 
   updateHud(data);
 }
@@ -831,6 +833,17 @@ function touchDistance(event) {
 /* -------------------------------------------------------------- Menü */
 
 el('btnMenu').onclick = () => { el('sheet').hidden = false; refreshLists(); };
+
+/* Ein Reiter lässt sich direkt ansteuern: /#menu=setup öffnet die Inbetriebnahme.
+ * Für ein Lesezeichen auf dem Tablet - und für Bildschirmfotos der Doku. */
+function menueAusAdresse() {
+  const treffer = /menu=([a-z]+)/.exec(location.hash);
+  if (!treffer) return;
+  const tab = document.querySelector(`.tab[data-tab="${treffer[1]}"]`);
+  if (!tab) return;
+  el('sheet').hidden = false;
+  tab.onclick();
+}
 el('sheetClose').onclick = () => { el('sheet').hidden = true; };
 document.querySelectorAll('.tab').forEach((tab) => {
   tab.onclick = () => {
@@ -1447,4 +1460,5 @@ resize();
 connect();
 bildschirmWachhalten();
 requestAnimationFrame(render);
+menueAusAdresse();
 setInterval(() => { if (!el('sheet').hidden) refreshLists(); }, 5000);
