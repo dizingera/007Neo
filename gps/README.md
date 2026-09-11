@@ -21,7 +21,7 @@ gleichen Netz.
 | | |
 |---|---|
 | **Spurführung** | AB-Linien, A+ (Punkt und Himmelsrichtung), aufgezeichnete Kurven, Kontur (die Feldgrenze als Ringspur). Lichtbalken und Abweichung in Zentimetern. Spurversatz („Nudge") in 10-cm-Schritten. Blick über die Haube in Perspektive, wahlweise flach oder Norden oben; Tag- und Nachtseite. |
-| **Vorgewende** | Tiefe in Arbeitsbreiten aus der Feldgrenze, Restdistanz in Metern, Annäherungsalarm. Zwei Wendemuster – Ω-Wende (weiter Bogen) und U-Wende (kompakt) – jeweils geplant, angesehen und erst dann gefahren. Geprüft wird jeder Punkt der Route gegen die Feldgrenze. |
+| **Vorgewende** | Tiefe in Arbeitsbreiten aus der Feldgrenze, Restdistanz in Metern, Annäherungsalarm. Zwei Wendemuster – Ω-Wende (weiter Bogen) und U-Wende (kompakt) – jeweils geplant, angesehen und erst dann gefahren. Geprüft wird jeder Punkt der Route gegen die Feldgrenze. Arbeitsreihenfolge „Vorgewende zuerst/zuletzt" als Hinweis, gelesen aus der bearbeiteten Fläche. |
 | **Bearbeitete Fläche** | Wird live mitgezeichnet. Hektar, Überlappung in Prozent, Lücken sofort sichtbar. |
 | **Sektionen** | Bis zu 24 Teilbreiten, automatisch aus über bereits bearbeitetem Boden und außerhalb der Feldgrenze. |
 | **Gezogene Geräte** | Anhängerkinematik statt starrem Versatz: die Ausrichtung des Geräts läuft dem Fahrzeug nach, abhängig von Tempo und Deichsellänge. In der Kurve wird dort markiert, wo das Gerät wirklich ist. |
@@ -152,7 +152,7 @@ gps/
 cd gps/backend && python3 -m unittest discover -s tests -v
 ```
 
-203 Tests, ohne Zusatzpakete lauffähig. Geprüft wird vor allem, was im Feld Geld
+213 Tests, ohne Zusatzpakete lauffähig. Geprüft wird vor allem, was im Feld Geld
 kostet, wenn es falsch ist: Flächen, das Vorzeichen der Abweichung, der
 Hangausgleich und die Bedingungen, unter denen die Lenkautomatik einschalten
 darf.

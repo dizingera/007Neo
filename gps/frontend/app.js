@@ -191,7 +191,8 @@ function updateHud(s) {
     ruf.classList.remove('an');
   } else if (zeigen) {
     const rest = headland.rest_m;
-    el('restLabel').textContent = headland.im_vorgewende ? 'im Vorgewende' : 'bis Vorgewende';
+    el('restLabel').textContent = (headland.im_vorgewende ? 'im Vorgewende' : 'bis Vorgewende') +
+      (headland.abdeckung != null ? ` · ${Math.round(headland.abdeckung * 100)} % bearbeitet` : '');
     el('rest').textContent = (rest >= 0 ? '' : '−') + Math.abs(rest).toFixed(0) + ' m';
     el('rest').className = headland.alarm ? 'warn' : '';
     // Der Balken zeigt die letzten 100 m - weiter voraus ist er voll.
@@ -239,6 +240,7 @@ function updateHud(s) {
     hint.push(turn.im_feld ? 'Wende geplant – Wende noch einmal drücken'
                            : 'Wende geplant, liegt aber nicht im Feld – Richtung oder Wendekreis ändern');
   }
+  if (headland && headland.hinweis) hint.push(headland.hinweis);
   if (!state.connected) hint.push('Keine Verbindung zum Gerät');
   el('hint').textContent = hint.join('\n');
   el('hint').classList.toggle('alarm', !state.connected);

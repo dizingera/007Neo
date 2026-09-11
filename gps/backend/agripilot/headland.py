@@ -46,6 +46,7 @@ from .guidance import GuidanceState, VehicleProfile, lightbar_offset
 # Muster und Richtungen, wie sie in der Oberfläche stehen.
 MUSTER = ("omega", "u")
 RICHTUNGEN = ("links", "rechts")
+REIHENFOLGEN = ("egal", "zuerst", "zuletzt")
 
 
 def _forward(heading: float) -> Point:
@@ -89,6 +90,7 @@ class HeadlandSettings:
     ueberspringen: int = 1          # Wiedereinfahrt: um so viele Spuren versetzt
     radius_m: float = 6.0           # kleinster Wendekreis der Maschine
     nur_im_feld: bool = True        # Sicherheitsprüfung erzwingen
+    reihenfolge: str = "egal"       # "zuerst" | "zuletzt" | "egal" - wann das Vorgewende dran ist
 
     def tiefe_m(self, arbeitsbreite_m: float) -> float:
         breite = self.breite_m if self.breite_m > 0.0 else max(0.5, arbeitsbreite_m)
@@ -107,6 +109,7 @@ class HeadlandSettings:
             ueberspringen=int(max(1, min(8, self.ueberspringen))),
             radius_m=float(max(1.5, min(30.0, self.radius_m))),
             nur_im_feld=bool(self.nur_im_feld),
+            reihenfolge=self.reihenfolge if self.reihenfolge in REIHENFOLGEN else "egal",
         )
 
     def to_dict(self) -> dict:
@@ -121,6 +124,7 @@ class HeadlandSettings:
             "ueberspringen": self.ueberspringen,
             "radius_m": self.radius_m,
             "nur_im_feld": self.nur_im_feld,
+            "reihenfolge": self.reihenfolge,
         }
 
     @classmethod
@@ -189,6 +193,8 @@ class HeadlandStatus:
     bis_grenze_m: Optional[float] = None
     im_vorgewende: bool = False
     alarm: bool = False
+    abdeckung: Optional[float] = None   # Anteil des Vorgewendes, der bearbeitet ist
+    hinweis: str = ""                   # Reihenfolge: was jetzt dran wäre
 
     def to_dict(self) -> dict:
         return {
@@ -197,6 +203,8 @@ class HeadlandStatus:
             "bis_grenze_m": self.bis_grenze_m,
             "im_vorgewende": self.im_vorgewende,
             "alarm": self.alarm,
+            "abdeckung": self.abdeckung,
+            "hinweis": self.hinweis,
         }
 
 
@@ -227,6 +235,67 @@ def status(position: Optional[Point], heading: Optional[float],
         if settings.aktiv and settings.alarm_aktiv:
             ergebnis.alarm = ergebnis.rest_m <= settings.alarm_abstand_m
     return ergebnis
+
+
+def abdeckung(ist_bearbeitet, boundary: Sequence[Point], tiefe_m: float,
+              schritt_m: float = 3.0) -> Optional[float]:
+    """Wie viel vom Vorgewende schon bearbeitet ist, als Anteil 0..1.
+
+    Abgetastet wird die Mittellinie des Vorgewendes - der Ring in halber Tiefe -
+    alle paar Meter. Das ist keine Flächenmessung, aber die Frage ist auch keine
+    Flächenfrage: "ist das Vorgewende schon dran gewesen?" beantwortet eine Linie
+    mittendurch ehrlich genug, und sie kostet ein paar Dutzend Abfragen statt
+    Tausender.
+
+    ``ist_bearbeitet`` ist die Frage an die Fläche (``CoverageMap.is_covered``).
+    ``None``, wenn es kein Vorgewende gibt oder der Ring nicht zu bilden ist.
+    """
+    if tiefe_m <= 0.0 or len(boundary) < 3:
+        return None
+    mitte = ring(boundary, tiefe_m / 2.0)
+    if len(mitte) < 3:
+        return None
+    proben = 0
+    getroffen = 0
+    n = len(mitte)
+    for i in range(n):
+        a, b = mitte[i], mitte[(i + 1) % n]
+        laenge = distance(a, b)
+        stuecke = max(1, int(laenge / schritt_m))
+        for k in range(stuecke):
+            t = (k + 0.5) / stuecke
+            punkt = (a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t)
+            proben += 1
+            if ist_bearbeitet(punkt):
+                getroffen += 1
+    return getroffen / proben if proben else None
+
+
+def reihenfolge_hinweis(settings: HeadlandSettings, abdeckung_anteil: Optional[float],
+                        modus: Optional[str], ring_nr: Optional[int]) -> str:
+    """Ein Satz dazu, ob die eingestellte Reihenfolge gerade eingehalten wird.
+
+    Das Programm erzwingt nichts - es kann nicht wissen, warum der Fahrer heute
+    anders herum fährt. Aber es kann sagen, was es sieht: das Vorgewende ist
+    noch nicht dran gewesen, und die Einstellung sagt "zuerst". Der Rest ist
+    Sache des Menschen auf dem Sitz.
+    """
+    if settings.reihenfolge == "egal" or abdeckung_anteil is None:
+        return ""
+    fertig = abdeckung_anteil >= 0.8
+    prozent = f"{abdeckung_anteil * 100:.0f} %"
+    auf_vorgewende = modus == "contour" and ring_nr is not None and ring_nr < settings.spuren
+    if settings.reihenfolge == "zuerst":
+        if auf_vorgewende:
+            return f"Vorgewende zuerst: Ring {ring_nr + 1} von {settings.spuren} · {prozent}"
+        if not fertig and modus in ("ab", "curve"):
+            return f"Vorgewende zuerst - erst die Kontur fahren ({prozent} bearbeitet)"
+        return ""
+    # "zuletzt": ob das Innere schon fertig ist, weiß die Fläche nicht als eine
+    # Zahl - gesagt wird nur, wie weit das Vorgewende ist, wenn man darauf fährt.
+    if auf_vorgewende:
+        return f"Vorgewende zuletzt: Ring {ring_nr + 1} von {settings.spuren} · {prozent}"
+    return ""
 
 
 def ring(boundary: Sequence[Point], inset_m: float) -> list[Point]:

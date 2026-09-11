@@ -162,6 +162,13 @@
           <option value="rechts">nach rechts</option>
         </select>
       </label>
+      <label>Arbeitsreihenfolge
+        <select name="reihenfolge">
+          <option value="egal">keine Vorgabe</option>
+          <option value="zuerst">Vorgewende zuerst</option>
+          <option value="zuletzt">Vorgewende zuletzt</option>
+        </select>
+      </label>
     </div>
     <div class="row" id="headlandSwitches">
       <label class="switch"><input type="checkbox" name="aktiv">
@@ -179,6 +186,11 @@
       sie wandert mit dem Gerät mit. Die Restdistanz oben zählt bis zum
       <i>Beginn</i> des Vorgewendes, nicht bis zur Grenze: dort endet die Arbeit
       und beginnt die Wende.</p>
+    <p class="note"><b>Arbeitsreihenfolge:</b> das Programm erzwingt nichts, es sieht
+      nur hin. Steht „zuerst" und die Kontur ist noch nicht gefahren, sagt es das,
+      sobald eine AB-Spur aktiv ist. Ob das Vorgewende bearbeitet ist, liest es
+      aus der markierten Fläche – deshalb zählt nur, was mit <b>Markieren</b>
+      gefahren wurde.</p>
     <p class="note"><b>Ω-Wende</b> holt nach vorn aus und braucht mehr Tiefe, fährt
       dafür weichere Radien. Die <b>U-Wende</b> kommt mit deutlich weniger Tiefe
       aus; dafür wächst die Zwischengerade mit dem Spurversatz.</p>

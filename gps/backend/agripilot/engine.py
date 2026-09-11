@@ -80,6 +80,8 @@ class Engine:
         self._turn_planned_at: Optional[geo.Point] = None
         self._ring_key: Optional[tuple] = None
         self._ring_cache: list[list[float]] = []
+        self._abdeckung_at = 0.0          # zuletzt abgetastet (Sekunden)
+        self._abdeckung: Optional[float] = None
         self._steering_was_engaged = False
 
         self.record_mode: Optional[str] = None          # "boundary" | "curve"
@@ -567,6 +569,18 @@ class Engine:
         )
         if self.headland_status.alarm and not vorher:
             self.note(f"Vorgewende in {self.headland_status.rest_m:.0f} m")
+        # Ob das Vorgewende schon dran war, sagt die Fläche - einmal je Sekunde
+        # gefragt, nicht zehnmal: die Antwort ändert sich langsamer als die Position.
+        jetzt = time.time()
+        if grenze and jetzt - self._abdeckung_at > 1.0:
+            self._abdeckung_at = jetzt
+            self._abdeckung = headland_module.abdeckung(
+                self.coverage.is_covered, grenze, self.headland_status.tiefe_m)
+        self.headland_status.abdeckung = self._abdeckung
+        self.headland_status.hinweis = headland_module.reihenfolge_hinweis(
+            self.headland, self._abdeckung,
+            self.line.mode if self.line else None,
+            self.guidance.pass_number if self.guidance.active else None)
 
     def _update_guidance(self, fix: Fix) -> None:
         if self.turn is not None and self.tool_position is not None \

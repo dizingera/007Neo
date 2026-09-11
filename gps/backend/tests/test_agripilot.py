@@ -1654,6 +1654,50 @@ class HeadlandGeometryTest(unittest.TestCase):
         self.assertEqual(self.headland.ring(QUADRAT, 0.0), QUADRAT)
 
 
+class ArbeitsreihenfolgeTest(unittest.TestCase):
+    """Vorgewende zuerst oder zuletzt: das Programm erzwingt nichts, es sieht hin."""
+
+    def setUp(self):
+        from agripilot import headland
+        self.headland = headland
+
+    def test_coverage_of_the_headland_is_read_from_the_worked_map(self):
+        """Abgetastet wird die Mittellinie des Vorgewendes - ein bearbeiteter
+        Rand zählt, ein leeres Feld nicht."""
+        karte = CoverageMap(cell_size=0.5)
+        self.assertAlmostEqual(self.headland.abdeckung(karte.is_covered, QUADRAT, 12.0), 0.0)
+        # Der ganze Rand wird als 12 m breiter Streifen bearbeitet.
+        abschnitte = build_sections(12.0, 1)
+        for a, b, kurs in (((6.0, 0.0), (6.0, 100.0), 0.0), ((0.0, 94.0), (100.0, 94.0), 90.0),
+                           ((94.0, 100.0), (94.0, 0.0), 180.0), ((100.0, 6.0), (0.0, 6.0), 270.0)):
+            karte.add_swath(a, b, kurs, abschnitte)
+        self.assertGreater(self.headland.abdeckung(karte.is_covered, QUADRAT, 12.0), 0.9)
+
+    def test_no_headland_no_answer(self):
+        karte = CoverageMap(cell_size=0.5)
+        self.assertIsNone(self.headland.abdeckung(karte.is_covered, QUADRAT, 0.0))
+        self.assertIsNone(self.headland.abdeckung(karte.is_covered, [], 12.0))
+
+    def test_first_means_a_hint_on_the_ab_line_while_the_headland_is_untouched(self):
+        s = self.headland.HeadlandSettings(reihenfolge="zuerst", spuren=2)
+        self.assertIn("erst die Kontur", self.headland.reihenfolge_hinweis(s, 0.1, "ab", 3))
+        self.assertEqual(self.headland.reihenfolge_hinweis(s, 0.95, "ab", 3), "")
+
+    def test_first_shows_the_ring_progress_while_on_the_headland(self):
+        s = self.headland.HeadlandSettings(reihenfolge="zuerst", spuren=2)
+        self.assertIn("Ring 1 von 2", self.headland.reihenfolge_hinweis(s, 0.2, "contour", 0))
+        # Ring 2 (Index 2) liegt schon innerhalb des Vorgewendes: keine Vorgewende-Meldung
+        self.assertEqual(self.headland.reihenfolge_hinweis(s, 0.9, "contour", 2), "")
+
+    def test_no_preference_means_silence(self):
+        s = self.headland.HeadlandSettings(reihenfolge="egal")
+        self.assertEqual(self.headland.reihenfolge_hinweis(s, 0.0, "ab", 1), "")
+
+    def test_an_unknown_order_falls_back_to_no_preference(self):
+        s = self.headland.HeadlandSettings.from_dict({"reihenfolge": "irgendwie"})
+        self.assertEqual(s.reihenfolge, "egal")
+
+
 class TurnPatternTest(unittest.TestCase):
     """Die beiden Wendemuster - und die Prüfung, ob sie ins Feld passen."""
 
@@ -2452,6 +2496,51 @@ class QuellenwechselTest(unittest.TestCase):
                 self.assertEqual(zustand["system"]["gnss"]["source"], "simulator")
                 self.assertIsNotNone(app.engine.simulator)
                 self.assertEqual(client.post("/api/quelle/neustart").status_code, 200)
+
+
+class OberflaecheTest(unittest.TestCase):
+    """Die Kabinenanzeige hat keine eigenen Tests - aber zwei Fehlerklassen
+    lassen sich ohne Browser fangen: ein Knopf, den das Programm anspricht und
+    den es im HTML nicht gibt, und eine ID, die zweimal vergeben ist. Beides ist
+    im Feld unsichtbar, bis jemand genau diesen Knopf drückt."""
+
+    FRONTEND = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(
+        os.path.abspath(__file__)))), "frontend")
+
+    def _lesen(self, name):
+        with open(os.path.join(self.FRONTEND, name), encoding="utf-8") as f:
+            return f.read()
+
+    def test_every_element_the_script_uses_exists_exactly_once(self):
+        import re
+        html = self._lesen("index.html")
+        js = self._lesen("app.js")
+        ids = re.findall(r'\bid="([^"]+)"', html)
+        doppelt = sorted({i for i in ids if ids.count(i) > 1})
+        self.assertEqual(doppelt, [], f"doppelte IDs im HTML: {doppelt}")
+        benutzt = set(re.findall(r"el\('([A-Za-z0-9_]+)'\)", js))
+        fehlt = sorted(benutzt - set(ids))
+        self.assertEqual(fehlt, [], f"im Programm angesprochen, im HTML nicht vorhanden: {fehlt}")
+
+    def test_the_shell_cache_lists_only_files_that_exist(self):
+        """Ein Eintrag in der Hülle, den es nicht gibt, lässt die ganze
+        Installation der Kachel scheitern - addAll ist alles oder nichts."""
+        import re
+        sw = self._lesen("sw.js")
+        eintraege = re.findall(r"'(/[^']+)'", sw.split("HUELLE = [")[1].split("];")[0])
+        fehlt = [e for e in eintraege if e != "/" and not os.path.exists(
+            os.path.join(self.FRONTEND, e.lstrip("/")))]
+        self.assertEqual(fehlt, [], f"in der Hülle gelistet, aber nicht vorhanden: {fehlt}")
+
+    def test_fonts_are_bundled_and_referenced_relative_to_the_stylesheet(self):
+        """Der Pi hat kein Internet: Schriften müssen mit im Repo liegen, und
+        ihre Pfade sind relativ zur CSS-Datei, nicht zur Seite."""
+        import re
+        css = self._lesen(os.path.join("fonts", "fonts.css"))
+        for url in re.findall(r"url\(([^)]+)\)", css):
+            self.assertFalse(url.startswith(("http", "/", "fonts/")), url)
+            self.assertTrue(os.path.exists(os.path.join(self.FRONTEND, "fonts", url)), url)
+        self.assertNotIn("fonts.googleapis", self._lesen("index.html"))
 
 
 class HeadlandApiTest(unittest.TestCase):

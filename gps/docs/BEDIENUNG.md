@@ -172,6 +172,16 @@ Maschine; sonst bleibt dort die Null stehen.
 * Der **Annäherungsalarm**: unter dem eingestellten Abstand blinkt der Hinweis
   rot und der Vorgewendering wird rot.
 
+**Arbeitsreihenfolge – Vorgewende zuerst oder zuletzt.** Das Programm erzwingt
+keine Reihenfolge; es kann nicht wissen, warum heute anders herum gefahren wird.
+Aber es sieht hin: ob das Vorgewende schon bearbeitet ist, liest es aus der
+markierten Fläche (abgetastet entlang der Mitte des Vorgewendes, alle drei
+Meter). Steht „zuerst" und eine AB-Spur ist aktiv, während das Vorgewende noch
+leer ist, sagt es das oben links – mit dem Prozentsatz, der schon bearbeitet
+ist. Auf der Kontur zeigt es, welcher Vorgewende-Ring gerade dran ist. Was nicht
+mit **Markieren** gefahren wurde, zählt dabei nicht – das Programm sieht nur,
+was es gemalt hat.
+
 ### Wenden
 
 Die kleine Taste **Wende** rechts hat drei Zustände, und sie sagt jedes Mal,
