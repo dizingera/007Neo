@@ -15,6 +15,7 @@ import base64
 import json
 import math
 import os
+import sqlite3
 import struct
 import sys
 import tempfile
@@ -494,6 +495,45 @@ class StorageTest(unittest.TestCase):
         self.assertEqual(len(self.store.track_points(job["id"])), 1)
 
 
+class AeltereDatenbankTest(unittest.TestCase):
+    """Eine Datenbank vom Frühjahr kennt die neuen Spalten nicht."""
+
+    def test_datenbank_ohne_plan_und_karte_wird_nachgeruestet(self):
+        with tempfile.TemporaryDirectory() as ordner:
+            pfad = os.path.join(ordner, "alt.db")
+            # Eine Arbeitstabelle im alten Zuschnitt: ohne map_id, plan_id,
+            # ausbringung - und ganz ohne die Tabellen plans und maps.
+            alt = sqlite3.connect(pfad)
+            alt.executescript("""
+                CREATE TABLE jobs (
+                    id TEXT PRIMARY KEY, field_id TEXT NOT NULL, line_id TEXT,
+                    device_id TEXT NOT NULL, vehicle TEXT NOT NULL DEFAULT '',
+                    operation TEXT NOT NULL DEFAULT '', started_at REAL NOT NULL,
+                    ended_at REAL, distance_m REAL NOT NULL DEFAULT 0,
+                    area_ha REAL NOT NULL DEFAULT 0, overlap_ha REAL NOT NULL DEFAULT 0,
+                    working_time_s REAL NOT NULL DEFAULT 0, coverage BLOB,
+                    updated_at REAL NOT NULL, deleted INTEGER NOT NULL DEFAULT 0);
+                INSERT INTO jobs (id, field_id, device_id, started_at, updated_at)
+                VALUES ('alt1', 'f1', 'pi', 1000.0, 1000.0);
+            """)
+            alt.commit()
+            alt.close()
+
+            store = Storage(pfad)
+            # Die alte Arbeit ist noch da und lässt sich lesen.
+            arbeit = store.get_job("alt1")
+            self.assertIsNotNone(arbeit)
+            self.assertIsNone(arbeit["ausbringung"])
+            self.assertIsNone(arbeit["map_id"])
+            # Und die neuen Tabellen sind da.
+            feld = store.save_field({"name": "Neu", "datum_lat": 48.0, "datum_lon": 11.0})
+            store.save_plan({"field_id": feld["id"], "plan": {"bahnen": []}})
+            store.save_map({"field_id": feld["id"], "name": "K", "daten": {}})
+            self.assertEqual(len(store.list_plans(feld["id"])), 1)
+            self.assertEqual(len(store.list_maps(feld["id"])), 1)
+            store.close()
+
+
 class SyncTest(unittest.TestCase):
     def setUp(self):
         self.dir = tempfile.TemporaryDirectory()
@@ -520,6 +560,39 @@ class SyncTest(unittest.TestCase):
         self.client.save_field({**self.client.get_field(field["id"]), "name": "Neu"})
         sync.apply_changes(self.master, sync.collect_changes(self.client, 0))
         self.assertEqual(self.master.get_field(field["id"])["name"], "Neu")
+
+    def test_plan_und_karte_reisen_zum_zweiten_traktor(self):
+        """Beide Maschinen müssen mit "Bahn 12" dieselbe Stelle meinen.
+
+        Der Plan taugt nur dann für zwei Traktoren, wenn er mit abgeglichen
+        wird - sonst rechnet jeder seinen eigenen und nummeriert anders.
+        """
+        field = self.master.save_field({"name": "Gemeinsam", "datum_lat": 48.0,
+                                        "datum_lon": 11.0})
+        plan = feldplan.planen(
+            [(0.0, 0.0), (300.0, 0.0), (300.0, 150.0), (0.0, 150.0)],
+            feldplan.PlanEinstellungen(arbeitsbreite_m=12.0))
+        self.master.save_plan({"field_id": field["id"], "name": "12 m",
+                               "einstellungen": plan.einstellungen.to_dict(),
+                               "plan": plan.to_dict()})
+        self.master.save_map({"field_id": field["id"], "name": "Weizen N2",
+                              "einheit": "kg/ha", "quelle": "Berater",
+                              "daten": {"name": "Weizen N2", "einheit": "kg/ha",
+                                        "zonen": [{"wert": 140.0, "name": "",
+                                                   "ring": [[48.0, 11.0], [48.001, 11.0],
+                                                            [48.001, 11.001]]}]}})
+
+        angewandt = sync.apply_changes(self.client, sync.collect_changes(self.master, 0))
+        self.assertEqual(angewandt["plans"], 1)
+        self.assertEqual(angewandt["maps"], 1)
+
+        drueben = self.client.field_plan(field["id"])
+        self.assertIsNotNone(drueben)
+        self.assertEqual(drueben["plan"]["bahnen"], plan.to_dict()["bahnen"])
+
+        karte = self.client.list_maps(field["id"], mit_daten=True)[0]
+        self.assertEqual(karte["name"], "Weizen N2")
+        self.assertEqual(karte["daten"]["zonen"][0]["wert"], 140.0)
 
     def test_coverage_of_two_tractors_is_combined(self):
         field = self.master.save_field({"name": "Gross", "datum_lat": 48.0, "datum_lon": 11.0})
