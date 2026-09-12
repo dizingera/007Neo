@@ -152,16 +152,27 @@ def jobs_summary_csv(store: Storage, field_id: Optional[str] = None) -> str:
     writer.writerow([
         "datum", "feld", "fahrzeug", "arbeit", "dauer_h", "strecke_km",
         "flaeche_ha", "ueberlappung_ha", "geraet",
+        # Die Ausbringung gehört in dieselbe Zeile: danach fragt die
+        # Schlagkartei, und eine zweite Datei daneben geht verloren. "grundlage"
+        # sagt, ob die Menge aus der Karte kommt oder die Maschine sie
+        # zurückgemeldet hat - ohne das läse jemand einen Istwert, wo keiner ist.
+        "karte", "menge", "einheit", "grundlage",
     ])
     fields = {f["id"]: f["name"] for f in store.list_fields()}
+    karten = {k["id"]: k["name"] for k in store.list_maps()}
     for job in store.list_jobs(field_id=field_id, limit=2000):
         duration_h = ((job["ended_at"] or job["started_at"]) - job["started_at"]) / 3600
+        gebucht = job.get("ausbringung") or {}
         writer.writerow([
             datetime.fromtimestamp(job["started_at"]).strftime("%d.%m.%Y %H:%M"),
             fields.get(job["field_id"], job["field_id"]),
             job["vehicle"], job["operation"], f"{duration_h:.2f}",
             f'{job["distance_m"] / 1000:.2f}', f'{job["area_ha"]:.3f}',
             f'{job["overlap_ha"]:.3f}', job["device_id"],
+            karten.get(job.get("map_id"), ""),
+            f'{gebucht["menge"]:.1f}' if gebucht.get("menge") is not None else "",
+            gebucht.get("einheit", ""),
+            gebucht.get("art", ""),
         ])
     return buffer.getvalue()
 

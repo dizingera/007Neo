@@ -334,8 +334,10 @@ ausdrücklich etwas anderes als null.
 **Was ausgebracht wurde**, wird beim Fahren mitgeschrieben: jede neu markierte
 Stelle wird auf den Sollwert gebucht, der dort galt. Unter der Karte stehen die
 geplanten Mengen je Zone, die ausgebrachte Menge und die Abweichung in Prozent.
-*Ausbringung als CSV* gibt das für die Schlagkartei aus, und dieselben Zahlen
-hängen an der Arbeit im Reiter Aufträge.
+*Ausbringung als CSV* gibt das für die Schlagkartei aus. Dieselben Zahlen
+hängen an der Arbeit und stehen in der Sammel-CSV unter Menü → Aufträge in
+derselben Zeile wie Fläche und Strecke – eine zweite Datei daneben geht im
+Büro verloren.
 
 Diese Zahl ist ehrlich beschränkt, und sie sagt das auch von sich: als
 Grundlage steht **Sollwert der Karte** dabei. Das System weiß, wo die Maschine

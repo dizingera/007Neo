@@ -1140,6 +1140,30 @@ class ExportTest(unittest.TestCase):
         self.store.close()
         self.dir.cleanup()
 
+    def test_sammel_csv_traegt_die_ausbringung_mit(self):
+        """Die Menge gehört in dieselbe Zeile - eine zweite Datei geht verloren."""
+        karte = self.store.save_map({"field_id": self.field["id"], "name": "Weizen N2",
+                                     "einheit": "kg/ha", "daten": {}})
+        gebucht = applikation.Ausbringung(einheit="kg/ha")
+        gebucht.buchen(140.0, 15_000.0)
+        self.store.update_job(self.job["id"], map_id=karte["id"],
+                              ausbringung=json.dumps(gebucht.to_dict()))
+
+        text = self.export.jobs_summary_csv(self.store)
+        kopf, zeile = text.splitlines()[0], text.splitlines()[1]
+        self.assertIn("karte;menge;einheit;grundlage", kopf)
+        self.assertIn("Weizen N2", zeile)
+        self.assertIn("210.0", zeile)            # 1,5 ha à 140 kg
+        self.assertIn("kg/ha", zeile)
+        self.assertIn("Sollwert der Karte", zeile)
+
+    def test_sammel_csv_bleibt_lesbar_ohne_karte(self):
+        """Der Normalfall: gegrubbert wird ohne Applikationskarte."""
+        text = self.export.jobs_summary_csv(self.store)
+        spalten = text.splitlines()[1].split(";")
+        self.assertEqual(spalten[-4:], ["", "", "", ""])
+        self.assertIn("Grubbern", text)
+
     def test_gpx_is_well_formed(self):
         import xml.etree.ElementTree as ET
         root = ET.fromstring(self.export.job_gpx(self.store, self.job["id"]))
