@@ -248,6 +248,7 @@ function updateHud(s) {
                            : 'Wende geplant, liegt aber nicht im Feld – Richtung oder Wendekreis ändern');
   }
   if (headland && headland.hinweis) hint.push(headland.hinweis);
+  if (s.guidance.active && s.guidance.message) hint.push(s.guidance.message);
   // Markieren an, aber jede Sektion automatisch aus: die Maschine steht
   // außerhalb der Grenze (oder auf schon bearbeiteter Fläche). Ohne den Satz
   // sieht es aus, als würde das Markieren nicht funktionieren.

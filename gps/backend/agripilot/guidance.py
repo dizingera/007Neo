@@ -304,6 +304,50 @@ class GuidanceLine:
             quer = -quer
         return quer, kurs, weg, innen
 
+    def naechste_ecke(self, position: Point, vehicle_heading: float,
+                      mindest_winkel: float = 35.0, reichweite: float = 80.0
+                      ) -> Optional[float]:
+        """Wie weit es auf dem Ring bis zur nächsten scharfen Ecke ist.
+
+        Eine Grenze aus dem Flächenantrag hat rechte Winkel; eine abgefahrene
+        hat den Wendekreis des Traktors. Um eine rechtwinklige Ecke kommt die
+        Lenkung nicht - sie hält die Spur bis zur Ecke und wäre dahinter mehr
+        als eine Toleranz daneben. Der Fahrer soll das vorher wissen: er lenkt
+        von Hand um die Ecke, danach greift die Automatik wieder. Gemessen wird
+        auf Ring 0; die inneren Ringe schneiden die Ecke etwas kürzer, das ist
+        für einen Hinweis in Metern gleichgültig. None: keine Ecke in Reichweite
+        oder keine Kontur.
+        """
+        if self.mode != "contour" or len(self.points) < 3:
+            return None
+        n = len(self.points)
+        bester = (float("inf"), 0, 0.0, 0.0)   # d, i, t, kurs
+        for i in range(n):
+            a, b = self.points[i], self.points[(i + 1) % n]
+            fuss, t, _ = project_on_segment(position, a, b)
+            d = distance(position, fuss)
+            if d < bester[0]:
+                bester = (d, i, t, heading_deg(a, b))
+        _, i, t, kurs = bester
+        vorwaerts = abs(angle_difference(kurs, vehicle_heading)) <= 90.0
+        schritt = 1 if vorwaerts else -1
+        a, b = self.points[i], self.points[(i + 1) % n]
+        # Vom Fußpunkt bis zum Ende des aktuellen Stücks in Fahrtrichtung.
+        weg = distance(a, b) * ((1.0 - t) if vorwaerts else t)
+        ecke = (i + 1) % n if vorwaerts else i
+        for _ in range(n):
+            if weg > reichweite:
+                return None
+            vor = self.points[(ecke - schritt) % n]
+            nach = self.points[(ecke + schritt) % n]
+            hier = self.points[ecke]
+            knick = abs(angle_difference(heading_deg(hier, nach), heading_deg(vor, hier)))
+            if knick >= mindest_winkel:
+                return weg
+            weg += distance(hier, nach)
+            ecke = (ecke + schritt) % n
+        return None
+
     def solve(self, position: Point, vehicle_heading: float,
               speed_ms: float, profile: VehicleProfile) -> GuidanceState:
         """Compute the guidance state for a tool position and heading."""

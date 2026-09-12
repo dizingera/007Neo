@@ -834,6 +834,11 @@ class Engine:
         self.guidance = self.line.solve(
             fuehrungspunkt, self.heading, fix.speed_ms, self.profile
         )
+        if self.line.mode == "contour":
+            ecke = self.line.naechste_ecke(fuehrungspunkt, self.heading)
+            if ecke is not None and ecke < 40.0:
+                self.guidance.message = (f"Ecke in {ecke:.0f} m - von Hand um die Ecke, "
+                                         "danach greift die Lenkung wieder")
 
     def _lenkpunkt(self) -> Optional[geo.Point]:
         """Worauf geführt wird: die Hinterachse (siehe VehicleProfile.steer_position).

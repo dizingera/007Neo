@@ -131,6 +131,14 @@ abzufahren, was ohnehin schon abgefahren wurde – die Grenze ist da. Gedacht f�
 Schläge. Wie herum die Grenze aufgezeichnet wurde, spielt keine Rolle: Ring 1
 liegt immer weiter innen, nie weiter außen.
 
+**Ecken.** Eine abgefahrene Grenze hat den Wendekreis des Traktors, eine aus
+dem Flächenantrag hat rechte Winkel. Um eine rechtwinklige Ecke kommt die
+Lenkautomatik nicht: sie hält die Spur bis zur Ecke, dahinter wäre sie mehr
+als die erlaubte Abweichung daneben und setzt aus. Deshalb steht 40 m vorher
+oben links „Ecke in 38 m – von Hand um die Ecke, danach greift die Lenkung
+wieder“: um die Ecke lenkt der Fahrer, auf der nächsten Kante zieht die
+Automatik von selbst wieder auf den Ring, sie bleibt scharf.
+
 Die Kontur wird **nicht gespeichert**: sie entsteht bei jedem Aufruf neu aus der
 aktuellen Grenze. Wer die Grenze neu abfährt, hat sofort die neue Kontur. Eine
 gespeicherte Kopie läge nach dem nächsten Abfahren still daneben – und man

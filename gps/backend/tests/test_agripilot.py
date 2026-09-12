@@ -3182,6 +3182,47 @@ class GeraetHinterAchseTest(unittest.TestCase):
         self.assertGreater(motor.steer_position[1], motor.implement_position[1] + 3.0)
 
 
+class KonturEckeTest(unittest.TestCase):
+    """Eine Grenze aus dem Antrag hat rechte Winkel. Vor der Ecke steht der
+    Hinweis, von Hand zu lenken - in Metern, in Fahrtrichtung."""
+
+    def test_distance_to_the_next_corner_in_either_direction(self):
+        ring = GuidanceLine("contour", QUADRAT, 3.0)
+        # Auf der Westkante (x=0) bei y=60 nach Norden: Ecke (0,100) in 40 m.
+        self.assertAlmostEqual(ring.naechste_ecke((0.0, 60.0), 0.0), 40.0, places=6)
+        # Dieselbe Stelle nach Süden: Ecke (0,0) in 60 m.
+        self.assertAlmostEqual(ring.naechste_ecke((0.0, 60.0), 180.0), 60.0, places=6)
+        # Auf der Nordkante nach Osten bei x=30: Ecke (100,100) in 70 m.
+        self.assertAlmostEqual(ring.naechste_ecke((30.0, 100.0), 90.0), 70.0, places=6)
+        # Außer Reichweite: None.
+        self.assertIsNone(ring.naechste_ecke((0.0, 10.0), 0.0, reichweite=50.0))
+        # Ein sanfter Knick zählt nicht als Ecke.
+        rund = GuidanceLine("contour", [(0, 0), (100, 0), (100, 100), (60, 110), (0, 100)], 3.0)
+        self.assertAlmostEqual(rund.naechste_ecke((100.0, 50.0), 0.0), 50.0, places=6)
+        self.assertIsNone(GuidanceLine("ab", [(0, 0), (0, 10)], 3.0).naechste_ecke((0, 5), 0.0))
+
+    def test_the_engine_says_it_before_the_corner(self):
+        from agripilot import config as config_module
+        from agripilot.engine import Engine
+        with tempfile.TemporaryDirectory() as ordner:
+            store = Storage(os.path.join(ordner, "k.db"))
+            try:
+                motor = Engine(config_module.load("/kein-solcher-pfad.yaml"), store)
+                motor.update_profile({"width_m": 3.0, "antenna_forward_m": 0.0})
+                feld = store.save_field({"name": "Feld", "datum_lat": 48.0, "datum_lon": 11.0,
+                                         "boundary": [list(p) for p in QUADRAT], "area_ha": 1.0})
+                motor.load_field(feld["id"])
+                motor.use_contour()
+                motor.tool_position, motor.heading = (0.0, 80.0), 0.0
+                motor._update_guidance(_fix(speed_ms=2.0))
+                self.assertIn("Ecke in 20 m", motor.guidance.message)
+                motor.tool_position = (0.0, 20.0)
+                motor._update_guidance(_fix(speed_ms=2.0))
+                self.assertEqual(motor.guidance.message, "")
+            finally:
+                store.close()
+
+
 class APlusErsetztTest(unittest.TestCase):
     """A+ zweimal gedrückt ist eine Spur, nicht zwei - außer die erste ist Saisonspur."""
 

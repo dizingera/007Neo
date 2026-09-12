@@ -163,7 +163,7 @@ gps/
 cd gps/backend && python3 -m unittest discover -s tests -v
 ```
 
-248 Tests, ohne Zusatzpakete lauffähig. Geprüft wird vor allem, was im Feld Geld
+250 Tests, ohne Zusatzpakete lauffähig. Geprüft wird vor allem, was im Feld Geld
 kostet, wenn es falsch ist: Flächen, das Vorzeichen der Abweichung, der
 Hangausgleich und die Bedingungen, unter denen die Lenkautomatik einschalten
 darf.
