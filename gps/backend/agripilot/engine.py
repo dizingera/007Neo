@@ -313,11 +313,37 @@ class Engine:
         grund.update(werte or {})
         return feldplan_module.PlanEinstellungen.from_dict(grund)
 
+    def plan_auftrag(self, werte: Optional[dict] = None
+                     ) -> tuple[list[geo.Point], feldplan_module.PlanEinstellungen]:
+        """Was zum Rechnen gebraucht wird - Grenze und Vorgaben, sonst nichts.
+
+        Getrennt vom Rechnen, weil das Rechnen nicht in die Ereignisschleife
+        gehört: ein 40-ha-Schlag mit sechs Metern Arbeitsbreite braucht auf
+        einem Pi etliche Sekunden, und in derselben Schleife laufen der
+        Empfänger und die Lenkautomatik. Der Server holt sich hier die
+        Zutaten, rechnet in einem Nebenläufer und gibt das Ergebnis an
+        ``plan_uebernehmen`` zurück - dort wird der Zustand des Motors
+        angefasst, wieder in der Schleife und damit von einem Faden allein.
+        """
+        return self._plan_grenze(), self.plan_einstellungen(werte)
+
     def plan_rechnen(self, werte: Optional[dict] = None) -> dict:
-        """Einen Arbeitsplan rechnen, ablegen und laden."""
-        grenze = self._plan_grenze()
-        einstellungen = self.plan_einstellungen(werte)
-        self.plan = feldplan_module.planen(grenze, einstellungen)
+        """Einen Arbeitsplan rechnen, ablegen und laden - alles auf einmal.
+
+        Der kurze Weg für Tests und Skripte. Im Server wird stattdessen
+        ``plan_auftrag`` und ``plan_uebernehmen`` benutzt, mit dem Rechnen
+        dazwischen in einem Nebenläufer.
+        """
+        grenze, einstellungen = self.plan_auftrag(werte)
+        return self.plan_uebernehmen(
+            feldplan_module.planen(grenze, einstellungen), einstellungen)
+
+    def plan_uebernehmen(self, plan: "feldplan_module.Feldplan",
+                         einstellungen: feldplan_module.PlanEinstellungen) -> dict:
+        """Einen fertig gerechneten Plan ablegen und laden."""
+        if self.field is None:
+            raise RuntimeError("Kein Feld ausgewählt")
+        self.plan = plan
         self.plan_bahn = None
         self._fortschritt = None
         datensatz = self.store.save_plan({

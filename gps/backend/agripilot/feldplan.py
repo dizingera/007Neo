@@ -666,6 +666,14 @@ ERLEDIGT_AB = 0.9
 # nichts.
 PROBE_M = 2.0
 
+# Höchstzahl der Stichproben je Bahn. Ohne die Deckelung kostet ein 40-ha-Schlag
+# mit 120 Bahnen à 400 m rund 24 000 Abfragen an die Flächenkarte, und die
+# laufen in derselben Schleife wie Empfänger und Lenkautomatik. Bei 60 Proben
+# liegt der Abstand auf einer 400-m-Bahn bei knapp sieben Metern - für die
+# Frage "ist diese Bahn durch?" mehr als genug, und ein Loch von der Größe
+# eines Traktors fällt dabei immer noch auf.
+PROBEN_MAX = 60
+
 
 @dataclass
 class BahnFortschritt:
@@ -711,7 +719,7 @@ def bahn_anteil(bahn: Bahn, ist_bearbeitet, schritt: float = PROBE_M) -> float:
     """
     if bahn.laenge_m <= 0.0:
         return 0.0
-    anzahl = max(2, int(bahn.laenge_m / max(0.5, schritt)) + 1)
+    anzahl = max(2, min(PROBEN_MAX, int(bahn.laenge_m / max(0.5, schritt)) + 1))
     treffer = 0
     for i in range(anzahl):
         t = i / (anzahl - 1)

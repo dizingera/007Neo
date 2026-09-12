@@ -4553,6 +4553,52 @@ class FeldplanApiTest(unittest.TestCase):
             self.assertAlmostEqual(abstand, motor.line.spacing, places=2)
             store.close()
 
+    def test_rechnen_ist_vom_motor_getrennt(self):
+        """Das Rechnen läuft im Server in einem Nebenläufer - also muss es
+        ohne den Motor auskommen und dasselbe liefern wie der kurze Weg.
+
+        In der Ereignisschleife hängen Empfänger, Kabinenanzeige und
+        Lenkautomatik; ein 40-ha-Schlag rechnet dort Sekunden.
+        """
+        from agripilot import config as config_module
+        from agripilot.engine import Engine
+
+        with tempfile.TemporaryDirectory() as ordner:
+            config = config_module.load("/kein-solcher-pfad.yaml")
+            config.server.data_dir = ordner
+            store = Storage(os.path.join(ordner, "t.db"))
+            motor = Engine(config, store)
+            feld = store.save_field({"name": "Planfeld", "datum_lat": 48.0,
+                                     "datum_lon": 11.0})
+            motor.load_field(feld["id"])
+            motor.save_boundary([(0.0, 0.0), (300.0, 0.0),
+                                 (300.0, 150.0), (0.0, 150.0)])
+
+            grenze, einstellungen = motor.plan_auftrag({"arbeitsbreite_m": 12.0})
+            # Reine Daten, kein Motor: genau das geht in den Nebenläufer.
+            self.assertIsInstance(grenze, list)
+            self.assertIsInstance(einstellungen, feldplan.PlanEinstellungen)
+            gerechnet = feldplan.planen(grenze, einstellungen)
+            ueber_teilung = motor.plan_uebernehmen(gerechnet, einstellungen)
+
+            direkt = motor.plan_rechnen({"arbeitsbreite_m": 12.0})
+            self.assertEqual(ueber_teilung["bahnen"], direkt["bahnen"])
+            self.assertEqual(ueber_teilung["richtung_grad"], direkt["richtung_grad"])
+            store.close()
+
+    def test_lange_bahnen_werden_gedeckelt_abgetastet(self):
+        """Sonst kostet ein großer Schlag zehntausende Abfragen je Bild."""
+        bahn = feldplan.Bahn(nummer=1, spur=0, start=(0.0, 0.0), ende=(2000.0, 0.0),
+                             richtung=90.0, laenge_m=2000.0)
+        gezaehlt = []
+        feldplan.bahn_anteil(bahn, lambda p: gezaehlt.append(p) or True)
+        self.assertLessEqual(len(gezaehlt), feldplan.PROBEN_MAX)
+        # Und die Antwort stimmt trotzdem.
+        self.assertAlmostEqual(feldplan.bahn_anteil(bahn, lambda p: True), 1.0)
+        self.assertAlmostEqual(feldplan.bahn_anteil(bahn, lambda p: False), 0.0)
+        self.assertAlmostEqual(
+            feldplan.bahn_anteil(bahn, lambda p: p[0] < 1000.0), 0.5, delta=0.03)
+
     def test_ein_geladener_plan_behaelt_seine_bahnnummern(self):
         """Zwei Traktoren müssen mit "Bahn 12" dieselbe Stelle meinen.
 

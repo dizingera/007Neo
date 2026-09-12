@@ -26,6 +26,7 @@ from fastapi.staticfiles import StaticFiles
 
 from . import applikation as applikation_module
 from . import config as config_module
+from . import feldplan as feldplan_module
 from . import checklist as checklist_module
 from . import settings as settings_module
 from . import export, geraete as geraete_module, imu as imu_module
@@ -344,8 +345,16 @@ def create_app(config=None) -> FastAPI:
 
     def guard(fn, *args, **kwargs):
         """Turn an engine refusal into a message the driver can read."""
+        return ok(guard_roh(fn, *args, **kwargs))
+
+    def guard_roh(fn, *args, **kwargs):
+        """Wie ``guard``, gibt aber den Rückgabewert selbst zurück.
+
+        Für die Fälle, in denen mit dem Ergebnis noch weitergearbeitet wird,
+        bevor eine Antwort daraus entsteht.
+        """
         try:
-            return ok(fn(*args, **kwargs))
+            return fn(*args, **kwargs)
         except (RuntimeError, ValueError, KeyError) as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -450,8 +459,19 @@ def create_app(config=None) -> FastAPI:
 
         Ohne Angaben nimmt der Plan die Arbeitsbreite der Maschine, die Tiefe
         aus den Vorgewende-Einstellungen und sucht die Richtung selbst.
+
+        Gerechnet wird in einem Nebenläufer, nicht hier: ein 40-ha-Schlag mit
+        sechs Metern Arbeitsbreite braucht auf einem Pi etliche Sekunden, und
+        in dieser Schleife hängen der Empfänger, die Kabinenanzeige und die
+        Lenkautomatik. Eine Sekunde Stillstand sind bei 10 km/h fast drei
+        Meter, die niemand regelt.
+
+        Angefasst wird der Motor nur davor und danach - das Rechnen selbst ist
+        eine reine Funktion auf Grenze und Vorgaben.
         """
-        return guard(engine.plan_rechnen, dict(payload or {}))
+        grenze, einstellungen = guard_roh(engine.plan_auftrag, dict(payload or {}))
+        plan = await asyncio.to_thread(feldplan_module.planen, grenze, einstellungen)
+        return guard(engine.plan_uebernehmen, plan, einstellungen)
 
     @api.get("/api/plans")
     async def list_plans(field_id: Optional[str] = None) -> list[dict]:
