@@ -3140,6 +3140,39 @@ class GeraetHinterAchseTest(unittest.TestCase):
         self.assertLess(max(abs(f) for f in spaet), 0.10,
                         f"schaukelt: {[round(f, 2) for f in spaet[::20]]}")
 
+    def test_the_sprayer_drives_a_turn_onto_the_neighbouring_pass(self):
+        """Die Route wird ab der Achse geplant - ab dem Gerät geplant läge sie
+        sieben Meter hinter der Maschine und der Folger bräche sofort ab."""
+        from agripilot.nmea import Fix
+        motor = self._motor()
+        motor.update_headland({"aktiv": True, "muster": "omega", "richtung": "links",
+                               "radius_m": 6.0, "ueberspringen": 0, "spuren": 2})
+        # Anfahren, damit Position und Achse gesetzt sind, dann planen.
+        self._fahren(motor, (100.0, 100.0), 0.0, sekunden=4)
+        plan = motor.plan_turn()
+        self.assertTrue(plan["im_feld"])
+        motor.start_turn()
+        ost, nord, heading = motor.position[0], motor.position[1], motor.heading
+        uhr, tempo, dt = 2_000_000.0, 2.0, 0.1
+        for _ in range(900):
+            lat, lon = motor.plane.to_wgs(ost, nord)
+            motor.on_fix(Fix(lat=lat, lon=lon, fix_quality=4, speed_ms=tempo,
+                             course_deg=heading, received_at=uhr))
+            einschlag = motor.guidance.steer_angle_deg if motor.guidance.active else 0.0
+            drehrate = math.degrees(tempo / 2.6 * math.tan(math.radians(einschlag)))
+            heading = (heading + drehrate * dt) % 360.0
+            h = math.radians(heading)
+            ost += math.sin(h) * tempo * dt
+            nord += math.cos(h) * tempo * dt
+            uhr += dt
+            if motor.turn is None:
+                break
+        self.assertIsNone(motor.turn, "Wende nicht zu Ende")
+        self.assertNotIn("abgebrochen", motor.guidance.message)
+        self.assertFalse(motor.state()["turn"]["geplant"])   # Route ist verbraucht
+        self.assertAlmostEqual(heading, 180.0, delta=15.0)
+        self.assertAlmostEqual(ost, 100.0 - motor.profile.spacing_m, delta=1.5)
+
     def test_marking_still_happens_at_the_implement(self):
         motor = self._motor()
         self._fahren(motor, (100.0, 20.0), 0.0, sekunden=4)

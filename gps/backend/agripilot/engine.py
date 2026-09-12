@@ -560,14 +560,18 @@ class Engine:
 
         grenze = [tuple(p) for p in (self.field.get("boundary") or [])] \
             if self.field else []
+        # Geplant wird ab dem Punkt, auf den auch gelenkt wird - der Achse.
+        # Ab dem Gerät geplant, läge die Route sieben Meter hinter der
+        # Maschine, und der Folger bräche beim ersten Bogen ab.
+        start = self._lenkpunkt()
         pfad = headland_module.plan(
-            self.tool_position, self.heading, einstellung,
+            start, self.heading, einstellung,
             self.profile.spacing_m, einstellung.tiefe_m(self.profile.width_m),
         )
         im_feld = headland_module.route_im_feld(pfad, grenze)
         self.turn_preview = pfad
         self.turn_preview_ok = im_feld
-        self._turn_planned_at = self.tool_position
+        self._turn_planned_at = start
         return {
             "punkte": [list(p) for p in pfad],
             "im_feld": im_feld,
@@ -590,7 +594,7 @@ class Engine:
         self._require_position()
         losgefahren = getattr(self, "_turn_planned_at", None)
         if losgefahren is not None and \
-                geo.distance(losgefahren, self.tool_position) > 5.0:
+                geo.distance(losgefahren, self._lenkpunkt()) > 5.0:
             # Die Route beginnt dort, wo sie geplant wurde. Von hier aus wäre
             # ihr erster Bogen ein Sprung quer über das Feld.
             raise RuntimeError("Die Maschine steht nicht mehr am Planungspunkt - "
@@ -611,6 +615,10 @@ class Engine:
         if self.turn is None:
             return
         self.turn = None
+        # Die Route ist gefahren (oder verworfen). Sie stehen zu lassen hieße:
+        # der Knopf sagt weiter „Ω los" und ein Druck schickte die Maschine auf
+        # eine Route, die an einer anderen Stelle des Feldes beginnt.
+        self.turn_preview, self.turn_preview_ok = [], False
         self.note(f"Wende beendet: {grund}")
 
     # -- jobs -------------------------------------------------------------
