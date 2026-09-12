@@ -582,8 +582,8 @@ def create_app(config=None) -> FastAPI:
         except (struct.error, IndexError) as exc:
             raise HTTPException(400, f"Die Datei ist beschädigt: {exc}") from exc
 
-        datensatz = guard(engine.karte_speichern, karte)
-        return ok({"karte": store.get_map(engine.karte_id) if engine.karte_id else None,
+        datensatz = guard_roh(engine.karte_speichern, karte)
+        return ok({"karte": datensatz,
                    "hinweise": karte.hinweise,
                    "uebersicht": engine.karte_uebersicht()})
 

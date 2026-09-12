@@ -41,7 +41,7 @@ import math
 import struct
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field as datenfeld
-from typing import Any, Iterable, Optional, Sequence
+from typing import Any, Optional, Sequence
 
 from . import shapefile
 from .geo import LocalPlane, Point, point_in_polygon, polygon_area
