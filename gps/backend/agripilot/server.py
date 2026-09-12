@@ -15,6 +15,7 @@ import asyncio
 import struct
 import contextlib
 import json
+import os
 import time
 from pathlib import Path
 from typing import Any, Optional
@@ -28,6 +29,7 @@ from . import checklist as checklist_module
 from . import settings as settings_module
 from . import export, geraete as geraete_module, imu as imu_module
 from . import recorder as recorder_module, shapefile as shapefile_module, sync
+from . import update as update_module
 from .actuators import build_output
 from .coverage import CoverageMap
 from .engine import Engine
@@ -770,6 +772,70 @@ def create_app(config=None) -> FastAPI:
     async def get_config() -> dict:
         return config.to_dict()
 
+    # -- Aktualisierung ---------------------------------------------------
+
+    @api.get("/api/update")
+    async def update_stand() -> dict:
+        return update_module.stand(VERSION)
+
+    @api.post("/api/update/paket")
+    async def update_paket(payload: dict = Body(...)):
+        """Ein Update-Paket (Zip, base64) prüfen und einspielen.
+
+        Vorher geht die Lenkung aus und eine laufende Arbeit wird gesichert:
+        gleich wird neu gestartet. Kopiert wird in einem Thread - ein paar
+        hundert Dateien und pip brauchen Sekunden, die Position läuft derweil.
+        """
+        import base64
+        try:
+            daten = base64.b64decode(payload.get("zip") or "")
+        except (ValueError, TypeError) as exc:
+            raise HTTPException(400, f"Paket nicht lesbar: {exc}") from exc
+        if not daten:
+            raise HTTPException(400, "Kein Paket übergeben")
+        application.steering.disarm("Aktualisierung")
+        if engine.job is not None:
+            engine.stop_job()
+        try:
+            ergebnis = await asyncio.to_thread(update_module.einspielen, daten)
+        except update_module.UpdateFehler as exc:
+            raise HTTPException(400, str(exc)) from exc
+        engine.note(f"Aktualisierung eingespielt: {ergebnis['version']} {ergebnis['commit']}")
+        return ok(ergebnis)
+
+    @api.post("/api/update/git")
+    async def update_git():
+        """Aus dem Git-Klon holen (nur vorspulen) - am Hof mit Netz."""
+        application.steering.disarm("Aktualisierung")
+        try:
+            ergebnis = await asyncio.to_thread(update_module.aus_repo_holen)
+        except update_module.UpdateFehler as exc:
+            raise HTTPException(400, str(exc)) from exc
+        if ergebnis["geaendert"]:
+            engine.note(f"Aus dem Repo geholt: {ergebnis['vorher']} → {ergebnis['nachher']}")
+        return ok(ergebnis)
+
+    @api.post("/api/update/zurueck")
+    async def update_zurueck(payload: dict = Body(default={})):
+        application.steering.disarm("Aktualisierung")
+        try:
+            ergebnis = await asyncio.to_thread(update_module.zurueckholen, payload.get("name", ""))
+        except update_module.UpdateFehler as exc:
+            raise HTTPException(400, str(exc)) from exc
+        engine.note("Vorigen Stand zurückgeholt")
+        return ok(ergebnis)
+
+    @api.post("/api/update/neustart")
+    async def update_neustart():
+        """Das Programm beenden und wiederkommen lassen. Die Antwort geht vor
+        dem Beenden hinaus; die Anzeige verbindet sich von selbst neu."""
+        application.steering.disarm("Neustart")
+        if engine.job is not None:
+            engine.stop_job()
+        engine.note("Neustart")
+        update_module.neustarten()
+        return ok({"neustart": update_module.neustart_art()})
+
     # -- Einstellungen ----------------------------------------------------
 
     @api.get("/api/settings")
@@ -898,6 +964,10 @@ def main() -> None:  # pragma: no cover - entry point
         # eine Kachel, die den Bildschirm wachhält.
         tls = {"ssl_certfile": config.server.tls_cert,
                "ssl_keyfile": config.server.tls_key}
+    if os.environ.get("AGRIPILOT_WARTE_AUF_PORT"):
+        # Als Nachfolger nach einer Aktualisierung gestartet: der Vorgänger
+        # gibt den Port erst frei, wenn er ganz beendet ist.
+        update_module.auf_freien_port_warten(config.server.host, config.server.port)
     uvicorn.run(
         create_app(config),
         host=config.server.host,

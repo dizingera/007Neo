@@ -77,6 +77,10 @@ def main() -> int:
            if config.gnss.source == "replay" else "Simulator")
     print(f"AgriPilot ({art})  http://{args.host}:{args.port}")
     print(f"Daten und Konfiguration: {daten}")
+    if os.environ.get("AGRIPILOT_WARTE_AUF_PORT"):
+        # Nach einer Aktualisierung als Nachfolger gestartet.
+        from agripilot import update
+        update.auf_freien_port_warten(args.host, args.port)
     uvicorn.run(create_app(config), host=args.host, port=args.port,
                 log_level="warning")
     return 0

@@ -246,6 +246,13 @@ Schritten von 0,1 erhöhen; pendelt es um die Spur, verringern.
 
 ## Betrieb und Wartung
 
+**Neuer Stand:** nicht das Installationsskript noch einmal laufen lassen,
+sondern auf dem PC `python scripts/make_update.py`, die Zip-Datei aufs Tablet
+und **Menü → System → Aktualisierung → Paket einspielen → Neu starten**. Siehe
+BEDIENUNG.md, „Änderungen einspielen“. Mit Netz und Git-Klon geht auch
+**Aus GitHub holen** aus der Oberfläche.
+
+
 ```bash
 systemctl status agripilot        # läuft es?
 journalctl -u agripilot -f        # Protokoll mitlesen

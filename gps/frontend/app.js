@@ -925,15 +925,7 @@ el('shpDateien').onchange = async (event) => {
   if (!shp) { toast('Die .shp-Datei fehlt in der Auswahl', true); return; }
   const info = el('shpInfo');
   info.textContent = `${shp.name} wird gelesen …`;
-  const b64 = async (datei) => {
-    const puffer = await datei.arrayBuffer();
-    let text = '';
-    const bytes = new Uint8Array(puffer);
-    for (let i = 0; i < bytes.length; i += 0x8000) {
-      text += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
-    }
-    return btoa(text);
-  };
+  const b64 = dateiAlsBase64;
   const dbf = finde('.dbf'), prj = finde('.prj');
   const payload = {
     name: shp.name,
@@ -1055,6 +1047,95 @@ el('btnSaveHeadland').onclick = async () => {
 el('autoSections').onchange = (event) =>
   api('POST', '/api/sections/auto', { enabled: event.target.checked });
 
+/* Aktualisierung: Paket einspielen, aus dem Repo holen, neu starten, zurück. */
+let updateVersion = '';
+async function renderUpdate() {
+  try {
+    const stand = await (await fetch('/api/update')).json();
+    updateVersion = stand.version;
+    el('updateStand').textContent =
+      `Version ${stand.version}` + (stand.commit ? ` · Stand ${stand.commit}` : '') +
+      (stand.eingespielt ? ` · eingespielt ${stand.eingespielt}` : '') +
+      (stand.git ? ' · aus Git-Klon' : '') + ` · ${stand.wurzel}`;
+    el('btnUpdateGit').hidden = !stand.git;
+    el('btnUpdateZurueck').hidden = !(stand.sicherungen && stand.sicherungen.length);
+    if (stand.sicherungen && stand.sicherungen.length) {
+      el('btnUpdateZurueck').textContent = `Vorigen Stand zurückholen (${stand.sicherungen[0].replace('sicherung-', '')})`;
+    }
+  } catch (error) {
+    el('updateStand').textContent = 'Stand nicht abrufbar';
+  }
+}
+
+async function dateiAlsBase64(datei) {
+  const puffer = await datei.arrayBuffer();
+  const bytes = new Uint8Array(puffer);
+  let text = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) {
+    text += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+  }
+  return btoa(text);
+}
+
+el('updatePaket').onchange = async (event) => {
+  const datei = event.target.files[0];
+  event.target.value = '';
+  if (!datei) return;
+  if (!confirm(`"${datei.name}" einspielen?\n\nDie Lenkung geht aus, eine laufende Arbeit wird ` +
+               `gesichert. Danach ist ein Neustart nötig.`)) return;
+  const info = el('updateInfo');
+  info.textContent = `${datei.name} wird übertragen und geprüft …`;
+  const antwort = await api('POST', '/api/update/paket', { name: datei.name, zip: await dateiAlsBase64(datei) });
+  if (!antwort) { info.textContent = ''; return; }
+  const e = antwort.data;
+  info.textContent = `Eingespielt: Version ${e.version} · Stand ${e.commit} · ${e.dateien} Dateien · ` +
+    `${e.requirements}` + (e.warnungen && e.warnungen.length ? ` · ${e.warnungen.join(' · ')}` : '') +
+    ' – jetzt Neu starten.';
+  toast('Update eingespielt – jetzt neu starten');
+  renderUpdate();
+};
+
+el('btnUpdateGit').onclick = async () => {
+  const info = el('updateInfo');
+  info.textContent = 'Hole aus dem Repo …';
+  const antwort = await api('POST', '/api/update/git');
+  if (!antwort) { info.textContent = ''; return; }
+  const e = antwort.data;
+  info.textContent = e.geaendert
+    ? `Geholt: ${e.vorher} → ${e.nachher} · ${e.requirements} – jetzt Neu starten.`
+    : `Schon auf Stand (${e.nachher}).`;
+  toast(e.geaendert ? 'Neuer Stand geholt – jetzt neu starten' : 'Schon auf dem neuesten Stand');
+  renderUpdate();
+};
+
+el('btnUpdateZurueck').onclick = async () => {
+  if (!confirm('Den vorigen Stand zurückholen? Der jetzige wird dabei gesichert.')) return;
+  const antwort = await api('POST', '/api/update/zurueck', {});
+  if (!antwort) return;
+  el('updateInfo').textContent = `Zurückgeholt aus ${antwort.data.zurueck_aus} – jetzt Neu starten.`;
+  toast('Voriger Stand zurückgeholt – jetzt neu starten');
+  renderUpdate();
+};
+
+el('btnUpdateNeustart').onclick = async () => {
+  if (!confirm('Programm jetzt neu starten? Die Lenkung geht aus, die Anzeige verbindet sich in ' +
+               'einigen Sekunden von selbst neu.')) return;
+  const antwort = await api('POST', '/api/update/neustart');
+  if (!antwort) return;
+  toast('Neustart läuft – die Anzeige verbindet sich gleich neu');
+  el('sheet').hidden = true;
+  // Nach dem Neustart die Seite frisch laden - so kommt auch neues app.js an.
+  setTimeout(async () => {
+    for (let versuch = 0; versuch < 60; versuch++) {
+      await new Promise((r) => setTimeout(r, 1000));
+      try {
+        const antwort2 = await fetch('/api/update', { cache: 'no-store' });
+        if (antwort2.ok) { location.reload(); return; }
+      } catch (error) { /* noch nicht da */ }
+    }
+  }, 2000);
+};
+
 /* Gerätesuche: was steckt dran? Ergebnis ist eine Liste und ein Vorschlag für
  * die Einstellungen - derselbe Weg wie beim Tippen von Hand. */
 let geraeteVorschlag = null;
@@ -1162,7 +1243,7 @@ async function refreshLists() {
   }
   if (active === 'machine') { fillProfile(); renderProfiles(await (await fetch('/api/profiles')).json()); }
   if (active === 'headland') fillHeadland();
-  if (active === 'system') { renderSystem(); renderRohdaten(); }
+  if (active === 'system') { renderSystem(); renderRohdaten(); renderUpdate(); }
   if (active === 'setup') renderSetup(await (await fetch('/api/checklist')).json());
   if (active === 'settings' && !settings.geladen) loadSettings();
 }

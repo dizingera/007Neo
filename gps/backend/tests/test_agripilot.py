@@ -3223,6 +3223,135 @@ class KonturEckeTest(unittest.TestCase):
                 store.close()
 
 
+class UpdateTest(unittest.TestCase):
+    """Aktualisierung im Betrieb: Paket bauen, prüfen, einspielen, zurückholen.
+    Konfiguration, Datenbank und Umgebung bleiben dabei, wo sie sind."""
+
+    def _baum(self, ordner, stand):
+        from pathlib import Path
+        w = Path(ordner)
+        (w / "backend" / "agripilot").mkdir(parents=True)
+        (w / "backend" / "agripilot" / "__init__.py").write_text(f'__version__ = "{stand}"\n')
+        (w / "backend" / "requirements.txt").write_text("fastapi\n")
+        (w / "frontend").mkdir()
+        (w / "frontend" / "app.js").write_text(f"// {stand}\n")
+        (w / "scripts").mkdir()
+        (w / "scripts" / "run.py").write_text(f"# {stand}\n")
+        return w
+
+    def test_package_round_trip_keeps_environment_and_data(self):
+        import zipfile
+        from agripilot import update
+        with tempfile.TemporaryDirectory() as q, tempfile.TemporaryDirectory() as z:
+            quelle = self._baum(q, "neu")
+            (quelle / "backend" / ".venv").mkdir()
+            (quelle / "backend" / ".venv" / "python.exe").write_text("nicht ins Paket")
+            (quelle / "backend" / "agripilot" / "__pycache__").mkdir()
+            (quelle / "backend" / "agripilot" / "__pycache__" / "x.pyc").write_text("x")
+            paket = update.paket_bauen(quelle, "1.1.0", commit="abc1234")
+            self.assertTrue(paket.name.startswith("agripilot-update-1.1.0-abc1234"))
+            namen = zipfile.ZipFile(paket).namelist()
+            self.assertIn("backend/agripilot/__init__.py", namen)
+            self.assertIn("update.json", namen)
+            self.assertFalse(any(".venv" in n or ".pyc" in n for n in namen))
+
+            ziel = self._baum(z, "alt")
+            (ziel / "backend" / ".venv").mkdir()
+            (ziel / "backend" / ".venv" / "python.exe").write_text("laufende Umgebung")
+            (ziel / ".simulator").mkdir()
+            (ziel / ".simulator" / "agripilot.db").write_text("Daten")
+            ergebnis = update.einspielen(paket.read_bytes(), ziel, pip=False)
+            self.assertEqual(ergebnis["version"], "1.1.0")
+            self.assertIn('"neu"', (ziel / "backend" / "agripilot" / "__init__.py").read_text())
+            self.assertEqual((ziel / "frontend" / "app.js").read_text(), "// neu\n")
+            # Umgebung und Daten unangetastet, alter Stand in der Sicherung
+            self.assertEqual((ziel / "backend" / ".venv" / "python.exe").read_text(), "laufende Umgebung")
+            self.assertEqual((ziel / ".simulator" / "agripilot.db").read_text(), "Daten")
+            sicherungen = update.sicherungen(ziel)
+            self.assertEqual(len(sicherungen), 1)
+            self.assertIn('"alt"', (ziel / ".update" / sicherungen[0] / "backend" / "agripilot" / "__init__.py").read_text())
+            stand = update.stand("1.1.0", ziel)
+            self.assertEqual(stand["paket_version"], "1.1.0")
+            self.assertEqual(stand["commit"], "abc1234")
+            # ... und zurück.
+            zurueck = update.zurueckholen("", ziel)
+            self.assertIn('"alt"', (ziel / "backend" / "agripilot" / "__init__.py").read_text())
+            self.assertEqual((ziel / "backend" / ".venv" / "python.exe").read_text(), "laufende Umgebung")
+            self.assertEqual(zurueck["zurueck_aus"], sicherungen[0])
+            self.assertEqual(len(update.sicherungen(ziel)), 1)   # der "neu"-Stand liegt jetzt dort
+
+    def test_bad_packages_are_refused_before_anything_is_touched(self):
+        import io
+        import json
+        import zipfile
+        from agripilot import update
+        with tempfile.TemporaryDirectory() as z:
+            ziel = self._baum(z, "alt")
+            with self.assertRaises(update.UpdateFehler):
+                update.einspielen(b"kein zip", ziel, pip=False)
+            puffer = io.BytesIO()
+            with zipfile.ZipFile(puffer, "w") as zf:
+                zf.writestr("frontend/app.js", "x")
+            with self.assertRaises(update.UpdateFehler) as fehler:
+                update.einspielen(puffer.getvalue(), ziel, pip=False)
+            self.assertIn("update.json", str(fehler.exception))
+            puffer = io.BytesIO()
+            with zipfile.ZipFile(puffer, "w") as zf:
+                zf.writestr("../boese.txt", "x")
+                zf.writestr("update.json", json.dumps({"dateien": {"../boese.txt": "0"}}))
+            with self.assertRaises(update.UpdateFehler) as fehler:
+                update.einspielen(puffer.getvalue(), ziel, pip=False)
+            self.assertIn("Unzulässiger Pfad", str(fehler.exception))
+            puffer = io.BytesIO()
+            with zipfile.ZipFile(puffer, "w") as zf:
+                zf.writestr("frontend/app.js", "manipuliert")
+                zf.writestr("update.json", json.dumps({"version": "9", "dateien": {"frontend/app.js": "00"}}))
+            with self.assertRaises(update.UpdateFehler) as fehler:
+                update.einspielen(puffer.getvalue(), ziel, pip=False)
+            self.assertIn("Prüfwert", str(fehler.exception))
+            self.assertEqual((ziel / "frontend" / "app.js").read_text(), "// alt\n")
+            self.assertEqual(update.sicherungen(ziel), [])
+
+    def test_the_command_line_starts_with_this_interpreter(self):
+        from agripilot import update
+        self.assertEqual(update.kommandozeile()[0], sys.executable)
+
+    def test_update_over_the_interface(self):
+        import base64
+        from pathlib import Path
+        from unittest import mock
+        from fastapi.testclient import TestClient
+        from agripilot import config as config_module, update
+        from agripilot.server import create_app
+        with tempfile.TemporaryDirectory() as ordner, tempfile.TemporaryDirectory() as q:
+            config = config_module.load("/kein-solcher-pfad.yaml")
+            config.server.data_dir = ordner
+            config.gnss.source = "simulator"
+            with TestClient(create_app(config)) as client:
+                stand = client.get("/api/update").json()
+                self.assertIn("version", stand)
+                self.assertIn(stand["neustart"], ("systemd", "nachfolger"))
+                self.assertEqual(client.post("/api/update/paket", json={"zip": ""}).status_code, 400)
+                kaputt = client.post("/api/update/paket", json={"zip": base64.b64encode(b"x" * 100).decode()})
+                self.assertEqual(kaputt.status_code, 400)
+                self.assertIn("Zip", kaputt.json()["detail"])
+                quelle = self._baum(q, "neu")
+                paket = update.paket_bauen(quelle, "1.1.0", commit="abc1234")
+                ziel = Path(ordner) / "install"
+                self._baum(ziel, "alt")
+                with mock.patch.object(update, "wurzel", return_value=ziel), \
+                        mock.patch.object(update, "_requirements_installieren", return_value="übersprungen"):
+                    antwort = client.post("/api/update/paket", json={
+                        "name": paket.name, "zip": base64.b64encode(paket.read_bytes()).decode()})
+                    self.assertEqual(antwort.status_code, 200, antwort.text)
+                    self.assertEqual(antwort.json()["data"]["version"], "1.1.0")
+                    self.assertEqual(client.get("/api/update").json()["paket_version"], "1.1.0")
+                    self.assertEqual(client.post("/api/update/zurueck", json={}).status_code, 200)
+                with mock.patch.object(update, "neustarten") as neu:
+                    self.assertEqual(client.post("/api/update/neustart").status_code, 200)
+                    neu.assert_called_once()
+
+
 class APlusErsetztTest(unittest.TestCase):
     """A+ zweimal gedrückt ist eine Spur, nicht zwei - außer die erste ist Saisonspur."""
 

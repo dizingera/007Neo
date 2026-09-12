@@ -83,3 +83,8 @@ gps/.simulator/
 
 # Wissensgraph (lokal erzeugt)
 graphify-out/
+
+# Aktualisierung im Betrieb
+gps/.update/
+gps/update.json
+gps/agripilot-update-*.zip

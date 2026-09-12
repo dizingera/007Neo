@@ -31,6 +31,7 @@ gleichen Netz.
 | **Saisonspur und Fahrgassen** | Die Spur vom Säen wird mit Fahrgassenabstand je Feld und Jahr gespeichert, beim Laden des Feldes das ganze Jahr automatisch aktiv; Fahrgassen rot gestrichelt auf dem Bildschirm. |
 | **Mehrere Maschinen** | Liste aller Maschinen im Reiter Maschine, Auswahl gilt sofort; jede mit eigenem Satz Maße. |
 | **Gerätesuche** | Menü → System findet Empfänger (F9P), Lenksteuerung (Phidget) und Neigungssensor (Tinkerforge) und übernimmt sie mit einem Druck in die Einstellungen. |
+| **Aktualisierung im Betrieb** | `scripts/make_update.py` baut ein Zip mit Prüfwerten; Menü → System spielt es ein, sichert den alten Stand, startet neu – ohne Terminal. Alternativ `git pull` aus der Oberfläche. Zurück mit einem Druck. |
 | **Rohdaten und Abspielmodus** | Zeichnet auf Wunsch auf, was *hereinkommt* – rohe NMEA-Sätze und Lagemeldungen mit Zeitstempel – und spielt dieselbe Datei wieder ein. Ein Fehler vom Feld lässt sich damit am Schreibtisch nachstellen, statt ihn zu erraten. |
 | **Mehrere Traktoren** | Der Master verteilt Felder und Spuren und gibt die RTK-Korrekturen weiter. Beide sehen, was der andere schon bearbeitet hat. |
 | **Hangausgleich** | Neigungssensor (Tinkerforge IMU Brick) rechnet die Schräglage heraus. Bei 3 m Antennenhöhe sind 6° Hang sonst 31 cm Versatz. |
@@ -135,6 +136,7 @@ gps/
 │                     Lenkwinkel, Nachlauf gezogener Geräte
 │   ├── headland.py   Vorgewende: Restdistanz, Alarm, Ω- und U-Wende, Route
 │   ├── recorder.py   Rohdaten mitschreiben und wieder abspielen
+│   ├── update.py     Update-Paket prüfen und einspielen, git pull, Neustart
 │   ├── shapefile.py  Feldgrenzen aus .shp/.dbf/.prj, UTM-Umkehrung ohne Pakete
 │   ├── geraete.py    Angeschlossene Geräte finden und als Einstellung vorschlagen
 │   ├── coverage.py   Bearbeitete Fläche als Raster, Überlappung, Sektionen
@@ -163,7 +165,7 @@ gps/
 cd gps/backend && python3 -m unittest discover -s tests -v
 ```
 
-250 Tests, ohne Zusatzpakete lauffähig. Geprüft wird vor allem, was im Feld Geld
+254 Tests, ohne Zusatzpakete lauffähig. Geprüft wird vor allem, was im Feld Geld
 kostet, wenn es falsch ist: Flächen, das Vorzeichen der Abweichung, der
 Hangausgleich und die Bedingungen, unter denen die Lenkautomatik einschalten
 darf.

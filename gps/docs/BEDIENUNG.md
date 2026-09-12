@@ -436,6 +436,39 @@ GPX/GeoJSON/CSV. Die Bezeichnung der nächsten Arbeit (Grubbern, Säen, Spritzen
 wird oben eingetragen und gemerkt; gestartet wird mit **Markieren** in der
 Kabine.
 
+## Änderungen einspielen (Menü → System → Aktualisierung)
+
+Ein neuer Stand kommt in drei Schritten auf das Tablet, ohne Terminal und ohne
+Installationsskript:
+
+1. **Auf dem PC** das Paket bauen: `python scripts/make_update.py` (oder
+   `-o D:\stick`, direkt auf den Stick). Heraus kommt eine Zip-Datei
+   `agripilot-update-<Version>-<Stand>.zip`, knapp ein Megabyte, mit
+   Prüfwerten für jede Datei.
+2. **Auf dem Tablet** die Datei hinbringen (USB-Stick, WLAN-Freigabe,
+   Messenger – egal), dann **Menü → System → Aktualisierung → Update-Paket
+   einspielen** und die Datei wählen. Das Programm prüft das Paket (Prüfwerte,
+   nur die vier Programmordner, nichts außerhalb), tauscht `backend`,
+   `frontend`, `scripts` und `docs` aus und legt den alten Stand als Sicherung
+   ab. Konfiguration, Datenbank und Python-Umgebung bleiben, wie sie sind.
+   Gibt es neue Bibliotheken, versucht es `pip` – ohne Netz scheitert das mit
+   Ansage, die Programmdateien sind trotzdem neu.
+3. **Neu starten** drücken. Die Lenkung geht aus, eine laufende Arbeit wird
+   gesichert, das Programm beendet sich und kommt von selbst wieder (unter
+   systemd über den Dienst, sonst als eigener Nachfolger); die Anzeige verbindet
+   sich in ein paar Sekunden neu und lädt die Seite frisch.
+
+Läuft das Programm aus einem Git-Klon und hat das Tablet gerade Netz, geht es
+kürzer: **Aus GitHub holen** (`git pull`, nur vorspulen), dann Neu starten.
+
+**Wenn der neue Stand nicht taugt:** **Vorigen Stand zurückholen** – die jüngste
+Sicherung wird wieder eingesetzt (der jetzige Stand wandert dabei selbst in eine
+Sicherung), dann Neu starten. Drei Sicherungen werden aufbewahrt, ältere
+verschwinden von selbst.
+
+Oben im Abschnitt steht, was gerade läuft: Version, Stand (Commit), wann
+eingespielt, und aus welchem Ordner.
+
 ## Rohdaten aufzeichnen und abspielen (Menü → System)
 
 Ein Fehler auf dem Feld ist teuer zu untersuchen: er passiert einmal, bei Regen,

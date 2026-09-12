@@ -332,6 +332,26 @@
       sind bei 3 m Antennenhöhe schon 5 cm Dauerversatz in jeder Spur.</p>
     <div class="list" id="systemList"></div>
 
+    <h3 class="abschnitt">Aktualisierung</h3>
+    <div class="row">
+      <span class="note" id="updateStand" role="status" aria-atomic="true">–</span>
+    </div>
+    <div class="row">
+      <label class="button primary" for="updatePaket">Update-Paket einspielen (.zip)</label>
+      <input type="file" id="updatePaket" accept=".zip" hidden>
+      <button id="btnUpdateGit" hidden>Aus GitHub holen</button>
+      <button id="btnUpdateNeustart">Neu starten</button>
+      <button id="btnUpdateZurueck" class="danger" hidden>Vorigen Stand zurückholen</button>
+    </div>
+    <p class="note">Auf dem PC <code>python scripts/make_update.py</code> aufrufen, die Zip-Datei
+      aufs Tablet bringen (USB-Stick, WLAN, Messenger) und hier einspielen – dann
+      <b>Neu starten</b>. Konfiguration, Datenbank und Python-Umgebung bleiben
+      unberührt; der alte Stand liegt als Sicherung bereit und lässt sich mit einem
+      Druck zurückholen. Läuft das Programm aus einem Git-Klon und hat Netz, geht es
+      auch mit <b>Aus GitHub holen</b>. Die Lenkung geht dabei aus, eine laufende
+      Arbeit wird gesichert.</p>
+    <p class="note" id="updateInfo" role="status" aria-atomic="true"></p>
+
     <h3 class="abschnitt">Rohdaten</h3>
     <div class="row">
       <button id="btnRohdaten" class="primary">Aufzeichnung starten</button>
