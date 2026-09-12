@@ -16,6 +16,12 @@ gleichen Netz.
 
 ![Kabinenanzeige](docs/bilder/kabine.png)
 
+Mit gerechnetem Arbeitsplan und Applikationskarte: die Bahnen mit ihren
+Nummern, das Vorgewende gepunktet, die bearbeitete Fläche grün, der Sollwert
+bei den Fahrtzahlen.
+
+![Der Plan in der Kabine](docs/bilder/plan.png)
+
 ## Was es kann
 
 | | |

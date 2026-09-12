@@ -236,6 +236,8 @@ insgesamt lässt sich unter **Menü → Maschine** abschalten.
 
 ## Arbeitsplan (Menü → Plan)
 
+![Der Plan in der Kabine](bilder/plan.png)
+
 Eine Spur setzt man beim Fahren: A drücken, B drücken, los. Das ist richtig für
 den ersten Schlag. Wer ein Feld zum dritten Mal bearbeitet, weiß aber vorher,
 wie es am wenigsten Wenden kostet – und genau das rechnet der Arbeitsplan aus
@@ -244,6 +246,8 @@ der Feldgrenze aus.
 **Voraussetzung ist die Feldgrenze.** Ohne sie gibt es keinen Plan, und das
 steht dann auch so da. Einmal umfahren (siehe *Ein Feld anlegen und vermessen*)
 oder ein Shapefile einlesen.
+
+![Der Reiter Plan](bilder/plan-menue.png)
 
 **Rechnen:** Menü → Plan → *Plan rechnen*. Was im Formular leer bleibt, kommt
 aus der Maschine und aus den Vorgewende-Einstellungen – Arbeitsbreite,
@@ -330,6 +334,8 @@ an der Stelle des **Geräts**, nicht an der Antenne: bei einem gezogenen Gerät
 liegen dazwischen in der Kurve mehrere Meter, genug, um an der Zonengrenze die
 falsche Menge zu nehmen. Wo keine Karte gilt, steht **ohne Karte** – das ist
 ausdrücklich etwas anderes als null.
+
+![Mengen und Abgleich](bilder/applikation.png)
 
 **Was ausgebracht wurde**, wird beim Fahren mitgeschrieben: jede neu markierte
 Stelle wird auf den Sollwert gebucht, der dort galt. Unter der Karte stehen die

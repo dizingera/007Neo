@@ -127,7 +127,12 @@ body.tag .hint { text-shadow: none; }
 .unten { position: absolute; left: calc(2.2 * var(--u)); right: calc(2.2 * var(--u)); bottom: calc(2.2 * var(--u));
   display: flex; align-items: flex-end; gap: calc(1.2 * var(--u)); z-index: 3; pointer-events: none; }
 .unten > * { pointer-events: auto; }
-.unten > .glas { position: static; }
+/* Glasflächen liegen sonst absolut über der Karte; in der unteren Reihe sollen
+ * sie im Fluss stehen und sich den Platz teilen. Auch die im Stapel - ohne die
+ * zweite Zeile fallen sie auf absolut zurück, liegen übereinander, und der
+ * Stapel hat die Höhe null. */
+.unten > .glas,
+.unten > .vgstapel > .glas { position: static; }
 
 /* --- Fahrt-Cluster --- */
 .cluster { padding: calc(1.3 * var(--u)) calc(1.6 * var(--u)) calc(1.1 * var(--u)); flex: none;

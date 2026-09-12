@@ -3917,6 +3917,39 @@ class FeldplanReihenfolgeTest(unittest.TestCase):
     def test_sprung_eins_ist_fortlaufend(self):
         self.assertEqual(feldplan.reihenfolge(range(5), "sprung", 1), [0, 1, 2, 3, 4])
 
+    def test_sprungmuster_wirkt_im_fertigen_plan(self):
+        """Die Zusage des Musters, am ganzen Plan gemessen.
+
+        Bei 7 m Wenderadius und 4 m Arbeitsbreite passt keine Wende auf die
+        Nachbarspur. Fortlaufend gefahren ist *jede* Wende zu eng; im Sprung
+        keine einzige. Bezahlt wird das mit Wendestrecke, und die steht als
+        Zahl daneben, damit die Wahl eine Wahl bleibt.
+        """
+        grenze = [(0.0, 0.0), (400.0, 0.0), (400.0, 200.0), (0.0, 200.0)]
+        sprung = feldplan.sprungweite(7.0, 4.0)
+        self.assertGreater(sprung, 1)
+
+        def enge_wenden(muster):
+            plan = feldplan.planen(grenze, feldplan.PlanEinstellungen(
+                arbeitsbreite_m=4.0, vorgewende_breiten=2.0,
+                wenderadius_m=7.0, muster=muster))
+            spuren = [b.spur for b in plan.bahnen]
+            return sum(1 for a, b in zip(spuren, spuren[1:])
+                       if abs(a - b) < sprung), plan
+
+        eng_fortlaufend, plan_fortlaufend = enge_wenden("fortlaufend")
+        eng_sprung, plan_sprung = enge_wenden("sprung")
+
+        self.assertEqual(eng_sprung, 0)
+        self.assertGreater(eng_fortlaufend, 0)
+        # Dieselben Bahnen, nur andere Reihenfolge.
+        self.assertEqual(len(plan_sprung.bahnen), len(plan_fortlaufend.bahnen))
+        self.assertAlmostEqual(plan_sprung.arbeitsstrecke_m,
+                               plan_fortlaufend.arbeitsstrecke_m, places=3)
+        # Und der Preis steht in der Streckenrechnung.
+        self.assertGreater(plan_sprung.wendestrecke_m,
+                           plan_fortlaufend.wendestrecke_m)
+
     def test_wendestrecke_ist_nie_kuerzer_als_der_halbkreis(self):
         """Die Maschine dreht nicht auf der Stelle - das muss die Schätzung wissen."""
         plan = feldplan.planen(
