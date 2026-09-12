@@ -3808,12 +3808,16 @@ class FeldplanGeometrieTest(unittest.TestCase):
                      (bahn.start[1] + bahn.ende[1]) / 2.0)
             self.assertTrue(geo.point_in_polygon(mitte, u_feld))
 
-    def test_die_bahnen_decken_den_ganzen_kern_ab(self):
+    def test_auf_geraden_feldern_decken_die_bahnen_den_kern_lueckenlos(self):
         """Kein Streifen im Kern darf zwischen zwei Bahnen durchfallen.
 
         Das ist die Probe, die eine zu clevere Richtungssuche auffliegen lässt:
         eine Richtung mit einer Bahn weniger sieht auf dem Papier besser aus,
         und im Feld bleibt ein Streifen stehen.
+
+        Lückenlos gilt hier, wo die Bahnen senkrecht auf den Feldrand treffen.
+        Wo er schräg liegt, bleibt ein Keil - siehe den Test darunter, der
+        dessen Größe festhält.
         """
         breite, tiefe = 12.0, 24.0
         grenze = [(0.0, 0.0), (300.0, 0.0), (300.0, 150.0), (0.0, 150.0)]
@@ -3834,6 +3838,67 @@ class FeldplanGeometrieTest(unittest.TestCase):
                 if abstand > breite / 2.0 + 0.01:
                     fern.append((punkt, round(abstand, 1)))
         self.assertEqual(fern, [], f"{len(fern)} Kernpunkte ohne Bahn")
+
+    def test_an_schraegen_raendern_bleibt_hoechstens_ein_schmaler_keil(self):
+        """Was die Bahnen an einem schrägen Rand nicht erreichen - gemessen.
+
+        Eine Bahn endet dort, wo *ihre Linie* den Kern verlässt. Läuft der
+        Feldrand schräg dazu, reicht der Kern seitlich daneben noch ein Stück
+        weiter, und zwischen Bahnende und Vorgewendering bleibt ein Keil. Das
+        liegt in der Natur paralleler Bahnen mit Vorgewende und lässt sich
+        nicht wegrechnen - aber es darf nicht wachsen, ohne dass es jemand
+        merkt.
+
+        Die Schranken sind großzügig gesetzt: sie halten die Größenordnung
+        fest, nicht eine Zahl. Gemessen wurden 6,7 m und 1,0 %.
+        """
+        breite = 9.0
+        felder = {
+            "Dreieck": [(0.0, 0.0), (300.0, 0.0), (150.0, 260.0)],
+            "Sanduhr": [(0.0, 0.0), (200.0, 0.0), (110.0, 100.0),
+                        (200.0, 200.0), (0.0, 200.0), (90.0, 100.0)],
+            "rund": [(200.0 * math.cos(2 * math.pi * i / 24),
+                      200.0 * math.sin(2 * math.pi * i / 24)) for i in range(24)],
+        }
+        for name, grenze in felder.items():
+            with self.subTest(name):
+                einstellungen = feldplan.PlanEinstellungen(
+                    arbeitsbreite_m=breite, vorgewende_breiten=2.0)
+                plan = feldplan.planen(grenze, einstellungen)
+                tiefe = einstellungen.vorgewende_tiefe_m
+                self.assertTrue(plan.bahnen)
+
+                def abstand(punkt):
+                    nah = min(geo.distance(punkt, geo.project_on_segment(
+                        punkt, bahn.start, bahn.ende)[0]) for bahn in plan.bahnen)
+                    for ring in plan.ringe:
+                        for i in range(len(ring)):
+                            nah = min(nah, geo.distance(punkt, geo.project_on_segment(
+                                punkt, ring[i], ring[(i + 1) % len(ring)])[0]))
+                    return nah
+
+                schritt = 2.0
+                xs = [p[0] for p in grenze]
+                ys = [p[1] for p in grenze]
+                weiteste, offen_m2 = 0.0, 0.0
+                y = min(ys)
+                while y <= max(ys):
+                    x = min(xs)
+                    while x <= max(xs):
+                        punkt = (x, y)
+                        if feldplan.im_kern(punkt, grenze, tiefe):
+                            d = abstand(punkt)
+                            if d > breite / 2.0:
+                                weiteste = max(weiteste, d)
+                                offen_m2 += schritt * schritt
+                        x += schritt
+                    y += schritt
+
+                anteil = offen_m2 / geo.polygon_area(grenze)
+                self.assertLess(weiteste, breite,
+                                f"{name}: Keil {weiteste:.1f} m breiter als erwartet")
+                self.assertLess(anteil, 0.015,
+                                f"{name}: {anteil * 100:.1f} % des Feldes offen")
 
     def test_eine_bahn_weniger_gewinnt_nicht_durch_weggelassene_stuecke(self):
         """Gezählt wird beim Bewerten jedes Stück, auch das kurze.

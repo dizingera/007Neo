@@ -295,6 +295,14 @@ markiert sind. An den Enden fehlen fast immer ein paar Meter, weil die Wende
 früher beginnt als die Bahn endet. Was ohne **Markieren** gefahren wurde, zählt
 nicht – das Programm sieht nur, was es gemalt hat.
 
+**Was der Plan nicht leistet:** eine Bahn endet dort, wo ihre Linie den Kern
+verlässt. Liegt der Feldrand schräg zur Fahrtrichtung, bleibt zwischen dem
+Bahnende und dem äußersten Vorgewendering ein Keil – bis zu einer halben
+Arbeitsbreite tief, auf einem runden oder dreieckigen Schlag zusammen unter
+einem Prozent der Fläche. Das liegt in der Natur paralleler Bahnen mit
+Vorgewende; die Überlappung, die ohnehin jeder fährt, deckt es ab. Es steht
+hier, damit niemand den Plan für lückenlos hält, wo er es nicht ist.
+
 **Der Plan gehört zum Feld** und wird mit abgeglichen. Der zweite Traktor
 bekommt beim Laden des Feldes denselben Plan mit denselben Bahnnummern – auch
 dann, wenn jemand inzwischen die Grenze nachgemessen hat. Neu gerechnet ergäbe

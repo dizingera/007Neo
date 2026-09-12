@@ -42,6 +42,22 @@ In zwei Stufen, weil das eine schnell und das andere genau sein muss:
    Intervallhalbierung auf den Zentimeter nachgeschärft.
 
 Das kostet Rechenzeit - einmal beim Planen, nicht im Fahren.
+
+Was der Plan nicht leistet
+--------------------------
+
+Eine Bahn endet dort, wo *ihre Linie* den Kern verlässt. Läuft der Feldrand
+schräg zur Fahrtrichtung, reicht der Kern seitlich daneben noch ein Stück
+weiter - zwischen dem Bahnende und dem äußersten Vorgewendering bleibt ein
+Keil. Gemessen auf einem runden, einem dreieckigen und einem sanduhrförmigen
+Schlag: bis zu einer halben Arbeitsbreite tief, zusammen unter einem Prozent
+der Feldfläche.
+
+Das liegt in der Natur paralleler Bahnen mit Vorgewende und lässt sich nicht
+wegrechnen; die Überlappung, die ohnehin jeder fährt, deckt es ab. Es steht
+hier, weil ein Plan, der so tut, als sei er lückenlos, schlechter ist als
+einer, der seine Lücke beziffert - und weil ein Test die Größenordnung
+festhält, damit sie nicht unbemerkt wächst.
 """
 
 from __future__ import annotations
