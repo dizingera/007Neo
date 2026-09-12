@@ -4620,6 +4620,53 @@ class FeldplanApiTest(unittest.TestCase):
             self.assertAlmostEqual(abstand, motor.line.spacing, places=2)
             store.close()
 
+    def _motor(self, ordner, grenze=((0.0, 0.0), (300.0, 0.0), (300.0, 150.0), (0.0, 150.0))):
+        from agripilot import config as config_module
+        from agripilot.engine import Engine
+        config = config_module.load("/kein-solcher-pfad.yaml")
+        config.server.data_dir = ordner
+        store = Storage(os.path.join(ordner, "t.db"))
+        motor = Engine(config, store)
+        feld = store.save_field({"name": "Planfeld", "datum_lat": 48.0,
+                                 "datum_lon": 11.0})
+        motor.load_field(feld["id"])
+        if grenze:
+            motor.save_boundary([tuple(p) for p in grenze])
+        return motor, store
+
+    def test_ohne_plan_heisst_es_nicht_das_feld_sei_durch(self):
+        """Zwei Lagen, zwei Sätze: rechnen oder Feierabend."""
+        with tempfile.TemporaryDirectory() as ordner:
+            motor, store = self._motor(ordner)
+            with self.assertRaises(RuntimeError) as fehler:
+                motor.naechste_bahn()
+            self.assertIn("Kein Plan", str(fehler.exception))
+            self.assertNotIn("durch", str(fehler.exception))
+
+            motor.plan_rechnen({"arbeitsbreite_m": 12.0})
+            with self.assertRaises(RuntimeError) as fehler:
+                # Alles bearbeitet: jetzt ist das Feld wirklich durch.
+                motor.coverage.is_covered = lambda p: True
+                motor.naechste_bahn()
+            self.assertIn("durch", str(fehler.exception))
+            store.close()
+
+    def test_plan_ohne_eine_einzige_bahn_wird_nicht_abgelegt(self):
+        """Ein leerer Plan in der Kabine sagt nicht, woran es liegt."""
+        with tempfile.TemporaryDirectory() as ordner:
+            motor, store = self._motor(ordner)
+            with self.assertRaises(RuntimeError) as fehler:
+                # 60 m Gerät, zehn Arbeitsbreiten Vorgewende: 600 m Rand auf
+                # einem Feld von 300 x 150 m.
+                motor.plan_rechnen({"arbeitsbreite_m": 500.0,
+                                    "vorgewende_breiten": 50.0})
+            text = str(fehler.exception)
+            self.assertIn("Kein Platz", text)
+            self.assertIn("Vorgewende", text)
+            self.assertIsNone(motor.plan)
+            self.assertEqual(store.list_plans(), [])
+            store.close()
+
     def test_rechnen_ist_vom_motor_getrennt(self):
         """Das Rechnen läuft im Server in einem Nebenläufer - also muss es
         ohne den Motor auskommen und dasselbe liefern wie der kurze Weg.

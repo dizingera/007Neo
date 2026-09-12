@@ -343,6 +343,16 @@ class Engine:
         """Einen fertig gerechneten Plan ablegen und laden."""
         if self.field is None:
             raise RuntimeError("Kein Feld ausgewählt")
+        if not plan.bahnen:
+            # Ein Plan ohne eine einzige Bahn abzulegen wäre die unfreundlichste
+            # Art, "passt nicht" zu sagen: die Kabine zeigte einen leeren Plan,
+            # und niemand wüsste, woran es liegt. Die beiden Gründe stehen
+            # beide im Satz, weil von außen nicht zu sehen ist, welcher greift.
+            raise RuntimeError(
+                f"Kein Platz für eine einzige Bahn: bei {plan.einstellungen.arbeitsbreite_m:g} m "
+                f"Arbeitsbreite und {plan.einstellungen.vorgewende_tiefe_m:g} m Vorgewende "
+                f"bleibt von {plan.feld_flaeche_ha:.2f} ha nichts übrig. "
+                "Schmaleres Gerät oder weniger Vorgewendespuren.")
         self.plan = plan
         self.plan_bahn = None
         self._fortschritt = None
@@ -440,7 +450,12 @@ class Engine:
 
     def naechste_bahn(self) -> dict:
         """Die nächstgelegene offene Bahn übernehmen."""
+        if self.plan is None:
+            raise RuntimeError("Kein Plan geladen")
         stand = self.plan_fortschritt(neu=True)
+        # Zwei verschiedene Lagen, zwei verschiedene Sätze: "kein Plan" heißt
+        # rechnen, "durch" heißt Feierabend. Ein gemeinsamer Satz schickt den
+        # Fahrer in die falsche Richtung.
         if stand is None or stand.naechste is None:
             raise RuntimeError("Keine offene Bahn mehr - das Feld ist durch")
         return self.bahn_waehlen(stand.naechste)
