@@ -11,8 +11,10 @@ Lenkautomatik einschalten darf.
 """
 
 import asyncio
+import json
 import math
 import os
+import struct
 import sys
 import tempfile
 import time
@@ -20,7 +22,7 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from agripilot import feldplan, geo, headland, nmea, sync
+from agripilot import applikation, feldplan, geo, headland, nmea, sync
 from agripilot.coverage import CoverageMap, build_sections
 from agripilot.guidance import GuidanceLine, HeadingFilter, VehicleProfile, lightbar_offset
 from agripilot.storage import Storage
@@ -3882,3 +3884,428 @@ class FeldplanFortschrittTest(unittest.TestCase):
 
     def plan_fortschritt(self, bearbeitet):
         return feldplan.fortschritt(self.plan, bearbeitet)
+
+
+def _isoxml(spalten, zeilen, art=2, lat_min=48.0, lon_min=11.0,
+            lat_schritt=0.0001, lon_schritt=0.00015, ddi="0006", zonen=None,
+            aufgabe="Weizen N2"):
+    """Eine TASKDATA.XML mit genau einem Raster."""
+    zonen = zonen or [("1", "15000")]
+    tzn = "".join(f'<TZN A="{a}" B="Zone {a}"><PDV A="{ddi}" B="{b}"/></TZN>'
+                  for a, b in zonen)
+    return (f'<?xml version="1.0"?><ISO11783_TaskData VersionMajor="4">'
+            f'<TSK A="TSK1" B="{aufgabe}" G="1">{tzn}'
+            f'<GRD A="{lat_min}" B="{lon_min}" C="{lat_schritt}" D="{lon_schritt}"'
+            f' E="{spalten}" F="{zeilen}" G="GRD00001" H="{art}" I="1"/>'
+            f'</TSK></ISO11783_TaskData>').encode()
+
+
+class ApplikationIsoXmlTest(unittest.TestCase):
+    """Applikationskarten aus ISO-XML - das Format der Terminals."""
+
+    def test_raster_art2_wird_mit_der_kennung_umgerechnet(self):
+        """DDI 6 ist mg/m²; 15000 davon sind 150 kg/ha, nicht 15000."""
+        werte = [0, 15000, 12000, 18000]
+        roh = struct.pack("<4i", *werte)
+        karte = applikation.aus_isoxml(_isoxml(2, 2), {"GRD00001.BIN": roh})
+        self.assertEqual(karte.art, "raster")
+        self.assertEqual(karte.einheit, "kg/ha")
+        self.assertEqual(karte.spanne()[:2], (120.0, 180.0))
+        self.assertEqual(karte.name, "Weizen N2")
+
+    def test_die_null_ist_ein_loch_und_keine_null(self):
+        """Kein Wert heißt: hier ist keine Karte - nicht: hier nichts ablegen."""
+        roh = struct.pack("<4i", 0, 15000, 15000, 15000)
+        karte = applikation.aus_isoxml(_isoxml(2, 2), {"GRD00001.BIN": roh})
+        self.assertIsNone(karte.raster.wert(0, 0))
+        self.assertEqual(karte.raster.wert(0, 1), 150.0)
+
+    def test_das_raster_wird_von_suedwesten_zeilenweise_nach_osten_gelesen(self):
+        """Ein verdrehtes Raster sieht in jeder Zahl richtig aus und düngt falsch.
+
+        Deshalb wird hier nicht die Liste geprüft, sondern die Stelle: der Wert
+        wird an der Koordinate abgefragt, an der er im Feld liegen muss.
+        """
+        lat_min, lon_min = 48.0, 11.0
+        lat_schritt, lon_schritt = 0.0010, 0.0015
+        # Zeile 0 (Süden): 10, 20, 30 | Zeile 1 (Norden): 40, 50, 60 (in mg/m²)
+        roh = struct.pack("<6i", 1000, 2000, 3000, 4000, 5000, 6000)
+        karte = applikation.aus_isoxml(
+            _isoxml(3, 2, lat_min=lat_min, lon_min=lon_min,
+                    lat_schritt=lat_schritt, lon_schritt=lon_schritt),
+            {"GRD00001.BIN": roh})
+        ebene = geo.LocalPlane(lat_min, lon_min)
+        lokal = karte.binden(ebene)
+
+        def bei(zeile, spalte):
+            lat = lat_min + (zeile + 0.5) * lat_schritt
+            lon = lon_min + (spalte + 0.5) * lon_schritt
+            return lokal.wert_bei(ebene.to_local(lat, lon))
+
+        self.assertEqual(bei(0, 0), 10.0)   # Südwest
+        self.assertEqual(bei(0, 2), 30.0)   # Südost
+        self.assertEqual(bei(1, 0), 40.0)   # Nordwest
+        self.assertEqual(bei(1, 2), 60.0)   # Nordost
+
+    def test_ausserhalb_des_rasters_gibt_es_keinen_wert(self):
+        roh = struct.pack("<4i", 15000, 15000, 15000, 15000)
+        karte = applikation.aus_isoxml(_isoxml(2, 2), {"GRD00001.BIN": roh})
+        ebene = geo.LocalPlane(48.0, 11.0)
+        lokal = karte.binden(ebene)
+        self.assertIsNone(lokal.wert_bei((5000.0, 5000.0)))
+        self.assertIsNone(lokal.wert_bei((-5000.0, -5000.0)))
+
+    def test_raster_art1_nimmt_den_wert_aus_der_behandlungszone(self):
+        roh = bytes([0, 1, 2, 1])
+        karte = applikation.aus_isoxml(
+            _isoxml(2, 2, art=1, zonen=[("1", "15000"), ("2", "9000")]),
+            {"GRD00001.BIN": roh})
+        self.assertEqual(karte.raster.werte, [None, 150.0, 90.0, 150.0])
+
+    def test_die_rasterdatei_wird_auch_klein_geschrieben_gefunden(self):
+        roh = struct.pack("<4i", 15000, 15000, 15000, 15000)
+        karte = applikation.aus_isoxml(_isoxml(2, 2), {"TASKDATA/grd00001.bin": roh})
+        self.assertEqual(karte.spanne()[0], 150.0)
+
+    def test_fehlende_rasterdatei_wird_benannt(self):
+        with self.assertRaises(applikation.KartenFehler) as fehler:
+            applikation.aus_isoxml(_isoxml(2, 2), {"egal.bin": b"\x00" * 16})
+        self.assertIn("GRD00001", str(fehler.exception))
+
+    def test_zu_kurze_rasterdatei_wird_abgelehnt(self):
+        with self.assertRaises(applikation.KartenFehler) as fehler:
+            applikation.aus_isoxml(_isoxml(4, 4), {"GRD00001.BIN": struct.pack("<2i", 1, 2)})
+        self.assertIn("zu kurz", str(fehler.exception))
+
+    def test_unbekannte_rasterart_wird_abgelehnt_statt_geraten(self):
+        with self.assertRaises(applikation.KartenFehler) as fehler:
+            applikation.aus_isoxml(_isoxml(2, 2, art=7), {"GRD00001.BIN": b"\x00" * 16})
+        self.assertIn("7", str(fehler.exception))
+
+    def test_ohne_aufgabe_mit_raster_gibt_es_eine_klare_absage(self):
+        xml = (b'<?xml version="1.0"?><ISO11783_TaskData><TSK A="T1" B="ohne Raster"/>'
+               b'</ISO11783_TaskData>')
+        with self.assertRaises(applikation.KartenFehler) as fehler:
+            applikation.aus_isoxml(xml, {})
+        self.assertIn("GRD", str(fehler.exception))
+
+    def test_unbekannte_kennung_bleibt_unumgerechnet_und_sagt_es(self):
+        roh = struct.pack("<4i", 140, 150, 160, 170)
+        karte = applikation.aus_isoxml(_isoxml(2, 2, ddi="0999"),
+                                       {"GRD00001.BIN": roh})
+        self.assertEqual(karte.spanne()[:2], (140.0, 170.0))   # unverändert
+        self.assertEqual(karte.einheit, "")
+        self.assertTrue(any("nicht hinterlegt" in h for h in karte.hinweise))
+
+    def test_vorgegebene_einheit_schaltet_die_umrechnung_ab(self):
+        """Der Ausweg, wenn die Datei eine Kennung benutzt, die hier falsch steht."""
+        roh = struct.pack("<4i", 140, 150, 160, 170)
+        karte = applikation.aus_isoxml(_isoxml(2, 2), {"GRD00001.BIN": roh},
+                                       einheit="kg/ha")
+        self.assertEqual(karte.einheit, "kg/ha")
+        self.assertEqual(karte.spanne()[:2], (140.0, 170.0))
+
+    def test_die_angenommene_aufloesung_steht_als_hinweis_da(self):
+        """Wo der Faktor nicht nachgeschlagen ist, muss es der Fahrer erfahren."""
+        roh = struct.pack("<4i", 15000, 15000, 12000, 18000)
+        karte = applikation.aus_isoxml(_isoxml(2, 2), {"GRD00001.BIN": roh})
+        self.assertTrue(any("Faktor" in h for h in karte.hinweise),
+                        f"kein Hinweis auf den Faktor: {karte.hinweise}")
+        self.assertFalse(applikation.DDI_EINHEITEN[6].geprueft)
+        self.assertTrue(applikation.DDI_EINHEITEN[1].geprueft)
+
+    def test_die_kennung_wird_hexadezimal_gelesen(self):
+        """"0010" sind sechzehn, nicht zehn - und sechzehn ist unbekannt.
+
+        Die Lesart entscheidet über die Einheit und damit über die Menge. Wer
+        hexadezimal liest, bekommt bei einer nicht hinterlegten Kennung eine
+        Warnung; wer dezimal liest, bekommt still die Einheit von DDI 10.
+        """
+        roh = struct.pack("<4i", 15000, 15000, 12000, 18000)
+        self.assertEqual(
+            applikation.aus_isoxml(_isoxml(2, 2, ddi="0006"),
+                                   {"GRD00001.BIN": roh}).einheit, "kg/ha")
+        # 000A hexadezimal ist DDI 10 - Anzahl je Fläche.
+        karte_zehn = applikation.aus_isoxml(
+            _isoxml(2, 2, ddi="000A"),
+            {"GRD00001.BIN": struct.pack("<4i", 300, 300, 250, 350)})
+        self.assertEqual(karte_zehn.einheit, "1/m²")
+        # 0010 hexadezimal ist sechzehn und steht nicht in der Tabelle.
+        karte_sechzehn = applikation.aus_isoxml(_isoxml(2, 2, ddi="0010"),
+                                                {"GRD00001.BIN": roh})
+        self.assertEqual(karte_sechzehn.einheit, "")
+        self.assertTrue(any("nicht hinterlegt" in h
+                            for h in karte_sechzehn.hinweise))
+
+    def test_uebergrosses_raster_wird_abgelehnt(self):
+        with self.assertRaises(applikation.KartenFehler) as fehler:
+            applikation.aus_isoxml(_isoxml(3000, 3000), {"GRD00001.BIN": b""})
+        self.assertIn("Zellen", str(fehler.exception))
+
+
+class ApplikationZonenTest(unittest.TestCase):
+    """Zonenkarten aus GeoJSON und Shapefile."""
+
+    def test_geojson_haelt_die_reihenfolge_lon_lat_ein(self):
+        """GeoJSON schreibt [lon, lat] - vertauscht landet die Karte im Meer."""
+        text = json.dumps({"type": "FeatureCollection", "features": [
+            {"type": "Feature", "properties": {"rate": 140},
+             "geometry": {"type": "Polygon", "coordinates": [[
+                 [11.70, 48.40], [11.71, 48.40], [11.71, 48.41], [11.70, 48.41],
+                 [11.70, 48.40]]]}}]})
+        karte = applikation.aus_geojson(text)
+        lat, lon = karte.zonen[0].ring[0]
+        self.assertAlmostEqual(lat, 48.40, places=6)
+        self.assertAlmostEqual(lon, 11.70, places=6)
+        self.assertEqual(karte.zonen[0].wert, 140.0)
+        # Der geschlossene Ring wird nicht doppelt geführt.
+        self.assertEqual(len(karte.zonen[0].ring), 4)
+
+    def test_geojson_multipolygon_wird_zu_mehreren_zonen(self):
+        text = json.dumps({"type": "FeatureCollection", "features": [
+            {"type": "Feature", "properties": {"menge": 90},
+             "geometry": {"type": "MultiPolygon", "coordinates": [
+                 [[[11.70, 48.40], [11.705, 48.40], [11.705, 48.405], [11.70, 48.40]]],
+                 [[[11.71, 48.41], [11.715, 48.41], [11.715, 48.415], [11.71, 48.41]]]]}}]})
+        karte = applikation.aus_geojson(text)
+        self.assertEqual(len(karte.zonen), 2)
+        self.assertTrue(all(z.wert == 90.0 for z in karte.zonen))
+
+    def test_geojson_ohne_zahlen_wird_abgelehnt(self):
+        text = json.dumps({"type": "FeatureCollection", "features": [
+            {"type": "Feature", "properties": {"sorte": "Weizen"},
+             "geometry": {"type": "Polygon", "coordinates": [[
+                 [11.70, 48.40], [11.71, 48.40], [11.71, 48.41], [11.70, 48.40]]]}}]})
+        with self.assertRaises(applikation.KartenFehler):
+            applikation.aus_geojson(text)
+
+    def test_kaputtes_geojson_wird_benannt(self):
+        with self.assertRaises(applikation.KartenFehler):
+            applikation.aus_geojson("{kein json")
+        with self.assertRaises(applikation.KartenFehler):
+            applikation.aus_geojson('{"type": "Polygon"}')
+
+    def test_shapefile_mit_wertespalte(self):
+        ecken = [(48.40, 11.70), (48.40, 11.7013), (48.4018, 11.7013), (48.4018, 11.70)]
+        ring = list(reversed([_tm_vorwaerts(lat, lon) for lat, lon in ecken]))
+        shp = _shp_bauen([[ring]])
+        dbf = _dbf_bauen([("SCHLAGNAME", 20), ("NMENGE", 10)],
+                         [("Große Wiese", "145.5")])
+        karte = applikation.aus_shapefile(shp, dbf, UTM32_PRJ, spalte="NMENGE")
+        self.assertEqual(len(karte.zonen), 1)
+        self.assertAlmostEqual(karte.zonen[0].wert, 145.5)
+        self.assertIn("NMENGE", karte.quelle)
+
+    def test_wertespalten_findet_die_zahlenspalten(self):
+        dbf = _dbf_bauen([("NAME", 20), ("NMENGE", 10), ("JAHR", 6)],
+                         [("Wiese", "145.5", "2026")])
+        spalten = applikation.wertespalten(dbf)
+        self.assertIn("NMENGE", spalten)
+        self.assertIn("JAHR", spalten)
+        self.assertNotIn("NAME", spalten)
+
+    def test_shapefile_ohne_dbf_wird_abgelehnt(self):
+        ring = [_tm_vorwaerts(48.40, 11.70), _tm_vorwaerts(48.40, 11.701),
+                _tm_vorwaerts(48.401, 11.701)]
+        with self.assertRaises(applikation.KartenFehler) as fehler:
+            applikation.aus_shapefile(_shp_bauen([[list(reversed(ring))]]), b"")
+        self.assertIn(".dbf", str(fehler.exception))
+
+    def test_shapefile_mit_spalte_ohne_zahlen_wird_abgelehnt(self):
+        ecken = [(48.40, 11.70), (48.40, 11.7013), (48.4018, 11.7013), (48.4018, 11.70)]
+        ring = list(reversed([_tm_vorwaerts(lat, lon) for lat, lon in ecken]))
+        dbf = _dbf_bauen([("NAME", 20)], [("Wiese",)])
+        with self.assertRaises(applikation.KartenFehler):
+            applikation.aus_shapefile(_shp_bauen([[ring]]), dbf, UTM32_PRJ,
+                                      spalte="NAME")
+
+
+class ApplikationNachschlagenTest(unittest.TestCase):
+    """Nachschlagen im Fahren und die Mengen fürs Feld."""
+
+    def setUp(self):
+        self.ebene = geo.LocalPlane(48.0, 11.0)
+        # Zwei Zonen nebeneinander, je 100 x 200 m, in lokalen Metern gedacht
+        # und nach WGS84 zurückgerechnet - so, wie eine echte Karte ankommt.
+        def nach_wgs(punkte):
+            return [self.ebene.to_wgs(x, y) for x, y in punkte]
+        self.karte = applikation.Applikationskarte(
+            name="Zweigeteilt", einheit="kg/ha",
+            zonen=[
+                applikation.Zone(140.0, nach_wgs([(0, 0), (100, 0), (100, 200), (0, 200)])),
+                applikation.Zone(90.0, nach_wgs([(100, 0), (200, 0), (200, 200), (100, 200)])),
+            ])
+        self.lokal = self.karte.binden(self.ebene)
+        self.grenze = [(0.0, 0.0), (200.0, 0.0), (200.0, 200.0), (0.0, 200.0)]
+
+    def test_der_wert_kommt_aus_der_richtigen_zone(self):
+        self.assertAlmostEqual(self.lokal.wert_bei((50.0, 100.0)), 140.0)
+        self.assertAlmostEqual(self.lokal.wert_bei((150.0, 100.0)), 90.0)
+
+    def test_ausserhalb_aller_zonen_gibt_es_keinen_wert(self):
+        self.assertIsNone(self.lokal.wert_bei((-50.0, 100.0)))
+
+    def test_standardwert_gilt_wo_keine_zone_greift(self):
+        self.karte.standardwert = 100.0
+        lokal = self.karte.binden(self.ebene)
+        self.assertAlmostEqual(lokal.wert_bei((-50.0, 100.0)), 100.0)
+        self.assertAlmostEqual(lokal.wert_bei((50.0, 100.0)), 140.0)
+
+    def test_kennzahlen_rechnen_flaeche_und_menge_je_zone(self):
+        zahlen = applikation.kennzahlen(self.lokal, self.grenze, raster_m=2.0)
+        self.assertEqual(zahlen["einheit"], "kg/ha")
+        self.assertEqual(len(zahlen["zonen"]), 2)
+        nach_wert = {z["wert"]: z for z in zahlen["zonen"]}
+        self.assertAlmostEqual(nach_wert[140.0]["flaeche_ha"], 2.0, delta=0.05)
+        self.assertAlmostEqual(nach_wert[90.0]["flaeche_ha"], 2.0, delta=0.05)
+        # 2 ha à 140 plus 2 ha à 90 = 460 kg
+        self.assertAlmostEqual(zahlen["menge"], 460.0, delta=12.0)
+        self.assertAlmostEqual(zahlen["flaeche_ha"], 4.0, places=3)
+
+    def test_kennzahlen_zaehlen_nur_was_im_feld_liegt(self):
+        """Eine Zone ragt fast immer über die Grenze - was draußen liegt, zählt nicht."""
+        halbes_feld = [(0.0, 0.0), (100.0, 0.0), (100.0, 200.0), (0.0, 200.0)]
+        zahlen = applikation.kennzahlen(self.lokal, halbes_feld, raster_m=2.0)
+        self.assertEqual([z["wert"] for z in zahlen["zonen"]], [140.0])
+        self.assertAlmostEqual(zahlen["menge"], 280.0, delta=8.0)
+
+    def test_luecken_in_der_karte_werden_ausgewiesen(self):
+        loch = [(0.0, 0.0), (300.0, 0.0), (300.0, 200.0), (0.0, 200.0)]
+        zahlen = applikation.kennzahlen(self.lokal, loch, raster_m=2.0)
+        self.assertAlmostEqual(zahlen["ohne_wert_ha"], 2.0, delta=0.06)
+
+    def test_rundlauf_durch_die_ablage(self):
+        wieder = applikation.Applikationskarte.from_dict(self.karte.to_dict())
+        self.assertEqual(wieder.to_dict(), self.karte.to_dict())
+        lokal = wieder.binden(self.ebene)
+        self.assertAlmostEqual(lokal.wert_bei((50.0, 100.0)), 140.0)
+
+
+class ApplikationPlausibilitaetTest(unittest.TestCase):
+    """Die Warnungen, die den Faktor 100 auffliegen lassen."""
+
+    def _karte(self, werte, einheit="kg/ha"):
+        return applikation.Applikationskarte(
+            name="Test", einheit=einheit,
+            zonen=[applikation.Zone(w, [(48.0, 11.0), (48.001, 11.0), (48.0, 11.001)])
+                   for w in werte])
+
+    def test_unplausible_mengen_werden_gemeldet_aber_nicht_abgelehnt(self):
+        warnungen = applikation.pruefen(self._karte([15000.0, 18000.0]))
+        self.assertTrue(warnungen)
+        self.assertIn("Einheit", warnungen[0])
+
+    def test_uebliche_mengen_gehen_ohne_warnung_durch(self):
+        self.assertEqual(applikation.pruefen(self._karte([140.0, 90.0])), [])
+
+    def test_eine_karte_ohne_unterschiede_ist_keine_teilflaeche(self):
+        warnungen = applikation.pruefen(self._karte([140.0, 140.0]))
+        self.assertTrue(any("dieselbe" in w or "denselben" in w for w in warnungen))
+
+    def test_karte_ganz_ohne_werte(self):
+        leer = applikation.Applikationskarte(name="leer")
+        self.assertIn("keinen einzigen", applikation.pruefen(leer)[0])
+
+
+class ApplikationAusbringungTest(unittest.TestCase):
+    """Was wirklich ausgebracht wurde - und wie ehrlich diese Zahl ist."""
+
+    def test_flaeche_wird_auf_ihren_sollwert_gebucht(self):
+        gebucht = applikation.Ausbringung(einheit="kg/ha")
+        gebucht.buchen(140.0, 10_000.0)     # ein Hektar à 140
+        gebucht.buchen(90.0, 20_000.0)      # zwei Hektar à 90
+        self.assertAlmostEqual(gebucht.flaeche_ha, 3.0)
+        self.assertAlmostEqual(gebucht.menge, 140.0 + 180.0)
+        self.assertAlmostEqual(gebucht.mittelwert, 320.0 / 3.0, places=6)
+
+    def test_flaeche_ohne_karte_wird_getrennt_gefuehrt(self):
+        """Wo keine Karte gilt, ist keine Menge gerechtfertigt - aber gefahren wurde."""
+        gebucht = applikation.Ausbringung(einheit="kg/ha")
+        gebucht.buchen(140.0, 10_000.0)
+        gebucht.buchen(None, 5_000.0)
+        self.assertAlmostEqual(gebucht.flaeche_ha, 1.0)
+        self.assertAlmostEqual(gebucht.to_dict()["ohne_karte_ha"], 0.5)
+        self.assertAlmostEqual(gebucht.menge, 140.0)
+
+    def test_ohne_rueckmeldung_heisst_die_mitschrift_sollwert(self):
+        """Das System weiß, wo es fuhr und was die Karte wollte - mehr nicht."""
+        gebucht = applikation.Ausbringung(einheit="kg/ha")
+        gebucht.buchen(140.0, 10_000.0)
+        self.assertFalse(gebucht.rueckmeldung)
+        self.assertEqual(gebucht.to_dict()["art"], "Sollwert der Karte")
+
+    def test_mit_rueckmeldung_zaehlt_der_istwert_der_maschine(self):
+        gebucht = applikation.Ausbringung(einheit="kg/ha")
+        gebucht.buchen(140.0, 10_000.0, ist_wert=132.0)
+        self.assertTrue(gebucht.rueckmeldung)
+        self.assertEqual(gebucht.to_dict()["art"], "Istwert der Maschine")
+        self.assertAlmostEqual(gebucht.menge, 132.0)
+
+    def test_null_flaeche_bucht_nichts(self):
+        gebucht = applikation.Ausbringung(einheit="kg/ha")
+        gebucht.buchen(140.0, 0.0)
+        gebucht.buchen(140.0, -5.0)
+        self.assertEqual(gebucht.nach_wert, {})
+
+    def test_abgleich_stellt_soll_gegen_ist(self):
+        geplant = {"einheit": "kg/ha", "menge": 400.0, "flaeche_ha": 3.0}
+        gebucht = applikation.Ausbringung(einheit="kg/ha")
+        gebucht.buchen(140.0, 10_000.0)
+        gebucht.buchen(90.0, 20_000.0)      # zusammen 320 kg auf 3 ha
+        zahlen = applikation.abgleich(geplant, gebucht)
+        self.assertAlmostEqual(zahlen["soll_menge"], 400.0)
+        self.assertAlmostEqual(zahlen["ist_menge"], 320.0)
+        self.assertAlmostEqual(zahlen["menge_abweichung"], -80.0)
+        self.assertAlmostEqual(zahlen["menge_abweichung_prozent"], -20.0)
+        self.assertAlmostEqual(zahlen["flaeche_abweichung_ha"], 0.0)
+
+    def test_abgleich_ohne_plan_teilt_nicht_durch_null(self):
+        zahlen = applikation.abgleich({}, applikation.Ausbringung(einheit="kg/ha"))
+        self.assertIsNone(zahlen["menge_abweichung_prozent"])
+
+    def test_rundlauf_durch_die_ablage(self):
+        gebucht = applikation.Ausbringung(einheit="kg/ha")
+        gebucht.buchen(140.0, 10_000.0)
+        gebucht.buchen(None, 5_000.0)
+        wieder = applikation.Ausbringung.from_dict(gebucht.to_dict())
+        self.assertEqual(wieder.to_dict(), gebucht.to_dict())
+
+    def test_csv_traegt_die_grundlage_mit(self):
+        gebucht = applikation.Ausbringung(einheit="kg/ha")
+        gebucht.buchen(140.0, 10_000.0)
+        text = applikation.ausbringung_csv(gebucht, "Große Wiese", "Weizen N2")
+        self.assertIn("Große Wiese", text)
+        self.assertIn("Sollwert der Karte", text)
+        self.assertIn("140;1,000;140,0", text)
+        self.assertTrue(text.endswith("\r\n"))
+
+    def test_buchen_aus_der_bearbeiteten_flaeche(self):
+        """Der Weg, den der Motor geht: neue Zellen der Flächenkarte nachschlagen."""
+        ebene = geo.LocalPlane(48.0, 11.0)
+        karte = applikation.Applikationskarte(
+            name="Zwei Zonen", einheit="kg/ha",
+            zonen=[applikation.Zone(140.0, [ebene.to_wgs(*p) for p in
+                                            [(0, 0), (100, 0), (100, 100), (0, 100)]]),
+                   applikation.Zone(90.0, [ebene.to_wgs(*p) for p in
+                                           [(100, 0), (200, 0), (200, 100), (100, 100)]])])
+        lokal = karte.binden(ebene)
+        flaeche = CoverageMap(cell_size=0.5)
+        teilbreiten = build_sections(6.0, 1)
+        # Quer durch beide Zonen fahren.
+        vorher = (10.0, 50.0)
+        for x in range(20, 200, 10):
+            jetzt = (float(x), 50.0)
+            flaeche.add_swath(vorher, jetzt, 90.0, teilbreiten)
+            vorher = jetzt
+
+        gebucht = applikation.Ausbringung(einheit=karte.einheit)
+        zellflaeche = flaeche.cell_size ** 2
+        for ix, iy in flaeche.drain_new_cells():
+            mitte = ((ix + 0.5) * flaeche.cell_size, (iy + 0.5) * flaeche.cell_size)
+            gebucht.buchen(lokal.wert_bei(mitte), zellflaeche)
+
+        self.assertEqual(sorted(gebucht.nach_wert), [90.0, 140.0])
+        # Gefahren wurde 190 m lang, 6 m breit: gut 0,11 ha, je Zone etwa die Hälfte.
+        self.assertAlmostEqual(gebucht.flaeche_ha, 190.0 * 6.0 / 10_000.0, delta=0.01)
+        self.assertAlmostEqual(gebucht.nach_wert[140.0] / 10_000.0,
+                               gebucht.nach_wert[90.0] / 10_000.0, delta=0.01)
