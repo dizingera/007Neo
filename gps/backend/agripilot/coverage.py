@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from typing import Optional, Sequence
+from typing import Callable, Optional, Sequence
 
 from .geo import Point, point_in_polygon
 
@@ -59,6 +59,15 @@ class CoverageMap:
         self.cells: set[tuple[int, int]] = set()
         self.applied_area_m2 = 0.0  # includes overlap: what the machine actually put out
         self._new_cells: list[tuple[int, int]] = []
+        # Wird bei jeder Zelle gerufen, die *diese* Maschine neu markiert - so
+        # bucht die Ausbringung mit, welcher Sollwert dort galt (siehe
+        # applikation.py). Bewusst kein zweites drain_new_cells: das holt sich
+        # die Kabinenanzeige, und zwei Verbraucher an einer Warteschlange heißt,
+        # dass einer leer ausgeht.
+        #
+        # Nur der eigene Weg, nicht `merge`: was der Nachbartraktor bearbeitet
+        # hat, hat er ausgebracht, nicht wir.
+        self.on_new_cell: Optional[Callable[[tuple[int, int]], None]] = None
 
     # -- queries ----------------------------------------------------------
 
@@ -152,6 +161,8 @@ class CoverageMap:
                 if point_in_polygon((cx, cy), polygon):
                     self.cells.add(cell)
                     self._new_cells.append(cell)
+                    if self.on_new_cell is not None:
+                        self.on_new_cell(cell)
 
     # -- section control --------------------------------------------------
 

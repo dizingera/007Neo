@@ -11,6 +11,7 @@ Lenkautomatik einschalten darf.
 """
 
 import asyncio
+import base64
 import json
 import math
 import os
@@ -3672,7 +3673,7 @@ class FeldplanGeometrieTest(unittest.TestCase):
             self.RECHTECK_OST,
             feldplan.PlanEinstellungen(arbeitsbreite_m=10.0, vorgewende_breiten=2.0))
         self.assertAlmostEqual(plan.feld_flaeche_ha, 2.0, places=6)
-        self.assertAlmostEqual(plan.kern_flaeche_ha, 160.0 * 60.0 / 10_000.0, places=2)
+        self.assertAlmostEqual(plan.bahnen_flaeche_ha, 160.0 * 60.0 / 10_000.0, places=2)
         self.assertAlmostEqual(plan.vorgewende_flaeche_ha,
                                2.0 - 160.0 * 60.0 / 10_000.0, places=2)
 
@@ -3684,7 +3685,7 @@ class FeldplanGeometrieTest(unittest.TestCase):
         self.assertEqual(len(plan.bahnen), 10)
         for bahn in plan.bahnen:
             self.assertAlmostEqual(bahn.laenge_m, 200.0, places=6)
-        self.assertAlmostEqual(plan.kern_flaeche_ha, 2.0, places=6)
+        self.assertAlmostEqual(plan.bahnen_flaeche_ha, 2.0, places=6)
 
     def test_einbuchtung_teilt_die_bahn_in_zwei_stuecke(self):
         """Ein U-förmiger Schlag: quer gefahren zerfällt jede Bahn.
@@ -3709,6 +3710,59 @@ class FeldplanGeometrieTest(unittest.TestCase):
             mitte = ((bahn.start[0] + bahn.ende[0]) / 2.0,
                      (bahn.start[1] + bahn.ende[1]) / 2.0)
             self.assertTrue(geo.point_in_polygon(mitte, u_feld))
+
+    def test_die_bahnen_decken_den_ganzen_kern_ab(self):
+        """Kein Streifen im Kern darf zwischen zwei Bahnen durchfallen.
+
+        Das ist die Probe, die eine zu clevere Richtungssuche auffliegen lässt:
+        eine Richtung mit einer Bahn weniger sieht auf dem Papier besser aus,
+        und im Feld bleibt ein Streifen stehen.
+        """
+        breite, tiefe = 12.0, 24.0
+        grenze = [(0.0, 0.0), (300.0, 0.0), (300.0, 150.0), (0.0, 150.0)]
+        plan = feldplan.planen(
+            grenze,
+            feldplan.PlanEinstellungen(arbeitsbreite_m=breite,
+                                       vorgewende_breiten=2.0))
+        fern = []
+        for x in range(5, 300, 5):
+            for y in range(5, 150, 5):
+                punkt = (float(x), float(y))
+                if not feldplan.im_kern(punkt, grenze, tiefe):
+                    continue
+                abstand = min(
+                    geo.distance(punkt, geo.project_on_segment(
+                        punkt, bahn.start, bahn.ende)[0])
+                    for bahn in plan.bahnen)
+                if abstand > breite / 2.0 + 0.01:
+                    fern.append((punkt, round(abstand, 1)))
+        self.assertEqual(fern, [], f"{len(fern)} Kernpunkte ohne Bahn")
+
+    def test_eine_bahn_weniger_gewinnt_nicht_durch_weggelassene_stuecke(self):
+        """Gezählt wird beim Bewerten jedes Stück, auch das kurze.
+
+        Direkt am Sieger vorbei: 88° hat auf diesem Feld eine Bahn mehr als
+        90°, weil der Kern quer dazu breiter ist. Wer kurze Bahnen aus der
+        Zählung wirft, bekommt dort scheinbar weniger Bahnen.
+        """
+        grenze = [(0.0, 0.0), (300.0, 0.0), (300.0, 150.0), (0.0, 150.0)]
+        gerade = feldplan._bewerten(grenze, 90.0, 12.0, 24.0)
+        for schief in (86.0, 88.0, 92.0, 94.0):
+            self.assertGreater(feldplan._bewerten(grenze, schief, 12.0, 24.0),
+                               gerade, f"{schief}° schlägt 90°")
+
+    def test_das_bahnband_liegt_mittig_ueber_dem_kern(self):
+        """Der Überstand verteilt sich, statt sich an einem Rand zu sammeln."""
+        grenze = [(0.0, 0.0), (300.0, 0.0), (300.0, 150.0), (0.0, 150.0)]
+        plan = feldplan.planen(
+            grenze,
+            feldplan.PlanEinstellungen(arbeitsbreite_m=12.0, vorgewende_breiten=2.0,
+                                       richtung_grad=90.0))
+        hoehen = sorted({round(b.start[1], 3) for b in plan.bahnen})
+        # Der Kern reicht von 24 bis 126; oben und unten muss gleich viel
+        # Überstand bleiben.
+        self.assertAlmostEqual(hoehen[0] - 24.0, 126.0 - hoehen[-1], places=3)
+        self.assertGreaterEqual(hoehen[0], 24.0 - 12.0 / 2.0)
 
     def test_zu_kleine_grenze_wird_abgelehnt(self):
         with self.assertRaises(ValueError):
@@ -3826,7 +3880,7 @@ class FeldplanFortschrittTest(unittest.TestCase):
         self.assertEqual(stand.erledigt_anzahl, 0)
         self.assertEqual(stand.offen_anzahl, len(self.plan.bahnen))
         self.assertAlmostEqual(stand.flaechen_anteil, 0.0, places=6)
-        self.assertAlmostEqual(stand.rest_ha, self.plan.kern_flaeche_ha, places=2)
+        self.assertAlmostEqual(stand.rest_ha, self.plan.bahnen_flaeche_ha, places=2)
         self.assertEqual(stand.naechste, 1)
 
     def test_vollstaendig_bearbeitet_laesst_nichts_offen(self):
@@ -4309,3 +4363,260 @@ class ApplikationAusbringungTest(unittest.TestCase):
         self.assertAlmostEqual(gebucht.flaeche_ha, 190.0 * 6.0 / 10_000.0, delta=0.01)
         self.assertAlmostEqual(gebucht.nach_wert[140.0] / 10_000.0,
                                gebucht.nach_wert[90.0] / 10_000.0, delta=0.01)
+
+
+class FeldplanApiTest(unittest.TestCase):
+    """Der Arbeitsplan von außen - so, wie die Kabine ihn aufruft."""
+
+    def test_plan_rechnen_bahn_fahren_und_fortschritt_ueber_die_schnittstelle(self):
+        from fastapi.testclient import TestClient
+        from agripilot import config as config_module
+        from agripilot.server import create_app
+
+        with tempfile.TemporaryDirectory() as ordner:
+            config = config_module.load("/kein-solcher-pfad.yaml")
+            config.server.data_dir = ordner
+            config.gnss.source = "simulator"
+            with TestClient(create_app(config)) as client:
+                client.post("/api/fields", json={"name": "Planfeld"})
+                app = client.app.state.app
+
+                # Ohne Feldgrenze gibt es keinen Plan - und das steht auch so da.
+                antwort = client.post("/api/plan", json={})
+                self.assertEqual(antwort.status_code, 400)
+                self.assertIn("Feldgrenze", antwort.json()["detail"])
+
+                app.engine.save_boundary([(0.0, 0.0), (300.0, 0.0),
+                                          (300.0, 150.0), (0.0, 150.0)])
+                antwort = client.post("/api/plan", json={
+                    "arbeitsbreite_m": 12.0, "vorgewende_breiten": 2.0})
+                self.assertEqual(antwort.status_code, 200)
+                plan = antwort.json()["data"]
+                self.assertAlmostEqual(plan["richtung_grad"], 90.0, places=3)
+                self.assertGreater(plan["bahnen_anzahl"], 3)
+                self.assertGreater(plan["dauer_min"], 0.0)
+
+                # Der Plan steht im Zustandsbild und ist abgelegt.
+                zustand = client.get("/api/state").json()
+                self.assertEqual(zustand["plan"]["bahnen_anzahl"],
+                                 plan["bahnen_anzahl"])
+                self.assertEqual(len(client.get("/api/plans").json()), 1)
+
+                # Eine Bahn übernehmen: daraus wird die Führungslinie.
+                erste = plan["bahnen"][0]["nummer"]
+                self.assertEqual(
+                    client.post(f"/api/plan/bahn/{erste}").status_code, 200)
+                zustand = client.get("/api/state").json()
+                self.assertEqual(zustand["line"]["mode"], "ab")
+                self.assertEqual(zustand["plan"]["bahn"], erste)
+                # Als abgeleitete Linie wird sie nicht als eigene Spur abgelegt.
+                self.assertTrue(zustand["line"]["derived"])
+                self.assertEqual(client.get("/api/lines").json(), [])
+
+                # "naechste" darf nicht als Bahnnummer gelesen werden.
+                antwort = client.post("/api/plan/bahn/naechste")
+                self.assertEqual(antwort.status_code, 200)
+
+                # Fortschritt: nichts gefahren, also alles offen.
+                stand = client.get("/api/plan/fortschritt").json()
+                self.assertEqual(stand["erledigt_anzahl"], 0)
+                self.assertEqual(stand["offen_anzahl"], plan["bahnen_anzahl"])
+                self.assertGreater(stand["rest_ha"], 0.0)
+
+                # Eine Bahn, die es nicht gibt.
+                self.assertEqual(client.post("/api/plan/bahn/9999").status_code, 400)
+
+                # Plan laden und wieder verwerfen.
+                plan_id = client.get("/api/plans").json()[0]["id"]
+                self.assertEqual(
+                    client.post(f"/api/plan/{plan_id}/load").status_code, 200)
+                self.assertEqual(client.delete("/api/plan").status_code, 200)
+                self.assertFalse(client.get("/api/plan").json()["aktiv"])
+
+    def test_ein_geladener_plan_behaelt_seine_bahnnummern(self):
+        """Zwei Traktoren müssen mit "Bahn 12" dieselbe Stelle meinen.
+
+        Neu gerechnet würde eine inzwischen nachgemessene Feldgrenze eine
+        andere Einteilung ergeben - deshalb wird der abgelegte Plan übernommen,
+        nicht neu gerechnet.
+        """
+        from agripilot import config as config_module
+        from agripilot.engine import Engine
+
+        with tempfile.TemporaryDirectory() as ordner:
+            config = config_module.load("/kein-solcher-pfad.yaml")
+            config.server.data_dir = ordner
+            store = Storage(os.path.join(ordner, "t.db"))
+            motor = Engine(config, store)
+            feld = store.save_field({"name": "Planfeld", "datum_lat": 48.0,
+                                     "datum_lon": 11.0})
+            motor.load_field(feld["id"])
+            motor.save_boundary([(0.0, 0.0), (300.0, 0.0),
+                                 (300.0, 150.0), (0.0, 150.0)])
+            motor.plan_rechnen({"arbeitsbreite_m": 12.0})
+            vorher = [b.to_dict() for b in motor.plan.bahnen]
+
+            # Die Grenze wird nachgemessen - der abgelegte Plan bleibt, wie er war.
+            motor.save_boundary([(0.0, 0.0), (310.0, 0.0),
+                                 (310.0, 155.0), (0.0, 155.0)])
+            zweiter = Engine(config, store)
+            zweiter.load_field(feld["id"])
+            self.assertIsNotNone(zweiter.plan)
+            self.assertEqual([b.to_dict() for b in zweiter.plan.bahnen], vorher)
+            store.close()
+
+
+class ApplikationApiTest(unittest.TestCase):
+    """Applikationskarten von außen: einlesen, fahren, dokumentieren."""
+
+    def _client(self, ordner):
+        from fastapi.testclient import TestClient
+        from agripilot import config as config_module
+        from agripilot.server import create_app
+        config = config_module.load("/kein-solcher-pfad.yaml")
+        config.server.data_dir = ordner
+        config.gnss.source = "simulator"
+        return TestClient(create_app(config))
+
+    def _geojson(self, ebene):
+        """Zwei Zonen nebeneinander, aus lokalen Metern nach WGS84 gerechnet."""
+        def ring(punkte):
+            return [[lon, lat] for lat, lon in
+                    (ebene.to_wgs(x, y) for x, y in punkte)]
+        return json.dumps({"type": "FeatureCollection", "features": [
+            {"type": "Feature", "properties": {"menge": 140},
+             "geometry": {"type": "Polygon", "coordinates": [
+                 ring([(0, 0), (150, 0), (150, 200), (0, 200)])]}},
+            {"type": "Feature", "properties": {"menge": 90},
+             "geometry": {"type": "Polygon", "coordinates": [
+                 ring([(150, 0), (300, 0), (300, 200), (150, 200)])]}}]})
+
+    def test_karte_einlesen_waehlen_und_ausbringung_dokumentieren(self):
+        with tempfile.TemporaryDirectory() as ordner:
+            with self._client(ordner) as client:
+                client.post("/api/fields", json={"name": "Kartenfeld"})
+                app = client.app.state.app
+                motor = app.engine
+                motor.save_boundary([(0.0, 0.0), (300.0, 0.0),
+                                     (300.0, 200.0), (0.0, 200.0)])
+
+                antwort = client.post("/api/karte/import", json={
+                    "geojson": self._geojson(motor.plane),
+                    "eigenschaft": "menge", "name": "Weizen N2"})
+                self.assertEqual(antwort.status_code, 200, antwort.text)
+
+                uebersicht = client.get("/api/karte").json()
+                self.assertTrue(uebersicht["aktiv"])
+                self.assertEqual(uebersicht["name"], "Weizen N2")
+                self.assertEqual(uebersicht["einheit"], "kg/ha")
+                # 3 ha à 140 plus 3 ha à 90 = 690 kg auf 6 ha
+                self.assertAlmostEqual(uebersicht["geplant"]["menge"], 690.0, delta=25.0)
+                self.assertAlmostEqual(uebersicht["geplant"]["flaeche_ha"], 6.0,
+                                       places=2)
+
+                # Der Sollwert steht im Zustandsbild, sobald eine Position da ist.
+                motor.implement_position = (50.0, 100.0)
+                motor._update_sollwert()
+                self.assertAlmostEqual(motor.state()["applikation"]["sollwert"], 140.0)
+                motor.implement_position = (250.0, 100.0)
+                motor._update_sollwert()
+                self.assertAlmostEqual(motor.state()["applikation"]["sollwert"], 90.0)
+
+                # Fahren: eine Arbeit über beide Zonen, dann dokumentieren.
+                client.post("/api/job/start", json={"operation": "Düngen"})
+                vorher = (10.0, 100.0)
+                for x in range(20, 290, 10):
+                    jetzt = (float(x), 100.0)
+                    motor.coverage.add_swath(vorher, jetzt, 90.0, motor.sections)
+                    vorher = jetzt
+
+                gebucht = motor.ausbringung
+                self.assertEqual(sorted(gebucht.nach_wert), [90.0, 140.0])
+                self.assertGreater(gebucht.menge, 0.0)
+
+                abgleich = client.get("/api/karte").json()["abgleich"]
+                self.assertLess(abgleich["ist_menge"], abgleich["soll_menge"])
+                self.assertIsNotNone(abgleich["menge_abweichung_prozent"])
+
+                csv = client.get("/api/karte/ausbringung.csv")
+                self.assertEqual(csv.status_code, 200)
+                self.assertIn("Kartenfeld", csv.text)
+                self.assertIn("Sollwert der Karte", csv.text)
+
+                # Die Arbeit trägt die Ausbringung und die Karte mit.
+                motor.distance_m = 200.0
+                arbeit = client.post("/api/job/stop").json()["data"]
+                gespeichert = app.store.get_job(arbeit["id"])
+                self.assertIsNotNone(gespeichert["ausbringung"])
+                self.assertEqual(gespeichert["map_id"], uebersicht["id"])
+                self.assertGreater(gespeichert["ausbringung"]["menge"], 0.0)
+
+    def test_karte_ohne_datei_und_mit_kaputter_datei(self):
+        with tempfile.TemporaryDirectory() as ordner:
+            with self._client(ordner) as client:
+                client.post("/api/fields", json={"name": "Kartenfeld"})
+                antwort = client.post("/api/karte/import", json={})
+                self.assertEqual(antwort.status_code, 400)
+                self.assertIn("Keine Datei", antwort.json()["detail"])
+
+                antwort = client.post("/api/karte/import",
+                                      json={"geojson": "{kein json"})
+                self.assertEqual(antwort.status_code, 400)
+
+                # ISO-XML ohne Rasterdatei: klare Ansage statt halber Karte.
+                antwort = client.post("/api/karte/import", json={
+                    "taskdata": base64.b64encode(_isoxml(2, 2)).decode()})
+                self.assertEqual(antwort.status_code, 400)
+                self.assertIn("Rasterdatei", antwort.json()["detail"])
+
+    def test_isoxml_ueber_die_schnittstelle_mit_warnung(self):
+        with tempfile.TemporaryDirectory() as ordner:
+            with self._client(ordner) as client:
+                client.post("/api/fields", json={"name": "Kartenfeld"})
+                motor = client.app.state.app.engine
+                motor.save_boundary([(0.0, 0.0), (300.0, 0.0),
+                                     (300.0, 200.0), (0.0, 200.0)])
+                lat, lon = motor.field["datum_lat"], motor.field["datum_lon"]
+                roh = struct.pack("<4i", 15000, 12000, 18000, 15000)
+                antwort = client.post("/api/karte/import", json={
+                    "taskdata": base64.b64encode(
+                        _isoxml(2, 2, lat_min=lat - 0.002, lon_min=lon - 0.002,
+                                lat_schritt=0.002, lon_schritt=0.002)).decode(),
+                    "raster": base64.b64encode(roh).decode(),
+                    "rastername": "GRD00001.BIN"})
+                self.assertEqual(antwort.status_code, 200, antwort.text)
+                daten = antwort.json()["data"]
+                self.assertTrue(any("Faktor" in h for h in daten["hinweise"]))
+                self.assertEqual(daten["uebersicht"]["einheit"], "kg/ha")
+
+    def test_spaltenauswahl_fuer_shapefile_karten(self):
+        with tempfile.TemporaryDirectory() as ordner:
+            with self._client(ordner) as client:
+                dbf = _dbf_bauen([("NAME", 20), ("NMENGE", 10)],
+                                 [("Wiese", "145.5")])
+                antwort = client.post("/api/karte/spalten",
+                                      json={"dbf": base64.b64encode(dbf).decode()})
+                self.assertEqual(antwort.status_code, 200)
+                self.assertIn("NMENGE", antwort.json()["data"]["spalten"])
+                self.assertEqual(client.post("/api/karte/spalten", json={}).status_code,
+                                 400)
+
+    def test_karte_wird_beim_laden_des_feldes_wieder_aktiv(self):
+        """Wer morgens weiterfährt, soll die Karte von gestern vorfinden."""
+        with tempfile.TemporaryDirectory() as ordner:
+            with self._client(ordner) as client:
+                feld = client.post("/api/fields", json={"name": "Kartenfeld"}).json()
+                motor = client.app.state.app.engine
+                motor.save_boundary([(0.0, 0.0), (300.0, 0.0),
+                                     (300.0, 200.0), (0.0, 200.0)])
+                client.post("/api/karte/import", json={
+                    "geojson": self._geojson(motor.plane),
+                    "eigenschaft": "menge", "name": "Weizen N2"})
+                client.post("/api/karte", json={})   # gibt es nicht, schadet nicht
+                motor.karte_entfernen()
+                self.assertFalse(client.get("/api/karte").json()["aktiv"])
+
+                client.post(f"/api/fields/{feld['data']['id']}/load")
+                uebersicht = client.get("/api/karte").json()
+                self.assertTrue(uebersicht["aktiv"])
+                self.assertEqual(uebersicht["name"], "Weizen N2")

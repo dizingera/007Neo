@@ -24,6 +24,7 @@ from fastapi import Body, FastAPI, HTTPException, Request, WebSocket, WebSocketD
 from fastapi.responses import JSONResponse, PlainTextResponse, Response
 from fastapi.staticfiles import StaticFiles
 
+from . import applikation as applikation_module
 from . import config as config_module
 from . import checklist as checklist_module
 from . import settings as settings_module
@@ -434,6 +435,163 @@ def create_app(config=None) -> FastAPI:
             "area_ha": merged.area_ha,
             "cells": merged.cells_for_display(),
         }
+
+    # -- Arbeitsplan -------------------------------------------------------
+
+    @api.get("/api/plan")
+    async def get_plan() -> dict:
+        if engine.plan is None:
+            return {"aktiv": False}
+        return {"aktiv": True, **(engine._plan_state() or {})}
+
+    @api.post("/api/plan")
+    async def plan_rechnen(payload: dict = Body(default={})):
+        """Einen Arbeitsplan aus der Feldgrenze rechnen.
+
+        Ohne Angaben nimmt der Plan die Arbeitsbreite der Maschine, die Tiefe
+        aus den Vorgewende-Einstellungen und sucht die Richtung selbst.
+        """
+        return guard(engine.plan_rechnen, dict(payload or {}))
+
+    @api.get("/api/plans")
+    async def list_plans(field_id: Optional[str] = None) -> list[dict]:
+        return store.list_plans(field_id)
+
+    @api.post("/api/plan/{plan_id}/load")
+    async def plan_laden(plan_id: str):
+        return guard(engine.plan_laden, plan_id)
+
+    @api.delete("/api/plan")
+    async def plan_loeschen():
+        return guard(engine.plan_loeschen)
+
+    # "naechste" muss vor "{nummer}" stehen: die Wege werden der Reihe nach
+    # geprüft, und /api/plan/bahn/naechste würde sonst als Bahnnummer gelesen.
+    @api.post("/api/plan/bahn/naechste")
+    async def naechste_bahn():
+        return guard(engine.naechste_bahn)
+
+    @api.post("/api/plan/bahn/{nummer}")
+    async def bahn_waehlen(nummer: int):
+        return guard(engine.bahn_waehlen, nummer)
+
+    @api.get("/api/plan/fortschritt")
+    async def plan_fortschritt() -> dict:
+        stand = engine.plan_fortschritt(neu=True)
+        return stand.to_dict() if stand else {"aktiv": False}
+
+    # -- Applikationskarten -------------------------------------------------
+
+    @api.get("/api/karten")
+    async def list_karten(field_id: Optional[str] = None) -> list[dict]:
+        return store.list_maps(field_id)
+
+    @api.get("/api/karte")
+    async def karte_uebersicht() -> dict:
+        return engine.karte_uebersicht()
+
+    @api.post("/api/karte/{map_id}/load")
+    async def karte_waehlen(map_id: str):
+        return guard(engine.karte_waehlen, map_id)
+
+    @api.delete("/api/karte")
+    async def karte_entfernen():
+        return guard(engine.karte_entfernen)
+
+    @api.delete("/api/karten/{map_id}")
+    async def karte_loeschen(map_id: str):
+        if engine.karte_id == map_id:
+            engine.karte_entfernen()
+        store.delete_map(map_id)
+        return ok()
+
+    @api.post("/api/karte/import")
+    async def karte_importieren(payload: dict = Body(...)):
+        """Eine Applikationskarte einlesen und dem Feld zuordnen.
+
+        Die Dateien kommen base64-kodiert im JSON, wie beim Shapefile-Import
+        der Felder. Drei Wege:
+
+        * ``shp`` und ``dbf`` (und ``prj``) mit ``spalte`` - Zonenkarte
+        * ``geojson`` als Text mit ``eigenschaft``
+        * ``taskdata`` und ``raster`` - ISO-XML mit Rasterdatei
+
+        ``einheit`` überschreibt die aus der Kennung abgeleitete Einheit. Das
+        ist der Ausweg, wenn eine Datei eine Kennung benutzt, die das System
+        nicht kennt - nachzulesen in applikation.py.
+        """
+        import base64
+
+        def datei(schluessel: str) -> Optional[bytes]:
+            roh = payload.get(schluessel)
+            if not roh:
+                return None
+            try:
+                return base64.b64decode(roh)
+            except (ValueError, TypeError) as exc:
+                raise HTTPException(400, f"{schluessel} nicht lesbar: {exc}") from exc
+
+        name = str(payload.get("name") or "")
+        einheit = payload.get("einheit") or None
+
+        try:
+            if payload.get("taskdata"):
+                taskdata = datei("taskdata")
+                raster = datei("raster")
+                if not raster:
+                    raise HTTPException(400, "Zur TASKDATA.XML gehört die Rasterdatei "
+                                             "(.BIN) - beide zusammen auswählen")
+                karte = applikation_module.aus_isoxml(
+                    taskdata, {str(payload.get("rastername") or "GRD00001.BIN"): raster},
+                    name=name, einheit=einheit,
+                    aufgabe=payload.get("aufgabe") or None)
+            elif payload.get("geojson"):
+                karte = applikation_module.aus_geojson(
+                    str(payload["geojson"]), payload.get("eigenschaft") or None,
+                    name=name, einheit=einheit or "kg/ha")
+            elif payload.get("shp"):
+                karte = applikation_module.aus_shapefile(
+                    datei("shp") or b"", datei("dbf") or b"",
+                    payload.get("prj") or None, payload.get("spalte") or None,
+                    name=name, einheit=einheit or "kg/ha")
+            else:
+                raise HTTPException(400, "Keine Datei dabei - erwartet werden "
+                                         "shp/dbf, geojson oder taskdata/raster")
+        except applikation_module.KartenFehler as exc:
+            raise HTTPException(400, str(exc)) from exc
+        except (struct.error, IndexError) as exc:
+            raise HTTPException(400, f"Die Datei ist beschädigt: {exc}") from exc
+
+        datensatz = guard(engine.karte_speichern, karte)
+        return ok({"karte": store.get_map(engine.karte_id) if engine.karte_id else None,
+                   "hinweise": karte.hinweise,
+                   "uebersicht": engine.karte_uebersicht()})
+
+    @api.post("/api/karte/spalten")
+    async def karte_spalten(payload: dict = Body(...)):
+        """Welche Spalten einer .dbf als Sollwert taugen - für die Auswahl."""
+        import base64
+        try:
+            dbf = base64.b64decode(payload.get("dbf") or "")
+        except (ValueError, TypeError) as exc:
+            raise HTTPException(400, f"dbf nicht lesbar: {exc}") from exc
+        if not dbf:
+            raise HTTPException(400, "Die .dbf-Datei fehlt")
+        try:
+            return ok({"spalten": applikation_module.wertespalten(dbf)})
+        except (struct.error, IndexError, ValueError) as exc:
+            raise HTTPException(400, f"Die .dbf-Datei ist beschädigt: {exc}") from exc
+
+    @api.get("/api/karte/ausbringung.csv")
+    async def ausbringung_csv():
+        if engine.karte is None:
+            raise HTTPException(400, "Keine Applikationskarte gewählt")
+        text = applikation_module.ausbringung_csv(
+            engine.ausbringung,
+            engine.field["name"] if engine.field else "",
+            engine.karte.name)
+        return PlainTextResponse(text, headers={
+            "Content-Disposition": 'attachment; filename="ausbringung.csv"'})
 
     # -- guidance lines ---------------------------------------------------
 

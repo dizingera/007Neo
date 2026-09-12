@@ -83,6 +83,29 @@ CREATE TABLE IF NOT EXISTS devices (
     deleted INTEGER NOT NULL DEFAULT 0
 );
 
+CREATE TABLE IF NOT EXISTS maps (
+    id TEXT PRIMARY KEY,
+    field_id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    einheit TEXT NOT NULL DEFAULT '',
+    quelle TEXT NOT NULL DEFAULT '',
+    daten TEXT NOT NULL DEFAULT '{}',      -- die Karte selbst, in WGS84
+    updated_at REAL NOT NULL,
+    deleted INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_maps_field ON maps(field_id);
+
+CREATE TABLE IF NOT EXISTS plans (
+    id TEXT PRIMARY KEY,
+    field_id TEXT NOT NULL,
+    name TEXT NOT NULL DEFAULT '',
+    einstellungen TEXT NOT NULL DEFAULT '{}',
+    plan TEXT NOT NULL DEFAULT '{}',       -- Bahnen und Ringe, in lokalen Metern
+    updated_at REAL NOT NULL,
+    deleted INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_plans_field ON plans(field_id);
+
 CREATE TABLE IF NOT EXISTS settings (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL,
@@ -90,7 +113,7 @@ CREATE TABLE IF NOT EXISTS settings (
 );
 """
 
-SYNCED_TABLES = ("fields", "lines", "jobs", "devices")
+SYNCED_TABLES = ("fields", "lines", "jobs", "devices", "maps", "plans")
 
 
 def new_id() -> str:
@@ -124,6 +147,15 @@ class Storage:
                                    ("fahrgasse_m", "REAL NOT NULL DEFAULT 0")):
             if spalte not in vorhanden:
                 self.db.execute(f"ALTER TABLE lines ADD COLUMN {spalte} {definition}")
+
+        # Die Arbeit weiß, nach welcher Karte sie gefahren wurde und was dabei
+        # herauskam - sonst steht die Ausbringung ohne Bezug in der Kartei.
+        vorhanden = {c[1] for c in self.db.execute("PRAGMA table_info(jobs)")}
+        for spalte, definition in (("map_id", "TEXT"),
+                                   ("plan_id", "TEXT"),
+                                   ("ausbringung", "TEXT NOT NULL DEFAULT ''")):
+            if spalte not in vorhanden:
+                self.db.execute(f"ALTER TABLE jobs ADD COLUMN {spalte} {definition}")
 
     def close(self) -> None:
         self.db.close()
@@ -164,6 +196,116 @@ class Storage:
 
     def delete_field(self, field_id: str) -> None:
         self._soft_delete("fields", field_id)
+
+    # -- Applikationskarten ------------------------------------------------
+
+    def save_map(self, record: dict) -> dict:
+        """Eine Applikationskarte ablegen. ``daten`` ist die Karte in WGS84."""
+        record = dict(record)
+        record.setdefault("id", new_id())
+        record.setdefault("name", "Applikationskarte")
+        record.setdefault("einheit", "")
+        record.setdefault("quelle", "")
+        record.setdefault("daten", {})
+        record["updated_at"] = time.time()
+        self.db.execute(
+            """INSERT INTO maps (id, field_id, name, einheit, quelle, daten,
+                                 updated_at, deleted)
+               VALUES (:id, :field_id, :name, :einheit, :quelle, :daten,
+                       :updated_at, 0)
+               ON CONFLICT(id) DO UPDATE SET
+                   field_id=excluded.field_id, name=excluded.name,
+                   einheit=excluded.einheit, quelle=excluded.quelle,
+                   daten=excluded.daten, updated_at=excluded.updated_at, deleted=0""",
+            {**record, "daten": json.dumps(record["daten"])},
+        )
+        self.db.commit()
+        return self.get_map(record["id"])
+
+    def get_map(self, map_id: str) -> Optional[dict]:
+        row = self.db.execute("SELECT * FROM maps WHERE id=?", (map_id,)).fetchone()
+        return _map_row(row) if row else None
+
+    def list_maps(self, field_id: Optional[str] = None,
+                  mit_daten: bool = False) -> list[dict]:
+        """Die Karten eines Feldes.
+
+        Ohne ``mit_daten`` bleibt die Karte selbst draußen: ein Raster mit
+        zehntausend Zellen gehört nicht in eine Liste, die nur die Namen zeigen
+        soll - über die Live-Verbindung wäre das bei jedem Aufruf ein Megabyte.
+        """
+        if field_id:
+            rows = self.db.execute(
+                "SELECT * FROM maps WHERE deleted=0 AND field_id=? "
+                "ORDER BY updated_at DESC", (field_id,)).fetchall()
+        else:
+            rows = self.db.execute(
+                "SELECT * FROM maps WHERE deleted=0 ORDER BY updated_at DESC"
+            ).fetchall()
+        karten = [_map_row(r) for r in rows]
+        if not mit_daten:
+            for karte in karten:
+                karte.pop("daten", None)
+        return karten
+
+    def delete_map(self, map_id: str) -> None:
+        self._soft_delete("maps", map_id)
+
+    # -- Arbeitsplaene -----------------------------------------------------
+
+    def save_plan(self, record: dict) -> dict:
+        """Den Arbeitsplan eines Feldes ablegen.
+
+        Gespeichert wird der gerechnete Plan, nicht nur die Einstellungen: das
+        Rechnen dauert auf einem Pi spürbar, und vor allem sollen zwei Traktoren
+        auf demselben Feld dieselben Bahnnummern vor sich haben. Über den
+        Abgleich bekommt der zweite genau den Plan des ersten.
+        """
+        record = dict(record)
+        record.setdefault("id", new_id())
+        record.setdefault("name", "")
+        record.setdefault("einstellungen", {})
+        record.setdefault("plan", {})
+        record["updated_at"] = time.time()
+        self.db.execute(
+            """INSERT INTO plans (id, field_id, name, einstellungen, plan,
+                                  updated_at, deleted)
+               VALUES (:id, :field_id, :name, :einstellungen, :plan,
+                       :updated_at, 0)
+               ON CONFLICT(id) DO UPDATE SET
+                   field_id=excluded.field_id, name=excluded.name,
+                   einstellungen=excluded.einstellungen, plan=excluded.plan,
+                   updated_at=excluded.updated_at, deleted=0""",
+            {**record, "einstellungen": json.dumps(record["einstellungen"]),
+             "plan": json.dumps(record["plan"])},
+        )
+        self.db.commit()
+        return self.get_plan(record["id"])
+
+    def get_plan(self, plan_id: str) -> Optional[dict]:
+        row = self.db.execute("SELECT * FROM plans WHERE id=?", (plan_id,)).fetchone()
+        return _plan_row(row) if row else None
+
+    def field_plan(self, field_id: str) -> Optional[dict]:
+        """Der jüngste Plan eines Feldes - der, der beim Laden gilt."""
+        row = self.db.execute(
+            "SELECT * FROM plans WHERE deleted=0 AND field_id=? "
+            "ORDER BY updated_at DESC LIMIT 1", (field_id,)).fetchone()
+        return _plan_row(row) if row else None
+
+    def list_plans(self, field_id: Optional[str] = None) -> list[dict]:
+        if field_id:
+            rows = self.db.execute(
+                "SELECT * FROM plans WHERE deleted=0 AND field_id=? "
+                "ORDER BY updated_at DESC", (field_id,)).fetchall()
+        else:
+            rows = self.db.execute(
+                "SELECT * FROM plans WHERE deleted=0 ORDER BY updated_at DESC"
+            ).fetchall()
+        return [_plan_row(r) for r in rows]
+
+    def delete_plan(self, plan_id: str) -> None:
+        self._soft_delete("plans", plan_id)
 
     # -- guidance lines ---------------------------------------------------
 
@@ -432,6 +574,19 @@ def _field_row(row: sqlite3.Row) -> dict:
     return record
 
 
+def _map_row(row: sqlite3.Row) -> dict:
+    record = dict(row)
+    record["daten"] = json.loads(record["daten"] or "{}")
+    return record
+
+
+def _plan_row(row: sqlite3.Row) -> dict:
+    record = dict(row)
+    record["einstellungen"] = json.loads(record["einstellungen"] or "{}")
+    record["plan"] = json.loads(record["plan"] or "{}")
+    return record
+
+
 def _line_row(row: sqlite3.Row) -> dict:
     record = dict(row)
     record["points"] = json.loads(record["points"] or "[]")
@@ -441,4 +596,6 @@ def _line_row(row: sqlite3.Row) -> dict:
 def _job_row(row: sqlite3.Row) -> dict:
     record = dict(row)
     record.pop("coverage", None)  # blob stays out of JSON responses
+    roh = record.get("ausbringung")
+    record["ausbringung"] = json.loads(roh) if roh else None
     return record

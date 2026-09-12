@@ -17,12 +17,14 @@ where the tool actually is, so what the screen shows is what the field gets.
 from __future__ import annotations
 
 import asyncio
+import json
 import math
 import time
 from dataclasses import asdict
 from typing import Any, Optional
 
-from . import geo, headland as headland_module, storage
+from . import (applikation as applikation_module, feldplan as feldplan_module,
+               geo, headland as headland_module, storage)
 from .actuators import SteerContext
 from .config import Config
 from .coverage import CoverageMap, Section, build_sections
@@ -61,6 +63,21 @@ class Engine:
         self.line: Optional[GuidanceLine] = None
         self.coverage = CoverageMap(cell_size=0.5)
         self.job: Optional[dict] = None
+
+        # Arbeitsplan des Feldes: Bahnen, Ringe, Reihenfolge.
+        self.plan: Optional[feldplan_module.Feldplan] = None
+        self.plan_id: Optional[str] = None
+        self.plan_bahn: Optional[int] = None     # welche Bahn gerade geführt wird
+        self._fortschritt: Optional[feldplan_module.Planfortschritt] = None
+        self._fortschritt_zeit = 0.0
+
+        # Applikationskarte und die Mitschrift dessen, was ausgebracht wurde.
+        self.karte: Optional[applikation_module.Applikationskarte] = None
+        self.karte_id: Optional[str] = None
+        self.karte_lokal: Optional[applikation_module.LokaleKarte] = None
+        self.sollwert: Optional[float] = None
+        self.ausbringung = applikation_module.Ausbringung()
+        self._karte_anhaengen()
 
         self.fix: Optional[Fix] = None
         self.position: Optional[geo.Point] = None      # antenna, local metres
@@ -230,7 +247,31 @@ class Engine:
         self.field = field
         self.plane = geo.LocalPlane(field["datum_lat"], field["datum_lon"])
         self.coverage = CoverageMap(cell_size=0.5)
+        self._karte_anhaengen()
         self.line = None
+        self.plan = None
+        self.plan_id = None
+        self.plan_bahn = None
+        self._fortschritt = None
+        self.karte = None
+        self.karte_id = None
+        self.karte_lokal = None
+        self.sollwert = None
+        self.ausbringung = applikation_module.Ausbringung()
+        # Plan und Karte des Feldes kommen mit - auch die vom Traktor nebenan,
+        # denn beide stehen in der abgeglichenen Datenbank.
+        gespeicherter_plan = self.store.field_plan(field_id)
+        if gespeicherter_plan is not None and gespeicherter_plan.get("plan"):
+            try:
+                self._plan_uebernehmen(gespeicherter_plan)
+            except (KeyError, TypeError, ValueError):
+                self.note("Der abgelegte Plan ist unlesbar - bitte neu rechnen")
+        karten = self.store.list_maps(field_id)
+        if karten:
+            try:
+                self.karte_waehlen(karten[0]["id"])
+            except (KeyError, RuntimeError, TypeError, ValueError):
+                self.note("Die abgelegte Applikationskarte ist unlesbar")
         # Die Saisonspur zuerst: die Fahrgassen vom Säen sollen beim Düngen und
         # Spritzen wieder unter den Rädern liegen - das ganze Jahr, ohne dass
         # jemand daran denken muss. Sonst die zuletzt benutzte Spur.
@@ -242,6 +283,221 @@ class Engine:
             self.load_line(lines[0]["id"])
         self.note(f"Feld geladen: {field['name']}")
         return field
+
+    # -- Arbeitsplan --------------------------------------------------------
+
+    def _plan_grenze(self) -> list[geo.Point]:
+        if not self.field or len(self.field.get("boundary") or []) < 3:
+            raise RuntimeError("Ohne Feldgrenze lässt sich nichts planen - "
+                               "das Feld einmal umfahren oder ein Shapefile einlesen")
+        return [tuple(p) for p in self.field["boundary"]]
+
+    def plan_einstellungen(self, werte: Optional[dict] = None
+                           ) -> feldplan_module.PlanEinstellungen:
+        """Die Vorgaben für den Plan, aufgefüllt aus Maschine und Vorgewende.
+
+        Was der Fahrer nicht angibt, steht schon im System: die Arbeitsbreite im
+        Maschinenprofil, die Vorgewendetiefe in den Vorgewende-Einstellungen.
+        Zweimal dasselbe eintippen zu müssen ist die zuverlässigste Art, zwei
+        verschiedene Werte zu bekommen.
+        """
+        breite = max(0.5, self.profile.spacing_m)
+        grund = {
+            "arbeitsbreite_m": breite,
+            # In Arbeitsbreiten gerechnet, aber über tiefe_m - so gilt auch ein
+            # in Metern übersteuertes Vorgewende.
+            "vorgewende_breiten": self.headland.tiefe_m(breite) / breite,
+            "wenderadius_m": self.headland.radius_m,
+            "geschwindigkeit_kmh": 8.0,
+        }
+        grund.update(werte or {})
+        return feldplan_module.PlanEinstellungen.from_dict(grund)
+
+    def plan_rechnen(self, werte: Optional[dict] = None) -> dict:
+        """Einen Arbeitsplan rechnen, ablegen und laden."""
+        grenze = self._plan_grenze()
+        einstellungen = self.plan_einstellungen(werte)
+        self.plan = feldplan_module.planen(grenze, einstellungen)
+        self.plan_bahn = None
+        self._fortschritt = None
+        datensatz = self.store.save_plan({
+            "id": self.plan_id or storage.new_id(),
+            "field_id": self.field["id"],
+            "name": (f"{einstellungen.arbeitsbreite_m:g} m, "
+                     f"{self.plan.richtung_grad:.0f}°"),
+            "einstellungen": einstellungen.to_dict(),
+            "plan": self.plan.to_dict(),
+        })
+        self.plan_id = datensatz["id"]
+        self.note(f"Plan: {len(self.plan.bahnen)} Bahnen, "
+                  f"{self.plan.richtung_grad:.0f}°, "
+                  f"{self.plan.dauer_min:.0f} min")
+        return self.plan.to_dict()
+
+    def plan_laden(self, plan_id: str) -> dict:
+        datensatz = self.store.get_plan(plan_id)
+        if datensatz is None:
+            raise KeyError("Plan nicht gefunden")
+        self._plan_uebernehmen(datensatz)
+        return self.plan.to_dict()
+
+    def _plan_uebernehmen(self, datensatz: dict) -> None:
+        """Einen abgelegten Plan wieder zu Bahnen machen.
+
+        Gerechnet wird nicht neu: der Plan aus der Ablage ist derselbe, den der
+        Traktor nebenan vor sich hat, mit denselben Bahnnummern. Neu rechnen
+        würde bei einer inzwischen nachgemessenen Feldgrenze eine andere
+        Einteilung ergeben - und dann meinen zwei Fahrer mit "Bahn 12"
+        verschiedene Stellen im Feld.
+        """
+        roh = datensatz.get("plan") or {}
+        einstellungen = feldplan_module.PlanEinstellungen.from_dict(
+            roh.get("einstellungen") or datensatz.get("einstellungen"))
+        bahnen = [feldplan_module.Bahn(
+            nummer=int(b["nummer"]), spur=int(b["spur"]),
+            start=tuple(b["start"]), ende=tuple(b["ende"]),
+            richtung=float(b["richtung"]), laenge_m=float(b["laenge_m"]))
+            for b in roh.get("bahnen") or []]
+        self.plan = feldplan_module.Feldplan(
+            einstellungen=einstellungen,
+            richtung_grad=float(roh.get("richtung_grad", 0.0)),
+            automatisch=bool(roh.get("automatisch", False)),
+            bahnen=bahnen,
+            ringe=[[tuple(p) for p in ring] for ring in roh.get("ringe") or []],
+            feld_flaeche_ha=float(roh.get("feld_flaeche_ha", 0.0)),
+            bahnen_flaeche_ha=float(roh.get("bahnen_flaeche_ha", 0.0)),
+            vorgewende_flaeche_ha=float(roh.get("vorgewende_flaeche_ha", 0.0)),
+            arbeitsstrecke_m=float(roh.get("arbeitsstrecke_m", 0.0)),
+            wendestrecke_m=float(roh.get("wendestrecke_m", 0.0)),
+            ringstrecke_m=float(roh.get("ringstrecke_m", 0.0)),
+        )
+        self.plan_id = datensatz["id"]
+        self.plan_bahn = None
+        self._fortschritt = None
+
+    def plan_loeschen(self) -> None:
+        if self.plan_id:
+            self.store.delete_plan(self.plan_id)
+        self.plan = None
+        self.plan_id = None
+        self.plan_bahn = None
+        self._fortschritt = None
+        self.note("Plan verworfen")
+
+    def bahn_waehlen(self, nummer: int) -> dict:
+        """Eine geplante Bahn als Führungslinie übernehmen.
+
+        Die Bahn wird zur AB-Linie zwischen ihren beiden Enden - dieselbe
+        Führung wie bei einer selbst gesetzten Spur, nur dass A und B aus dem
+        Plan kommen. Gespeichert wird sie nicht: sie steht schon im Plan, und
+        eine zweite Kopie liefe ihm davon.
+        """
+        if self.plan is None:
+            raise RuntimeError("Kein Plan geladen")
+        bahn = self.plan.bahn(int(nummer))
+        if bahn is None:
+            raise KeyError(f"Bahn {nummer} steht nicht im Plan")
+        self.line = GuidanceLine(
+            "ab", [bahn.start, bahn.ende], self.profile.spacing_m,
+            name=f"Bahn {bahn.nummer}", line_id="", derived=True)
+        self.plan_bahn = bahn.nummer
+        self.note(f"Bahn {bahn.nummer} von {len(self.plan.bahnen)}")
+        return self.line.to_dict()
+
+    def naechste_bahn(self) -> dict:
+        """Die nächstgelegene offene Bahn übernehmen."""
+        stand = self.plan_fortschritt(neu=True)
+        if stand is None or stand.naechste is None:
+            raise RuntimeError("Keine offene Bahn mehr - das Feld ist durch")
+        return self.bahn_waehlen(stand.naechste)
+
+    def plan_fortschritt(self, neu: bool = False
+                         ) -> Optional[feldplan_module.Planfortschritt]:
+        """Wie weit der Plan abgearbeitet ist - höchstens alle zwei Sekunden neu.
+
+        Das Auszählen kostet je Bahn ein paar Dutzend Abfragen an die
+        bearbeitete Fläche. Bei achtzig Bahnen ist das nichts, was zehnmal je
+        Sekunde passieren muss: der Fortschritt ändert sich im Takt der
+        Traktorgeschwindigkeit, nicht im Takt des Empfängers.
+        """
+        if self.plan is None:
+            return None
+        jetzt = time.time()
+        if neu or self._fortschritt is None or jetzt - self._fortschritt_zeit > 2.0:
+            self._fortschritt = feldplan_module.fortschritt(
+                self.plan, self.coverage.is_covered,
+                ab_position=self.tool_position)
+            self._fortschritt_zeit = jetzt
+        return self._fortschritt
+
+    # -- Applikationskarte --------------------------------------------------
+
+    def _karte_anhaengen(self) -> None:
+        """Die Buchung der Ausbringung an die Flächenkarte hängen."""
+        self.coverage.on_new_cell = self._zelle_gebucht
+
+    def _zelle_gebucht(self, zelle: tuple[int, int]) -> None:
+        if self.karte_lokal is None or self.job is None:
+            return
+        kante = self.coverage.cell_size
+        mitte = ((zelle[0] + 0.5) * kante, (zelle[1] + 0.5) * kante)
+        self.ausbringung.buchen(self.karte_lokal.wert_bei(mitte), kante * kante)
+
+    def karte_waehlen(self, map_id: str) -> dict:
+        datensatz = self.store.get_map(map_id)
+        if datensatz is None:
+            raise KeyError("Applikationskarte nicht gefunden")
+        if self.plane is None:
+            raise RuntimeError("Erst ein Feld laden")
+        self.karte = applikation_module.Applikationskarte.from_dict(datensatz["daten"])
+        self.karte_id = datensatz["id"]
+        self.karte_lokal = self.karte.binden(self.plane)
+        self.ausbringung = applikation_module.Ausbringung(einheit=self.karte.einheit)
+        self.note(f"Applikationskarte: {self.karte.name}")
+        return self.karte_uebersicht()
+
+    def karte_entfernen(self) -> None:
+        self.karte = None
+        self.karte_id = None
+        self.karte_lokal = None
+        self.sollwert = None
+        self.note("Applikationskarte abgewählt")
+
+    def karte_speichern(self, karte: "applikation_module.Applikationskarte") -> dict:
+        """Eine frisch eingelesene Karte ablegen und gleich verwenden."""
+        if self.field is None:
+            raise RuntimeError("Erst ein Feld laden")
+        datensatz = self.store.save_map({
+            "field_id": self.field["id"],
+            "name": karte.name,
+            "einheit": karte.einheit,
+            "quelle": karte.quelle,
+            "daten": karte.to_dict(),
+        })
+        self.karte_waehlen(datensatz["id"])
+        return datensatz
+
+    def karte_uebersicht(self) -> dict:
+        """Karte, geplante Mengen fürs Feld und der Stand der Ausbringung."""
+        if self.karte is None or self.karte_lokal is None:
+            return {"aktiv": False}
+        geplant = {}
+        if self.field and len(self.field.get("boundary") or []) >= 3:
+            geplant = applikation_module.kennzahlen(
+                self.karte_lokal, [tuple(p) for p in self.field["boundary"]])
+        return {
+            "aktiv": True,
+            "id": self.karte_id,
+            "name": self.karte.name,
+            "einheit": self.karte.einheit,
+            "quelle": self.karte.quelle,
+            "art": self.karte.art,
+            "hinweise": list(self.karte.hinweise),
+            "geplant": geplant,
+            "ausgebracht": self.ausbringung.to_dict(),
+            "abgleich": (applikation_module.abgleich(geplant, self.ausbringung)
+                         if geplant else None),
+        }
 
     def import_fields(self, umrisse: list) -> list[dict]:
         """Felder aus einem Shapefile anlegen - eines je Fläche.
@@ -635,6 +891,8 @@ class Engine:
         )
         self.distance_m = 0.0
         self.working_time_s = 0.0
+        self.ausbringung = applikation_module.Ausbringung(
+            einheit=self.karte.einheit if self.karte else "")
         self.note(f"Arbeit gestartet{': ' + operation if operation else ''}")
         return self.job
 
@@ -650,6 +908,11 @@ class Engine:
             overlap_ha=self.coverage.overlap_m2 / 10_000.0,
             working_time_s=self.working_time_s,
             coverage=self.coverage.pack(),
+            map_id=self.karte_id,
+            plan_id=self.plan_id,
+            ausbringung=(json.dumps(self.ausbringung.to_dict())
+                         if self.ausbringung.nach_wert or self.ausbringung.ohne_wert_m2
+                         else ""),
         )
         job = self.store.get_job(self.job["id"])
         self.job = None
@@ -729,6 +992,9 @@ class Engine:
 
         self._update_headland()
         self._update_guidance(fix)
+        # Erst nachschlagen, dann markieren: dann zeigt die Kabine denselben
+        # Sollwert, den die Buchung für diesen Schritt verwendet.
+        self._update_sollwert()
         self._update_coverage(previous_implement if plausible else None)
         self._update_steering(fix)
         self._record_track(fix, now)
@@ -849,6 +1115,19 @@ class Engine:
         if self.steer_position is not None and self.position is not None:
             return self.steer_position
         return self.tool_position
+
+    def _update_sollwert(self) -> None:
+        """Den Sollwert an der Stelle des Geräts nachschlagen.
+
+        Am Gerät, nicht an der Antenne: ausgebracht wird dort, wo der Streuer
+        ist, und bei einem gezogenen Gerät liegen zwischen beiden in der Kurve
+        mehrere Meter - genug, um an der Zonengrenze die falsche Menge zu
+        nehmen.
+        """
+        if self.karte_lokal is None or self.implement_position is None:
+            self.sollwert = None
+            return
+        self.sollwert = self.karte_lokal.wert_bei(self.implement_position)
 
     def _update_coverage(self, previous_implement: Optional[geo.Point]) -> None:
         """Mark the ground swept since the previous position.
@@ -1035,7 +1314,41 @@ class Engine:
                 "compensation": self.config.imu.terrain_compensation,
             } if self.imu is not None else None),
             "steering": self.steering.status() if self.steering else None,
+            "plan": self._plan_state(),
+            "applikation": self._applikation_state(),
             "messages": self.messages[-6:],
+        }
+
+    def _plan_state(self) -> Optional[dict]:
+        """Der Plan fürs Bild: Bahnen, Ringe, Fortschritt, aktuelle Bahn."""
+        if self.plan is None:
+            return None
+        stand = self.plan_fortschritt()
+        return {
+            **self.plan.to_dict(),
+            "id": self.plan_id,
+            "bahn": self.plan_bahn,
+            "fortschritt": stand.to_dict() if stand else None,
+        }
+
+    def _applikation_state(self) -> dict:
+        """Der Sollwert fürs Bild - jede Position neu, ohne die großen Zahlen.
+
+        Die Mengenrechnung fürs ganze Feld steht bewusst nicht hier: sie tastet
+        das Feld ab und hat in einem Bild, das zehnmal je Sekunde über die
+        Leitung geht, nichts zu suchen. Die holt sich die Oberfläche einzeln
+        über ``karte_uebersicht``.
+        """
+        if self.karte is None:
+            return {"aktiv": False}
+        return {
+            "aktiv": True,
+            "id": self.karte_id,
+            "name": self.karte.name,
+            "einheit": self.karte.einheit,
+            "art": self.karte.art,
+            "sollwert": self.sollwert,
+            "ausgebracht": self.ausbringung.to_dict(),
         }
 
     def _require_position(self) -> None:

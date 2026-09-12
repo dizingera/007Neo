@@ -168,7 +168,7 @@ class Feldplan:
     bahnen: list[Bahn]
     ringe: list[list[Point]] = datenfeld(default_factory=list)
     feld_flaeche_ha: float = 0.0
-    kern_flaeche_ha: float = 0.0
+    bahnen_flaeche_ha: float = 0.0     # was die Bahnen abdecken, mit Überstand
     vorgewende_flaeche_ha: float = 0.0
     arbeitsstrecke_m: float = 0.0
     wendestrecke_m: float = 0.0
@@ -205,7 +205,7 @@ class Feldplan:
             "bahnen": [b.to_dict() for b in self.bahnen],
             "ringe": [[list(p) for p in r] for r in self.ringe],
             "feld_flaeche_ha": round(self.feld_flaeche_ha, 3),
-            "kern_flaeche_ha": round(self.kern_flaeche_ha, 3),
+            "bahnen_flaeche_ha": round(self.bahnen_flaeche_ha, 3),
             "vorgewende_flaeche_ha": round(self.vorgewende_flaeche_ha, 3),
             "spuren": self.spuren,
             "bahnen_anzahl": len(self.bahnen),
@@ -322,7 +322,7 @@ def _spur_bereich(grenze: Sequence[Point], richtung: float) -> tuple[float, floa
 
 
 def _abschnitte_im_feld(v: float, uv_grenze: Sequence[tuple[float, float]]
-                        ) -> list[tuple[float, float]]:
+                        ) -> list[tuple[tuple[float, float], tuple[float, float]]]:
     """Wo liegt die Parallele im Abstand ``v`` innerhalb der Feldgrenze?
 
     Exakt gerechnet, nicht abgetastet: die Grenze ist ein Streckenzug, und wo
@@ -334,14 +334,25 @@ def _abschnitte_im_feld(v: float, uv_grenze: Sequence[tuple[float, float]]
     Das ist der schnelle Vorfilter: er sagt, *wo überhaupt* abgetastet werden
     muss, und beim Suchen der Arbeitsrichtung ersetzt er das Abtasten ganz.
     Übergeben wird die Grenze bereits in Bahnkoordinaten (längs, quer).
+
+    Zu jedem Durchstoßpunkt steht der Sinus des Winkels, unter dem die Bahn auf
+    die Kante trifft - den braucht die Bewertung, um das Vorgewende schräg
+    richtig abzuziehen.
     """
-    kreuzungen: list[float] = []
+    kreuzungen: list[tuple[float, float]] = []
     n = len(uv_grenze)
     for i in range(n):
         u1, v1 = uv_grenze[i]
         u2, v2 = uv_grenze[(i + 1) % n]
         if (v1 > v) != (v2 > v):
-            kreuzungen.append(u1 + (v - v1) * (u2 - u1) / (v2 - v1))
+            u = u1 + (v - v1) * (u2 - u1) / (v2 - v1)
+            # Wie schräg die Bahn auf diese Kante trifft. Der Sinus des Winkels
+            # zwischen beiden ist |dv| / Kantenlänge - und genau der sagt
+            # später, wie viele Meter längs der Bahn ein Meter Abstand zur
+            # Kante kostet.
+            laenge = math.hypot(u2 - u1, v2 - v1)
+            sinus = abs(v2 - v1) / laenge if laenge > 0.0 else 1.0
+            kreuzungen.append((u, sinus))
     kreuzungen.sort()
     return [(kreuzungen[i], kreuzungen[i + 1])
             for i in range(0, len(kreuzungen) - 1, 2)]
@@ -355,22 +366,33 @@ def _bahnkoordinaten(grenze: Sequence[Point],
              p[0] * quer[0] + p[1] * quer[1]) for p in grenze]
 
 
-def _spurabstaende(uv_grenze: Sequence[tuple[float, float]],
-                   breite: float) -> list[float]:
-    """Die Querabstände der Parallelspuren.
+def _spurabstaende(uv_grenze: Sequence[tuple[float, float]], breite: float,
+                   tiefe_m: float) -> list[float]:
+    """Die Querabstände der Parallelspuren - mittig über den Kern gelegt.
 
-    Die erste Spur liegt eine halbe Arbeitsbreite hinter dem Rand des Feldes -
-    so deckt die Bahn den Streifen bis zum Rand ab, statt mit der Mitte auf dem
-    Rand zu liegen und die Hälfte zu vergeuden.
+    Der naheliegende Weg wäre, am Feldrand anzufangen und alle ``breite`` Meter
+    eine Spur zu setzen. Das geht schief, sobald ein Vorgewende im Spiel ist:
+    die äußeren Spuren liegen dann ganz im Randstreifen, und wo das Band endet,
+    entscheidet der Zufall. Zwei Arbeitsrichtungen, die sich um zwei Grad
+    unterscheiden, bekommen so verschieden viele Bahnen - und die Suche nach
+    der besten Richtung wählt die, bei der zufällig eine Bahn herausfällt und
+    ein Streifen unbearbeitet bleibt.
+
+    Deshalb spannt das Band nicht über das Feld, sondern über den **Kern**, und
+    liegt mittig darin: der Überstand verteilt sich auf beide Seiten, statt
+    sich an einem Rand zu sammeln. Die Anzahl der Bahnen hängt damit nur noch
+    an der Breite des Kerns quer zur Fahrtrichtung - genau der Größe, um die es
+    bei der Wahl der Richtung geht.
     """
     vs = [v for _, v in uv_grenze]
-    v_von, v_bis = min(vs), max(vs)
-    abstaende = []
-    v = v_von + breite / 2.0
-    while v <= v_bis:
-        abstaende.append(v)
-        v += breite
-    return abstaende
+    v_von, v_bis = min(vs) + tiefe_m, max(vs) - tiefe_m
+    if v_bis < v_von:
+        return []
+    spanne = v_bis - v_von
+    anzahl = max(1, math.ceil(spanne / breite - 1e-9))
+    ueberstand = anzahl * breite - spanne
+    start = v_von - ueberstand / 2.0 + breite / 2.0
+    return [start + k * breite for k in range(anzahl)]
 
 
 def bahnen_fuer(grenze: Sequence[Point], richtung: float, breite: float,
@@ -381,8 +403,8 @@ def bahnen_fuer(grenze: Sequence[Point], richtung: float, breite: float,
     uv = _bahnkoordinaten(grenze, richtung)
     min_laenge = breite * MIN_BAHN_FAKTOR
     ergebnis: list[tuple[int, Point, Point]] = []
-    for spur, v in enumerate(_spurabstaende(uv, breite)):
-        for u_von, u_bis in _abschnitte_im_feld(v, uv):
+    for spur, v in enumerate(_spurabstaende(uv, breite, tiefe_m)):
+        for (u_von, _), (u_bis, _) in _abschnitte_im_feld(v, uv):
             for anfang, ende in _spur_stuecke(v, richtung, grenze, tiefe_m,
                                               u_von, u_bis, min_laenge):
                 ergebnis.append((spur, anfang, ende))
@@ -410,19 +432,35 @@ def _bewerten(grenze: Sequence[Point], richtung: float, breite: float,
     würden.
 
     Gerechnet wird ohne Abtasten - nur der exakte Schnitt mit der Feldgrenze,
-    an beiden Enden um die Vorgewendetiefe gekürzt. Für den Vergleich von
-    Dutzenden Richtungen genügt das und kostet statt Sekunden nichts; die
-    genaue Geometrie entsteht erst, wenn der Sieger feststeht.
+    an beiden Enden ums Vorgewende gekürzt. Für den Vergleich von Dutzenden
+    Richtungen genügt das und kostet statt Sekunden nichts; die genaue
+    Geometrie entsteht erst, wenn der Sieger feststeht.
+
+    Zwei Dinge muss diese Abkürzung trotzdem richtig machen, sonst wählt sie
+    den falschen Winkel:
+
+    * **Schräg kostet mehr.** Trifft die Bahn unter einem flachen Winkel auf
+      den Feldrand, sind bis zum Vorgewendeabstand mehr Meter zu fahren als die
+      Tiefe selbst - genau ``tiefe / sin(Winkel)``. Pauschal die Tiefe
+      abzuziehen macht schräge Bahnen künstlich lang.
+    * **Kurze Bahnen werden mitgezählt, nicht weggelassen.** Der fertige Plan
+      lässt einen Stummel unter einer halben Arbeitsbreite aus - der wird beim
+      Vorgewende mitgenommen. Täte die Bewertung dasselbe, würde sie genau die
+      Richtungen belohnen, bei denen Bahnen aus der Zählung fallen: weniger
+      Bahnen auf dem Papier, ein unbearbeiteter Streifen im Feld. Gezählt wird
+      hier deshalb jedes Stück, das überhaupt Länge hat.
     """
     uv = _bahnkoordinaten(grenze, richtung)
-    min_laenge = breite * MIN_BAHN_FAKTOR
     anzahl, gesamt = 0, 0.0
-    for v in _spurabstaende(uv, breite):
-        for u_von, u_bis in _abschnitte_im_feld(v, uv):
-            laenge = (u_bis - u_von) - 2.0 * tiefe_m
-            if laenge >= min_laenge:
-                anzahl += 1
-                gesamt += laenge
+    for v in _spurabstaende(uv, breite, tiefe_m):
+        for (u_von, sin_von), (u_bis, sin_bis) in _abschnitte_im_feld(v, uv):
+            anfang = u_von + (tiefe_m / sin_von if sin_von > 1e-9 else tiefe_m)
+            ende = u_bis - (tiefe_m / sin_bis if sin_bis > 1e-9 else tiefe_m)
+            laenge = ende - anfang
+            if laenge <= 0.0:
+                continue
+            anzahl += 1
+            gesamt += laenge
     if anzahl == 0:
         return (10 ** 6, 0.0)
     return (anzahl, round(gesamt, 3))
@@ -591,11 +629,12 @@ def planen(grenze: Sequence[Point],
     ringe = vorgewende_ringe(grenze, breite, tiefe)
     arbeitsstrecke = sum(b.laenge_m for b in bahnen)
     feld_flaeche = polygon_area(grenze) / 10_000.0
-    # Die Kernfläche aus den Bahnen: jede Bahn deckt ihre Länge mal die
-    # Arbeitsbreite ab. Genau das wird auch wirklich bearbeitet - eine aus dem
-    # versetzten Vieleck gerechnete Fläche wäre glatter, aber nicht das, was
-    # die Maschine hinterlässt.
-    kern_flaeche = min(feld_flaeche, arbeitsstrecke * breite / 10_000.0)
+    # Was die Bahnen abdecken: Länge mal Arbeitsbreite. Bewusst nicht
+    # "Kernfläche" genannt - das Bahnband liegt mittig über dem Kern und ragt
+    # an beiden Seiten ein Stück ins Vorgewende hinein. Dieser Streifen wird
+    # wirklich zweimal befahren, also gehört er in die Zahl, die sagt, was die
+    # Maschine hinterlässt.
+    bahnen_flaeche = min(feld_flaeche, arbeitsstrecke * breite / 10_000.0)
 
     return Feldplan(
         einstellungen=einstellungen,
@@ -604,8 +643,8 @@ def planen(grenze: Sequence[Point],
         bahnen=bahnen,
         ringe=ringe,
         feld_flaeche_ha=feld_flaeche,
-        kern_flaeche_ha=kern_flaeche,
-        vorgewende_flaeche_ha=max(0.0, feld_flaeche - kern_flaeche),
+        bahnen_flaeche_ha=bahnen_flaeche,
+        vorgewende_flaeche_ha=max(0.0, feld_flaeche - bahnen_flaeche),
         arbeitsstrecke_m=arbeitsstrecke,
         wendestrecke_m=_wendestrecke(bahnen, einstellungen.wenderadius_m),
         ringstrecke_m=sum(polygon_perimeter(r) for r in ringe),
