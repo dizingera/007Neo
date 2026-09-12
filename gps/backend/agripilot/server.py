@@ -348,6 +348,18 @@ def create_app(config=None) -> FastAPI:
     async def _shutdown() -> None:
         await application.stop()
 
+    # Was über die Schnittstelle hereinkommt, kommt aus dem Netz - auch aus
+    # einem Netz, in dem ein Traktor, ein Handy und der Hofrechner hängen. Ein
+    # Pi hat zwei Gigabyte; eine Datei, die das sprengt, ist keine Feldgrenze
+    # und keine Applikationskarte, sondern ein Versehen oder ein Versuch.
+    DATEI_MAX = 20_000_000
+
+    def _groesse_pruefen(was: str, daten: Optional[bytes]) -> None:
+        if daten is not None and len(daten) > DATEI_MAX:
+            raise HTTPException(
+                400, f"{was} ist größer als {DATEI_MAX // 1_000_000} MB - "
+                     "das ist keine Feldkarte")
+
     def ok(payload: Any = None) -> JSONResponse:
         return JSONResponse({"ok": True, "data": payload})
 
@@ -418,8 +430,7 @@ def create_app(config=None) -> FastAPI:
             raise HTTPException(400, f"Dateien nicht lesbar: {exc}") from exc
         if not shp:
             raise HTTPException(400, "Die .shp-Datei fehlt")
-        if len(shp) > 20_000_000:
-            raise HTTPException(400, "Die .shp-Datei ist größer als 20 MB - das ist kein Feld")
+        _groesse_pruefen("Die .shp-Datei", shp)
         prj = payload.get("prj") or None
         try:
             umrisse = shapefile_module.lesen(shp, dbf, prj)
@@ -554,10 +565,17 @@ def create_app(config=None) -> FastAPI:
             roh = payload.get(schluessel)
             if not roh:
                 return None
+            # Erst die kodierte Länge prüfen, dann dekodieren: das Dekodieren
+            # selbst legt die ganze Datei noch einmal in den Speicher, und
+            # genau das soll bei einer sinnlos großen Datei nicht passieren.
+            if isinstance(roh, str) and len(roh) > DATEI_MAX // 3 * 4 + 8:
+                raise HTTPException(400, f"{schluessel}: zu groß")
             try:
-                return base64.b64decode(roh)
+                daten = base64.b64decode(roh)
             except (ValueError, TypeError) as exc:
                 raise HTTPException(400, f"{schluessel} nicht lesbar: {exc}") from exc
+            _groesse_pruefen(schluessel, daten)
+            return daten
 
         name = str(payload.get("name") or "")
         einheit = payload.get("einheit") or None
@@ -574,8 +592,10 @@ def create_app(config=None) -> FastAPI:
                     name=name, einheit=einheit,
                     aufgabe=payload.get("aufgabe") or None)
             elif payload.get("geojson"):
+                text = str(payload["geojson"])
+                _groesse_pruefen("Das GeoJSON", text.encode("utf-8", "ignore"))
                 karte = applikation_module.aus_geojson(
-                    str(payload["geojson"]), payload.get("eigenschaft") or None,
+                    text, payload.get("eigenschaft") or None,
                     name=name, einheit=einheit or "kg/ha")
             elif payload.get("shp"):
                 karte = applikation_module.aus_shapefile(
@@ -599,12 +619,16 @@ def create_app(config=None) -> FastAPI:
     async def karte_spalten(payload: dict = Body(...)):
         """Welche Spalten einer .dbf als Sollwert taugen - für die Auswahl."""
         import base64
+        roh = payload.get("dbf") or ""
+        if isinstance(roh, str) and len(roh) > DATEI_MAX // 3 * 4 + 8:
+            raise HTTPException(400, "dbf: zu groß")
         try:
-            dbf = base64.b64decode(payload.get("dbf") or "")
+            dbf = base64.b64decode(roh)
         except (ValueError, TypeError) as exc:
             raise HTTPException(400, f"dbf nicht lesbar: {exc}") from exc
         if not dbf:
             raise HTTPException(400, "Die .dbf-Datei fehlt")
+        _groesse_pruefen("Die .dbf-Datei", dbf)
         try:
             return ok({"spalten": applikation_module.wertespalten(dbf)})
         except (struct.error, IndexError, ValueError) as exc:

@@ -4232,6 +4232,32 @@ class ApplikationIsoXmlTest(unittest.TestCase):
         self.assertTrue(any("nicht hinterlegt" in h
                             for h in karte_sechzehn.hinweise))
 
+    def test_entartete_zellgroessen_werden_abgelehnt(self):
+        """Null, negativ, ein Grad: die Karte sieht aus, als wäre sie da.
+
+        Bei null liefert sie überall "kein Wert", bei negativ liegt sie
+        gespiegelt, bei einem Grad deckt eine Zelle hundert Kilometer ab.
+        Alle drei laufen ohne diese Prüfung durch und fallen erst im Feld auf.
+        """
+        roh = struct.pack("<4i", 15000, 15000, 12000, 18000)
+        for name, lat_s, lon_s in (("null", 0.0, 0.0001),
+                                   ("negativ", -0.0001, 0.0001),
+                                   ("ein Grad", 1.0, 0.0001),
+                                   ("winzig", 1e-12, 0.0001),
+                                   ("Ost entartet", 0.0001, 0.0)):
+            with self.subTest(name):
+                with self.assertRaises(applikation.KartenFehler) as fehler:
+                    applikation.aus_isoxml(
+                        _isoxml(2, 2, lat_schritt=lat_s, lon_schritt=lon_s),
+                        {"GRD00001.BIN": roh})
+                self.assertIn("Zellgröße", str(fehler.exception))
+
+        # Und eine übliche Zellgröße geht durch.
+        karte = applikation.aus_isoxml(
+            _isoxml(2, 2, lat_schritt=0.0001, lon_schritt=0.00015),
+            {"GRD00001.BIN": roh})
+        self.assertEqual(karte.art, "raster")
+
     def test_uebergrosses_raster_wird_abgelehnt(self):
         with self.assertRaises(applikation.KartenFehler) as fehler:
             applikation.aus_isoxml(_isoxml(3000, 3000), {"GRD00001.BIN": b""})
@@ -4411,6 +4437,61 @@ class ApplikationNachschlagenTest(unittest.TestCase):
         loch = [(0.0, 0.0), (300.0, 0.0), (300.0, 200.0), (0.0, 200.0)]
         zahlen = applikation.kennzahlen(self.lokal, loch, raster_m=2.0)
         self.assertAlmostEqual(zahlen["ohne_wert_ha"], 2.0, delta=0.06)
+
+    def test_viele_zonen_bleiben_im_fahren_bezahlbar(self):
+        """Die Abfrage darf nicht an der Zahl der Zonen hängen.
+
+        Eine aus einem Satellitenbild abgeleitete Karte hat schnell Tausende
+        Zonen. Ohne die Fächer kostet das Millisekunden je Abfrage - zehnmal
+        je Sekunde, in derselben Schleife, in der die Lenkung rechnet.
+        """
+        def karte_mit(anzahl):
+            zonen = [applikation.Zone(
+                100.0 + i % 50,
+                [self.ebene.to_wgs(x, y) for x, y in
+                 [(i * 3.0, 0.0), (i * 3.0 + 3, 0.0),
+                  (i * 3.0 + 3, 3.0), (i * 3.0, 3.0)]])
+                for i in range(anzahl)]
+            return applikation.Applikationskarte(
+                name="viele", einheit="kg/ha", zonen=zonen).binden(self.ebene)
+
+        klein, gross = karte_mit(20), karte_mit(4000)
+        # Erst die Antworten: das Gitter darf nichts an ihnen ändern.
+        for lokal in (klein, gross):
+            self.assertAlmostEqual(lokal.wert_bei((1.5, 1.5)), 100.0)
+            self.assertIsNone(lokal.wert_bei((-500.0, -500.0)))
+        self.assertAlmostEqual(gross.wert_bei((3000 * 3.0 + 1.5, 1.5)),
+                               100.0 + 3000 % 50)
+
+        def dauer(lokal, punkt, runden=400):
+            start = time.perf_counter()
+            for _ in range(runden):
+                lokal.wert_bei(punkt)
+            return (time.perf_counter() - start) / runden
+
+        # Zweihundertmal so viele Zonen dürfen die Abfrage nicht um das
+        # Zweihundertfache verteuern. Großzügig gefasst, damit der Test nicht
+        # an der Tagesform der Maschine hängt - er soll die Größenordnung
+        # festhalten, nicht eine Zahl.
+        self.assertLess(dauer(gross, (-500.0, -500.0)),
+                        max(dauer(klein, (-500.0, -500.0)) * 10, 0.0002))
+
+    def test_das_fach_aendert_die_antwort_nicht(self):
+        """Eine feldgroße Zone liegt in zu vielen Fächern und wird immer geprüft."""
+        gross = applikation.Zone(80.0, [self.ebene.to_wgs(x, y) for x, y in
+                                        [(-5000, -5000), (5000, -5000),
+                                         (5000, 5000), (-5000, 5000)]])
+        klein = applikation.Zone(150.0, [self.ebene.to_wgs(x, y) for x, y in
+                                         [(0, 0), (50, 0), (50, 50), (0, 50)]])
+        # Reihenfolge in der Datei entscheidet: die erste passende Zone gewinnt.
+        zuerst_klein = applikation.Applikationskarte(
+            name="a", einheit="kg/ha", zonen=[klein, gross]).binden(self.ebene)
+        zuerst_gross = applikation.Applikationskarte(
+            name="b", einheit="kg/ha", zonen=[gross, klein]).binden(self.ebene)
+        self.assertAlmostEqual(zuerst_klein.wert_bei((25.0, 25.0)), 150.0)
+        self.assertAlmostEqual(zuerst_gross.wert_bei((25.0, 25.0)), 80.0)
+        # Und außerhalb der kleinen Zone gilt überall die große.
+        self.assertAlmostEqual(zuerst_klein.wert_bei((900.0, 900.0)), 80.0)
 
     def test_rundlauf_durch_die_ablage(self):
         wieder = applikation.Applikationskarte.from_dict(self.karte.to_dict())
@@ -4901,6 +4982,32 @@ class ApplikationApiTest(unittest.TestCase):
                 daten = antwort.json()["data"]
                 self.assertTrue(any("Faktor" in h for h in daten["hinweise"]))
                 self.assertEqual(daten["uebersicht"]["einheit"], "kg/ha")
+
+    def test_zu_grosse_dateien_werden_abgewiesen(self):
+        """Ein Pi hat zwei Gigabyte. Was das sprengt, ist keine Feldkarte.
+
+        Geprüft wird schon an der kodierten Länge: das Dekodieren legt die
+        Datei noch einmal in den Speicher, und genau das soll bei einer
+        sinnlos großen Datei nicht mehr passieren.
+        """
+        with tempfile.TemporaryDirectory() as ordner:
+            with self._client(ordner) as client:
+                client.post("/api/fields", json={"name": "Kartenfeld"})
+                riesig = "A" * 40_000_000     # gut 30 MB nach dem Dekodieren
+
+                antwort = client.post("/api/karte/import",
+                                      json={"taskdata": riesig, "raster": "AAAA"})
+                self.assertEqual(antwort.status_code, 400)
+                self.assertIn("groß", antwort.json()["detail"])
+
+                antwort = client.post("/api/karte/import",
+                                      json={"geojson": "x" * 25_000_000})
+                self.assertEqual(antwort.status_code, 400)
+                self.assertIn("größer", antwort.json()["detail"])
+
+                antwort = client.post("/api/karte/spalten", json={"dbf": riesig})
+                self.assertEqual(antwort.status_code, 400)
+                self.assertIn("groß", antwort.json()["detail"])
 
     def test_spaltenauswahl_fuer_shapefile_karten(self):
         with tempfile.TemporaryDirectory() as ordner:

@@ -41,7 +41,7 @@ import math
 import struct
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field as datenfeld
-from typing import Any, Optional, Sequence
+from typing import Any, Iterable, Optional, Sequence
 
 from . import shapefile
 from .geo import LocalPlane, Point, point_in_polygon, polygon_area
@@ -233,14 +233,29 @@ class Applikationskarte:
 # ---------------------------------------------------------------------------
 
 
+# Kantenlänge der Fächer, in die die Zonen einsortiert werden. Fünfzig Meter
+# sind grob genug, dass eine übliche Karte in wenige hundert Fächer fällt, und
+# fein genug, dass in einem Fach selten mehr als eine Handvoll Zonen liegt.
+FACH_M = 50.0
+
+
 class LokaleKarte:
     """Die Karte in der Meter-Ebene des Feldes - nur noch nachschlagen.
 
-    Der Zonenfall bekommt je Zone ein umschließendes Rechteck vorweg: die
-    Prüfung, ob ein Punkt in einem Vieleck liegt, kostet über alle Kanten, das
-    Rechteck kostet vier Vergleiche und wirft die allermeisten Zonen sofort
-    hinaus. Bei einer Karte mit dreißig Zonen ist das der Unterschied zwischen
-    spürbar und unmerklich.
+    Zwei Stufen, damit die Abfrage nicht an der Zahl der Zonen hängt:
+
+    1. **Fächer.** Das Feld wird in ein grobes Gitter geteilt, und jede Zone
+       wird in die Fächer eingetragen, die ihr umschließendes Rechteck berührt.
+       Eine Abfrage sieht nur in ihr Fach - aus "alle Zonen durchgehen" wird
+       "die zwei, die hier überhaupt in Frage kommen".
+    2. **Rechteck, dann Vieleck.** In einem Fach wird erst das umschließende
+       Rechteck geprüft (vier Vergleiche), und nur wer das besteht, wird gegen
+       seine Kanten gerechnet.
+
+    Das ist nicht Zierde. Ohne die Fächer kostet eine Karte mit 20 000 Zonen -
+    wie sie aus einem Satellitenbild fällt - zwei Millisekunden je Abfrage; bei
+    zehn Positionen je Sekunde ist ein Pi damit ausgelastet, und zwar in
+    derselben Schleife, in der die Lenkung rechnet.
     """
 
     def __init__(self, karte: Applikationskarte, ebene: LocalPlane) -> None:
@@ -259,6 +274,9 @@ class LokaleKarte:
             ys = [p[1] for p in ring]
             self.zonen.append((zone.wert, ring,
                                (min(xs), min(ys), max(xs), max(ys))))
+        self._faecher: dict[tuple[int, int], list[int]] = {}
+        self._ueberall: list[int] = []
+        self._faecher_bauen()
 
         self.raster = karte.raster
         if self.raster is not None:
@@ -270,6 +288,36 @@ class LokaleKarte:
             # Die Projektion ist über ein Feld hinweg linear, also bleibt das
             # Gitter ein Gitter: aus Grad-Schritten werden feste Meter-Schritte.
             self._schritt = (ost1 - ost0, nord1 - nord0)
+
+    def _faecher_bauen(self) -> None:
+        """Jede Zone in die Fächer eintragen, die ihr Rechteck berührt.
+
+        Eine Zone, die über sehr viele Fächer reicht, wandert stattdessen in
+        ``_ueberall`` und wird bei jeder Abfrage geprüft. Sonst würde eine
+        einzige feldgroße Zone in Tausende Fächer geschrieben, und das Gitter
+        kostete mehr Speicher, als es an Zeit spart.
+        """
+        for index, (_, _, (x0, y0, x1, y1)) in enumerate(self.zonen):
+            von_x, bis_x = int(x0 // FACH_M), int(x1 // FACH_M)
+            von_y, bis_y = int(y0 // FACH_M), int(y1 // FACH_M)
+            anzahl = (bis_x - von_x + 1) * (bis_y - von_y + 1)
+            if anzahl > 256:
+                self._ueberall.append(index)
+                continue
+            for ix in range(von_x, bis_x + 1):
+                for iy in range(von_y, bis_y + 1):
+                    self._faecher.setdefault((ix, iy), []).append(index)
+
+    def _kandidaten(self, punkt: Point) -> Iterable[int]:
+        fach = (int(punkt[0] // FACH_M), int(punkt[1] // FACH_M))
+        treffer = self._faecher.get(fach)
+        if not self._ueberall:
+            return treffer or ()
+        if not treffer:
+            return self._ueberall
+        # Nach Reihenfolge in der Datei, damit die erste passende Zone
+        # dieselbe ist wie ohne Fächer - sonst hinge der Wert an der Sortierung.
+        return sorted(treffer + self._ueberall)
 
     def wert_bei(self, punkt: Point) -> Optional[float]:
         """Der Sollwert an dieser Stelle, oder None außerhalb der Karte."""
@@ -283,7 +331,8 @@ class LokaleKarte:
             wert = self.raster.wert(zeile, spalte)
             return self.standardwert if wert is None else wert
 
-        for wert, ring, (x0, y0, x1, y1) in self.zonen:
+        for index in self._kandidaten(punkt):
+            wert, ring, (x0, y0, x1, y1) = self.zonen[index]
             if x0 <= punkt[0] <= x1 and y0 <= punkt[1] <= y1 and \
                     point_in_polygon(punkt, ring):
                 return self.standardwert if wert is None else wert
@@ -571,6 +620,18 @@ def aus_isoxml(taskdata: bytes, raster_dateien: dict[str, bytes],
 
     if spalten <= 0 or zeilen <= 0:
         raise KartenFehler("Das Raster hat keine Zellen")
+    # Entartete Zellgrößen still durchzulassen ist die unangenehmste Art zu
+    # scheitern: bei null liefert die Karte überall "kein Wert", bei negativ
+    # liegt sie gespiegelt, und bei einem Grad deckt eine Zelle hundert
+    # Kilometer ab. In allen drei Fällen sieht die Karte aus, als wäre sie da.
+    # Nicht "name" als Schleifenvariable: das ist der Parameter, unter dem die
+    # Karte später heißt, und er stünde danach auf "Ost".
+    for richtung, schritt in (("Nord", lat_schritt), ("Ost", lon_schritt)):
+        if not (1e-9 < schritt < 1.0):
+            raise KartenFehler(
+                f"Zellgröße in {richtung}-Richtung ist {schritt:g}° - das ist keine "
+                "Applikationskarte. Erwartet wird ein Wert zwischen einem "
+                "Millionstel und einem Grad.")
     if spalten * zeilen > 2_000_000:
         raise KartenFehler(f"Das Raster hat {spalten * zeilen} Zellen - "
                            "das ist keine Applikationskarte für ein Feld")
