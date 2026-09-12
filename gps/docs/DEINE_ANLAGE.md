@@ -18,6 +18,42 @@ Ein F9P heißt: **ein Traktor** ist ausgerüstet. Die Master/Client-Aufteilung d
 Systems bleibt trotzdem sinnvoll – das Windows-Tablet läuft als Master und ist
 später bereit, wenn ein zweiter Empfänger dazukommt.
 
+## Organigramm – wer hängt woran
+
+Jeder Pfeil ist ein Kabel oder eine Funkstrecke. (GitHub und Obsidian zeichnen
+das Diagramm; im Editor ist es der Text darunter.)
+
+```mermaid
+flowchart TB
+  subgraph HOF["Hof · Basisstation (feste Koordinaten!)"]
+    BANT["Antenne Basis"] --> BF9P["ZED-F9P Basis · RTCM3"]
+  end
+  BF9P -. "NTRIP / TCP / Funkmodem" .-> TAB
+  ANT["GNSS-Antenne · Dach, mittig über Hinterachse"] -- "Antennenkabel" --> F9P
+  subgraph KAB["Kabine · Windows-Tablet = Rechner"]
+    F9P["ZED-F9P Rover · 10 Hz"] -- "USB 115200" --> TAB["Windows-Tablet · AgriPilot"]
+    TAB -- "RTCM3 zurück" --> F9P
+    IMU["IMU Brick 2.0 · fest verschraubt"] -- "USB" --> BRICKD["Brick Daemon"] --> TAB
+    TAB -- "USB · Sollwinkel in Grad" --> PHID["Phidget-Motorsteuerung · Failsafe 500 ms"]
+    TAB -- "WLAN · :8080" --> ANDR["Android-Tablet · 2. Anzeige"]
+  end
+  subgraph LENK["Lenkung"]
+    PHID --> NOTAUS["NOT-AUS in der Motorleitung"] --> MOTOR["Lenkmotor 12 V mit Drehgeber"] --> MECH["Mechanik am Lenkrad"]
+    WAS["Radwinkelsensor (optional)"] -.-> PHID
+  end
+  subgraph STROM["12 V"]
+    BAT["Bordnetz"] --> WANDL["Wandler 12→5 V/3 A mit Puffer"] --> TAB
+    WANDL --> F9P
+    WANDL --> IMU
+    BAT --> SICH["eigene Sicherung"] --> PHID
+  end
+```
+
+Vorhanden: F9P, IMU Brick, Phidget-Steuerung, beide Tablets, Basis. Fehlt:
+Antenne mit Grundplatte, 12-V-Versorgung, **Not-Aus**, Motor samt Mechanik am
+Lenkrad; optional der Radwinkelsensor. Der Plan mit Stückliste und Abnahmen je
+Schritt liegt als Seite vor („AgriPilot Hardware-Plan“, 12.09.2026).
+
 ## Was der IMU bringt (und warum er kein Zubehör ist)
 
 Die Antenne sitzt gut drei Meter über dem Boden. Sechs Grad Seitenhang – das ist
