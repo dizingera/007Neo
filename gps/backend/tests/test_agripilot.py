@@ -4933,3 +4933,320 @@ class ApplikationApiTest(unittest.TestCase):
                 uebersicht = client.get("/api/karte").json()
                 self.assertTrue(uebersicht["aktiv"])
                 self.assertEqual(uebersicht["name"], "Weizen N2")
+
+
+class SollwertAusgabeTest(unittest.TestCase):
+    """Die Ausgabe des Sollwerts - lieber ablehnen als versuchen."""
+
+    def setUp(self):
+        from agripilot.config import SollwertConfig
+        from agripilot import sollwert as sollwert_modul
+        self.modul = sollwert_modul
+        self.config = SollwertConfig(enabled=True, ausgang="anzeige")
+        self.mitschrift = []
+
+        class Mitschreiber(sollwert_modul.SollwertAusgang):
+            name = "test"
+
+            def __init__(self, ziel):
+                super().__init__()
+                self.ziel = ziel
+                self.ready = True
+                self.status = "bereit"
+
+            def send(self, befehl):
+                self.gesendet += 1
+                self.ziel.append((befehl.wert, befehl.aktiv, befehl.grund))
+
+        self.ausgang = Mitschreiber(self.mitschrift)
+        self.regler = sollwert_modul.SollwertRegler(self.config, self.ausgang)
+
+    def _fix(self, rank=4, alter=0.0, jetzt=1000.0):
+        from agripilot.nmea import Fix
+        fix = Fix(lat=48.0, lon=11.0, fix_quality=rank, speed_ms=2.0)
+        fix.received_at = jetzt - alter
+        return fix
+
+    def test_ab_werk_geht_nichts_hinaus(self):
+        """Die wichtigste Zusage: ohne Freigabe bleibt der Ausgang still."""
+        self.config.enabled = False
+        befehl = self.regler.update(140.0, "kg/ha", self._fix(), True, True, now=1000.0)
+        self.assertFalse(befehl.aktiv)
+        self.assertIn("nicht freigegeben", befehl.grund)
+        self.assertIsNone(befehl.wert)
+
+    def test_ohne_markieren_wird_nichts_ausgebracht(self):
+        """Auf dem Weg zum Feld hat ein Sollwert nichts zu suchen."""
+        befehl = self.regler.update(140.0, "kg/ha", self._fix(), True,
+                                    arbeit_laeuft=False, now=1000.0)
+        self.assertFalse(befehl.aktiv)
+        self.assertIn("Markieren", befehl.grund)
+
+    def test_ohne_karte_kein_ausgang(self):
+        befehl = self.regler.update(None, "", self._fix(), karte_aktiv=False,
+                                    arbeit_laeuft=True, now=1000.0)
+        self.assertFalse(befehl.aktiv)
+        self.assertIn("Applikationskarte", befehl.grund)
+
+    def test_schlechter_fix_sperrt(self):
+        """Ein Sprung um Dezimeter setzt an der Zonengrenze den falschen Wert."""
+        befehl = self.regler.update(140.0, "kg/ha", self._fix(rank=1), True, True,
+                                    now=1000.0)
+        self.assertFalse(befehl.aktiv)
+        self.assertIn("RTK", befehl.grund)
+
+    def test_veraltete_daten_sperren(self):
+        befehl = self.regler.update(140.0, "kg/ha", self._fix(alter=3.0), True, True,
+                                    now=1000.0)
+        self.assertFalse(befehl.aktiv)
+        self.assertIn("veraltet", befehl.grund)
+
+    def test_freigegeben_und_alles_stimmt_geht_der_wert_hinaus(self):
+        befehl = self.regler.update(140.0, "kg/ha", self._fix(), True, True, now=1000.0)
+        self.assertTrue(befehl.aktiv)
+        self.assertAlmostEqual(befehl.wert, 140.0)
+        self.assertTrue(befehl.aus_karte)
+        self.assertEqual(self.mitschrift[-1][0], 140.0)
+
+    def test_beim_sperren_geht_nicht_der_letzte_wert_weiter(self):
+        """"Darf nicht" heißt nicht "mach weiter wie bisher"."""
+        self.regler.update(140.0, "kg/ha", self._fix(), True, True, now=1000.0)
+        befehl = self.regler.update(140.0, "kg/ha", self._fix(), True,
+                                    arbeit_laeuft=False, now=1001.0)
+        self.assertIsNone(befehl.wert)
+        self.assertIsNone(self.mitschrift[-1][0])
+
+    def test_rueckfall_halten_ueberbrueckt_ein_loch_in_der_karte(self):
+        self.config.rueckfall = "halten"
+        self.regler.update(140.0, "kg/ha", self._fix(), True, True, now=1000.0)
+        befehl = self.regler.update(None, "kg/ha", self._fix(), True, True, now=1001.0)
+        self.assertAlmostEqual(befehl.wert, 140.0)
+        self.assertFalse(befehl.aus_karte)
+        self.assertIn("ohne Karte", befehl.grund)
+
+    def test_rueckfall_aus_legt_im_loch_nichts_ab(self):
+        self.config.rueckfall = "aus"
+        self.regler.update(140.0, "kg/ha", self._fix(), True, True, now=1000.0)
+        befehl = self.regler.update(None, "kg/ha", self._fix(), True, True, now=1001.0)
+        self.assertAlmostEqual(befehl.wert, 0.0)
+        self.assertFalse(befehl.aus_karte)
+
+    def test_rueckfall_als_feste_zahl(self):
+        self.config.rueckfall = "110"
+        befehl = self.regler.update(None, "kg/ha", self._fix(), True, True, now=1000.0)
+        self.assertAlmostEqual(befehl.wert, 110.0)
+
+    def test_unsinniger_rueckfall_haelt_statt_zu_raten(self):
+        self.config.rueckfall = "vielleicht"
+        self.regler.update(140.0, "kg/ha", self._fix(), True, True, now=1000.0)
+        befehl = self.regler.update(None, "kg/ha", self._fix(), True, True, now=1001.0)
+        self.assertAlmostEqual(befehl.wert, 140.0)
+
+    def test_gleiche_werte_werden_nicht_zehnmal_je_sekunde_gesendet(self):
+        """Ein Streuer, der jedem Zappeln folgt, streut ungleichmäßiger."""
+        jetzt = 1000.0
+        for i in range(10):
+            self.regler.update(140.0, "kg/ha", self._fix(jetzt=jetzt), True, True,
+                               now=jetzt)
+            jetzt += 0.1
+        # Einmal der erste Wert, dazu höchstens ein Herzschlag in einer Sekunde.
+        self.assertLessEqual(len(self.mitschrift), 3, self.mitschrift)
+
+    def test_eine_echte_aenderung_geht_sofort_hinaus(self):
+        self.regler.update(140.0, "kg/ha", self._fix(), True, True, now=1000.0)
+        vorher = len(self.mitschrift)
+        self.regler.update(90.0, "kg/ha", self._fix(jetzt=1000.1), True, True,
+                           now=1000.1)
+        self.assertEqual(len(self.mitschrift), vorher + 1)
+        self.assertEqual(self.mitschrift[-1][0], 90.0)
+
+    def test_der_herzschlag_haelt_den_wachhund_der_gegenstelle_ruhig(self):
+        self.regler.update(140.0, "kg/ha", self._fix(), True, True, now=1000.0)
+        vorher = len(self.mitschrift)
+        self.regler.update(140.0, "kg/ha", self._fix(jetzt=1002.0), True, True,
+                           now=1002.0)
+        self.assertEqual(len(self.mitschrift), vorher + 1)
+
+    def test_status_nennt_freigabe_rueckfall_und_ausgang(self):
+        self.regler.update(140.0, "kg/ha", self._fix(), True, True, now=1000.0)
+        stand = self.regler.status()
+        self.assertTrue(stand["freigegeben"])
+        self.assertEqual(stand["rueckfall"], "halten")
+        self.assertEqual(stand["ausgang"]["typ"], "test")
+        self.assertAlmostEqual(stand["befehl"]["wert"], 140.0)
+
+
+class SollwertAusgangTest(unittest.TestCase):
+    """Die Ausgänge selbst - ohne Hardware, was ohne Hardware geht."""
+
+    def test_ab_werk_ist_der_ausgang_nur_anzeige(self):
+        from agripilot.config import SollwertConfig
+        from agripilot import sollwert as modul
+        ausgang = modul.ausgang_bauen(SollwertConfig())
+        self.assertIsInstance(ausgang, modul.NurAnzeige)
+        asyncio.run(ausgang.start())
+        self.assertTrue(ausgang.ready)
+        self.assertIn("nur Anzeige", ausgang.status)
+
+    def test_udp_ausgang_schickt_eine_lesbare_zeile(self):
+        import socket
+        from agripilot import sollwert as modul
+        empfaenger = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        empfaenger.bind(("127.0.0.1", 0))
+        empfaenger.settimeout(2.0)
+        port = empfaenger.getsockname()[1]
+        try:
+            ausgang = modul.UdpAusgang("127.0.0.1", port)
+            asyncio.run(ausgang.start())
+            ausgang.send(modul.SollwertBefehl(aktiv=True, wert=142.5, einheit="kg/ha"))
+            daten, _ = empfaenger.recvfrom(256)
+            self.assertEqual(daten.decode(), "SOLL 142.50 kg/ha")
+            # Und ohne Wert die Null - die Gegenstelle bekommt immer eine Zahl.
+            ausgang.send(modul.SollwertBefehl(aktiv=False, wert=None, einheit="kg/ha"))
+            daten, _ = empfaenger.recvfrom(256)
+            self.assertEqual(daten.decode(), "SOLL 0.00 kg/ha")
+            asyncio.run(ausgang.stop())
+        finally:
+            empfaenger.close()
+
+    def test_serieller_ausgang_ohne_pyserial_sagt_es(self):
+        from agripilot import sollwert as modul
+        import builtins
+        echt = builtins.__import__
+
+        def ohne_serial(name, *args, **kwargs):
+            if name == "serial":
+                raise ImportError("kein pyserial")
+            return echt(name, *args, **kwargs)
+
+        ausgang = modul.SeriellerAusgang("/dev/gibtsnicht")
+        builtins.__import__ = ohne_serial
+        try:
+            asyncio.run(ausgang.start())
+        finally:
+            builtins.__import__ = echt
+        self.assertFalse(ausgang.ready)
+        self.assertIn("pyserial", ausgang.status)
+        # Und ein Senden auf einen nicht bereiten Ausgang tut nichts, statt zu werfen.
+        ausgang.send(modul.SollwertBefehl(aktiv=True, wert=140.0, einheit="kg/ha"))
+        self.assertEqual(ausgang.gesendet, 0)
+
+
+class KonfigurationVollstaendigTest(unittest.TestCase):
+    """Jeder Abschnitt, der geschrieben wird, muss auch gelesen werden.
+
+    Der Fehler dahinter fiel erst im laufenden System auf: ein neuer Abschnitt
+    landet über ``asdict`` von selbst in der Datei, aber ``load`` zählt die
+    Abschnitte einzeln auf. Fehlt er dort, schreibt die Oberfläche die
+    Einstellung, die Datei zeigt sie - und nach dem Neustart steht wieder der
+    Standardwert da. Das sieht nach einem Bedienfehler aus und ist keiner.
+    """
+
+    def test_jeder_abschnitt_ueberlebt_einen_rundlauf(self):
+        from agripilot import config as config_module
+        import dataclasses
+
+        with tempfile.TemporaryDirectory() as ordner:
+            pfad = os.path.join(ordner, "config.yaml")
+            config = config_module.load(pfad)
+            abschnitte = [f.name for f in dataclasses.fields(config)
+                          if f.name != "path"]
+            self.assertIn("sollwert", abschnitte)
+
+            # In jedem Abschnitt einen Wert vom Standard wegbewegen.
+            geaendert = {}
+            for name in abschnitte:
+                abschnitt = getattr(config, name)
+                for feld in dataclasses.fields(abschnitt):
+                    wert = getattr(abschnitt, feld.name)
+                    if isinstance(wert, bool):
+                        neu = not wert
+                    elif isinstance(wert, int) and not isinstance(wert, bool):
+                        neu = wert + 7
+                    elif isinstance(wert, float):
+                        neu = wert + 1.5
+                    elif isinstance(wert, str) and feld.name != "password":
+                        neu = wert + "x"
+                    else:
+                        continue
+                    setattr(abschnitt, feld.name, neu)
+                    geaendert[f"{name}.{feld.name}"] = neu
+                    break
+            self.assertEqual(len(geaendert), len(abschnitte),
+                             "nicht jeder Abschnitt hat einen prüfbaren Wert")
+            config.save(pfad)
+
+            wieder = config_module.load(pfad)
+            for schluessel, erwartet in geaendert.items():
+                name, feld = schluessel.split(".")
+                self.assertEqual(getattr(getattr(wieder, name), feld), erwartet,
+                                 f"{schluessel} überlebt den Neustart nicht")
+
+
+class SollwertUeberDieSchnittstelleTest(unittest.TestCase):
+    """Der ganze Weg: Karte, Fahrt, und was am Streuer ankommt."""
+
+    def test_der_sollwert_geht_beim_fahren_wirklich_hinaus(self):
+        import socket
+        from fastapi.testclient import TestClient
+        from agripilot import config as config_module
+        from agripilot.server import create_app
+
+        empfaenger = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        empfaenger.bind(("127.0.0.1", 0))
+        empfaenger.settimeout(2.0)
+        port = empfaenger.getsockname()[1]
+
+        with tempfile.TemporaryDirectory() as ordner:
+            config = config_module.load("/kein-solcher-pfad.yaml")
+            config.server.data_dir = ordner
+            config.gnss.source = "simulator"
+            config.sollwert.enabled = True
+            config.sollwert.ausgang = "udp"
+            config.sollwert.host = "127.0.0.1"
+            config.sollwert.udp_port = port
+            try:
+                with TestClient(create_app(config)) as client:
+                    client.post("/api/fields", json={"name": "Ausgabefeld"})
+                    motor = client.app.state.app.engine
+                    motor.save_boundary([(0.0, 0.0), (300.0, 0.0),
+                                         (300.0, 200.0), (0.0, 200.0)])
+                    ebene = motor.plane
+
+                    def ring(punkte):
+                        return [[lon, lat] for lat, lon in
+                                (ebene.to_wgs(x, y) for x, y in punkte)]
+
+                    client.post("/api/karte/import", json={
+                        "eigenschaft": "menge", "name": "N2",
+                        "geojson": json.dumps({"type": "FeatureCollection", "features": [
+                            {"type": "Feature", "properties": {"menge": 140},
+                             "geometry": {"type": "Polygon", "coordinates": [
+                                 ring([(0, 0), (300, 0), (300, 200), (0, 200)])]}}]})})
+
+                    # Ohne Markieren darf nichts hinausgehen.
+                    motor.implement_position = (50.0, 100.0)
+                    motor._update_sollwert()
+                    stand = motor.state()["applikation"]["ausgabe"]
+                    self.assertFalse(stand["befehl"]["aktiv"])
+                    self.assertIn("Markieren", stand["befehl"]["grund"])
+
+                    # Mit Markieren und gutem Fix geht der Wert der Karte hinaus.
+                    client.post("/api/job/start", json={"operation": "Düngen"})
+                    motor.implement_position = (50.0, 100.0)
+                    motor._update_sollwert()
+                    stand = motor.state()["applikation"]["ausgabe"]
+                    self.assertTrue(stand["befehl"]["aktiv"], stand)
+                    self.assertAlmostEqual(stand["befehl"]["wert"], 140.0)
+
+                    # Und am Draht liegt eine lesbare Zeile.
+                    gesehen = []
+                    for _ in range(4):
+                        try:
+                            gesehen.append(empfaenger.recvfrom(256)[0].decode())
+                        except socket.timeout:
+                            break
+                    self.assertTrue(any("SOLL 140.00 kg/ha" == z for z in gesehen),
+                                    f"am Draht: {gesehen}")
+            finally:
+                empfaenger.close()

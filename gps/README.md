@@ -30,6 +30,7 @@ bei den Fahrtzahlen.
 | **Vorgewende** | Tiefe in Arbeitsbreiten aus der Feldgrenze, Restdistanz in Metern, Annäherungsalarm. Zwei Wendemuster – Ω-Wende (weiter Bogen) und U-Wende (kompakt) – jeweils geplant, angesehen und erst dann gefahren. Geprüft wird jeder Punkt der Route gegen die Feldgrenze. Arbeitsreihenfolge „Vorgewende zuerst/zuletzt" als Hinweis, gelesen aus der bearbeiteten Fläche. |
 | **Arbeitsplan** | Aus der Feldgrenze gerechnet: die Arbeitsrichtung mit den wenigsten Wenden, die Ringe des Vorgewendes und die Bahnen dazwischen, dazu Reihenfolge (fortlaufend oder im Sprung, wenn der Wendekreis die Nachbarspur nicht hergibt), Bahnzahl, Strecke und geschätzte Dauer. Eine Bahn antippen macht sie zur Führungslinie. Was gefahren ist, liest der Plan aus der bearbeiteten Fläche – nicht daraus, was angetippt wurde. Der Plan liegt beim Feld und wird mit abgeglichen: der zweite Traktor hat dieselben Bahnnummern vor sich. |
 | **Applikationskarten** | Teilflächenspezifisch düngen, säen, spritzen. Karten aus Shapefile mit Wertespalte, aus GeoJSON oder als ISO-XML mit Rasterdatei (beide Rasterarten). Der Sollwert steht groß in der Kabine und wird an der Stelle des **Geräts** nachgeschlagen, nicht an der Antenne. Was ausgebracht wurde, wird je Zone mitgeschrieben, gegen den Plan gehalten und als CSV für die Schlagkartei ausgegeben. |
+| **Sollwert ausgeben** | An die Maschine, über eine serielle Schnittstelle oder UDP – eine Zeile je Befehl (`SOLL 140.00 kg/ha`), schlicht genug für einen Streuerrechner oder einen Mikrocontroller dazwischen. **Ab Werk abgeschaltet**, und gesperrt, solange keine Karte geladen ist, Markieren aus ist oder der Fix nicht taugt. Was gilt, wo die Karte nichts sagt, steht in den Einstellungen und nicht im Code. |
 | **Bearbeitete Fläche** | Wird live mitgezeichnet. Hektar, Überlappung in Prozent, Lücken sofort sichtbar. |
 | **Sektionen** | Bis zu 24 Teilbreiten, automatisch aus über bereits bearbeitetem Boden und außerhalb der Feldgrenze. |
 | **Gezogene Geräte** | Anhängerkinematik statt starrem Versatz: die Ausrichtung des Geräts läuft dem Fahrzeug nach, abhängig von Tempo und Deichsellänge. In der Kurve wird dort markiert, wo das Gerät wirklich ist. |
@@ -129,6 +130,13 @@ Sekunden auf Mitte.
 Das ersetzt keinen Not-Aus und keinen Fahrer auf dem Sitz. Auf öffentlichen
 Straßen hat die Lenkautomatik nichts zu suchen.
 
+Die **Ausgabe des Sollwerts** an einen Streuer bewegt nichts und ist deshalb
+keine Gefahr für Leib und Leben – sie ist eine Gefahr fürs Konto. Ein Faktor
+100 in der Einheit legt das Hundertfache ab, über zwanzig Hektar, und auffallen
+tut es im Herbst. Sie ist deshalb ebenso ab Werk abgeschaltet, verlangt eine
+geladene Karte und laufendes Markieren, und der Import zeigt die kleinste,
+größte und mittlere Menge, bevor irgendetwas hinausgeht.
+
 ## Aufbau
 
 ```
@@ -146,6 +154,7 @@ gps/
 │   ├── feldplan.py   Arbeitsplan: Arbeitsrichtung, Bahnen, Reihenfolge, Stand
 │   ├── applikation.py Applikationskarten lesen, Sollwert nachschlagen,
 │                     Ausbringung mitschreiben
+│   ├── sollwert.py   Sollwert ausgeben: Bedingungen, Rückfall, Ausgänge
 │   ├── recorder.py   Rohdaten mitschreiben und wieder abspielen
 │   ├── update.py     Update-Paket prüfen und einspielen, git pull, Neustart
 │   ├── shapefile.py  Feldgrenzen aus .shp/.dbf/.prj, UTM-Umkehrung ohne Pakete
@@ -176,7 +185,7 @@ gps/
 cd gps/backend && python3 -m unittest discover -s tests -v
 ```
 
-334 Tests, ohne Zusatzpakete lauffähig. Geprüft wird vor allem, was im Feld Geld
+366 Tests, ohne Zusatzpakete lauffähig. Geprüft wird vor allem, was im Feld Geld
 kostet, wenn es falsch ist: Flächen, das Vorzeichen der Abweichung, der
 Hangausgleich und die Bedingungen, unter denen die Lenkautomatik einschalten
 darf.

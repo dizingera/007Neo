@@ -209,6 +209,30 @@ class SteeringConfig:
 
 
 @dataclass
+class SollwertConfig:
+    """Ausgabe des Sollwerts aus der Applikationskarte an die Maschine.
+
+    Ab Werk "nur Anzeige": der Wert steht in der Kabine, es geht nichts hinaus.
+    Ein Ausgang wird bewusst beim Einbau eingerichtet - ein falscher Sollwert
+    fährt nichts kaputt, aber er legt still das Zehnfache ab, über zwanzig
+    Hektar, und auffallen tut das im Herbst.
+
+    ``rueckfall`` sagt, was gilt, wo die Karte kein Loch, sondern keine Angabe
+    hat: "halten" (letzter Wert), "aus" (null) oder eine feste Zahl. Die
+    Abwägung dahinter steht in sollwert.py.
+    """
+
+    enabled: bool = False
+    ausgang: str = "anzeige"     # "anzeige" | "seriell" | "udp"
+    port: str = "/dev/ttyUSB1"   # nur für "seriell"
+    baud: int = 38400
+    host: str = "192.168.5.9"    # nur für "udp"
+    udp_port: int = 8890
+    rueckfall: str = "halten"    # "halten" | "aus" | eine Zahl
+    require_rtk: bool = True
+
+
+@dataclass
 class ServerConfig:
     host: str = "0.0.0.0"
     port: int = 8080
@@ -235,6 +259,7 @@ class Config:
     corrections: CorrectionsConfig = field(default_factory=CorrectionsConfig)
     network: NetworkConfig = field(default_factory=NetworkConfig)
     steering: SteeringConfig = field(default_factory=SteeringConfig)
+    sollwert: SollwertConfig = field(default_factory=SollwertConfig)
     server: ServerConfig = field(default_factory=ServerConfig)
     path: Optional[Path] = None
 
@@ -315,6 +340,7 @@ def load(path: str | Path | None = None) -> Config:
         corrections=CorrectionsConfig(**_corrections_section(data)),
         network=NetworkConfig(**_subset(NetworkConfig, data.get("network"))),
         steering=SteeringConfig(**_subset(SteeringConfig, data.get("steering"))),
+        sollwert=SollwertConfig(**_subset(SollwertConfig, data.get("sollwert"))),
         server=ServerConfig(**_subset(ServerConfig, data.get("server"))),
         path=target,
     )

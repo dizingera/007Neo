@@ -126,6 +126,7 @@ class Engine:
         self._last_track_point: Optional[geo.Point] = None
         self._last_update_at: Optional[float] = None
         self.steering = None    # set by the server once the controller exists
+        self.sollwert_regler = None   # dito, für die Ausgabe des Sollwerts
         self.simulator = None   # set when running on the simulator source
         self.imu = None         # set when a tilt sensor is configured
         self.terrain_offset_m = (0.0, 0.0)   # (rechts, vorn) - nur zur Anzeige
@@ -1175,8 +1176,26 @@ class Engine:
         """
         if self.karte_lokal is None or self.implement_position is None:
             self.sollwert = None
+        else:
+            self.sollwert = self.karte_lokal.wert_bei(self.implement_position)
+        self._sollwert_ausgeben()
+
+    def _sollwert_ausgeben(self) -> None:
+        """Den nachgeschlagenen Wert an die Maschine geben - wenn er darf.
+
+        Die Bedingungen stehen in sollwert.py; hier wird nur zusammengetragen,
+        was sie zum Entscheiden brauchen. Dass die Arbeit läuft, ist eine
+        davon: ohne Markieren wird nicht ausgebracht.
+        """
+        if self.sollwert_regler is None or self.fix is None:
             return
-        self.sollwert = self.karte_lokal.wert_bei(self.implement_position)
+        self.sollwert_regler.update(
+            self.sollwert,
+            self.karte.einheit if self.karte else "",
+            self.fix,
+            karte_aktiv=self.karte_lokal is not None,
+            arbeit_laeuft=self.job is not None,
+        )
 
     def _update_coverage(self, previous_implement: Optional[geo.Point]) -> None:
         """Mark the ground swept since the previous position.
@@ -1398,6 +1417,8 @@ class Engine:
             "art": self.karte.art,
             "sollwert": self.sollwert,
             "ausgebracht": self.ausbringung.to_dict(),
+            "ausgabe": (self.sollwert_regler.status()
+                        if self.sollwert_regler is not None else None),
         }
 
     def _require_position(self) -> None:

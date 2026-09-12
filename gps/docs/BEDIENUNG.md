@@ -345,6 +345,55 @@ hängen an der Arbeit und stehen in der Sammel-CSV unter Menü → Aufträge in
 derselben Zeile wie Fläche und Strecke – eine zweite Datei daneben geht im
 Büro verloren.
 
+### Den Sollwert an die Maschine geben
+
+Bis hierher steht der Wert in der Kabine. Ihn an einen Streuer oder eine
+Spritze zu geben, ist ein eigener Schritt – unter **Menü → Einstellungen →
+Sollwert ausgeben**, und **ab Werk ist er aus**.
+
+Das ist kein übertriebener Respekt vor einem Zahlenwert. Die Lenkung kann eine
+Maschine in den Graben fahren, dafür hat sie ihre sechs Bedingungen; ein
+falscher Sollwert fährt nichts kaputt, er legt still das Zehnfache ab, über
+zwanzig Hektar, und auffallen tut das im Herbst. Beides verlangt dieselbe
+Bauart.
+
+**Ausgänge:** eine serielle Schnittstelle oder UDP an eine Steuerung im selben
+Netz. Hinaus geht je Befehl eine Zeile:
+
+```
+SOLL 140.00 kg/ha
+```
+
+Schlicht genug, dass sich ein Streuerrechner oder ein kleiner Mikrocontroller
+dazwischenhängen lässt, ohne dass jemand ein Protokoll nachbauen muss. Wer
+ISOBUS hat, hängt hier seine Brücke an.
+
+**Ausgegeben wird nur, wenn alles gleichzeitig stimmt:** in den Einstellungen
+freigegeben, eine Karte geladen, **Markieren an**, und der Fix gut und frisch.
+Ohne Markieren wird nicht ausgebracht – auf dem Weg zum Feld hat ein Sollwert
+nichts zu suchen. Fällt eine Bedingung weg, geht die Null hinaus, nicht der
+letzte Wert: „darf nicht" heißt nicht „mach weiter wie bisher". Der Grund steht
+im Klartext unter Menü → Plan.
+
+Gesendet wird bei jeder Änderung und einmal je Sekunde auch ohne – die
+Gegenstelle hat meist einen Wachhund, der ohne frische Befehle abschaltet. Ein
+Zappeln um ein halbes Kilo an einer Zellgrenze löst dagegen keinen Befehl aus:
+ein Streuer, der jedem Zappeln folgt, streut ungleichmäßiger als einer, der
+Stufen fährt.
+
+**Ohne Karte** – dort, wo die Karte keine Angabe macht – gilt, was unter
+*Ohne Karte* eingestellt ist:
+
+| Einstellung | Wirkung | Wann richtig |
+|---|---|---|
+| `halten` | der letzte Wert bleibt stehen | Lücken mitten im Schlag; am Feldrand streut die Maschine damit weiter |
+| `aus` | null | wenn die Karte am Feldrand aufhört; ein Loch mitten im Feld wird zum unbehandelten Fleck |
+| eine Zahl | dieser Wert | der Betriebsdurchschnitt, den der Berater ohnehin genannt hat |
+
+Ab Werk `halten`. In der Kabine steht in diesem Fall neben der Zahl **ohne
+Karte**, damit sichtbar bleibt, dass der Wert gerade nicht aus der Karte kommt.
+Steht die Ausgabe an, steht dort außerdem **geht raus**.
+
 Diese Zahl ist ehrlich beschränkt, und sie sagt das auch von sich: als
 Grundlage steht **Sollwert der Karte** dabei. Das System weiß, wo die Maschine
 gefahren ist und was die Karte dort verlangt hat. Ob der Streuer die Menge auch

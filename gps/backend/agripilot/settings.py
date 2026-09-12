@@ -223,6 +223,39 @@ GRUPPEN: list[Gruppe] = [
         ],
     ),
     Gruppe(
+        id="sollwert",
+        titel="Sollwert ausgeben (Applikationskarte)",
+        hinweis="Ohne Freigabe steht der Sollwert nur in der Kabine. Ein falscher "
+                "Wert fährt nichts kaputt - er legt still das Zehnfache ab, über "
+                "zwanzig Hektar, und auffallen tut das im Herbst.",
+        felder=[
+            Feld("sollwert.enabled", "Ausgabe freigegeben", "schalter", sofort=True,
+                 warnung="Erst die Mengen der eingelesenen Karte prüfen: die kleinste "
+                         "und größte stehen unter Menü → Plan.",
+                 hilfe="Ohne Freigabe wird der Sollwert angezeigt und dokumentiert, "
+                       "aber nicht ausgegeben."),
+            Feld("sollwert.ausgang", "Ausgang", "auswahl", auswahl=(
+                ("anzeige", "Nur Anzeige (gibt nichts aus)"),
+                ("seriell", "Serielle Schnittstelle"),
+                ("udp", "Steuerung im Netz über UDP"),
+            )),
+            Feld("sollwert.port", "Serieller Anschluss", hilfe="Nur bei 'seriell'."),
+            Feld("sollwert.baud", "Baudrate", "ganzzahl", minimum=1200, maximum=921600),
+            Feld("sollwert.host", "Adresse der Steuerung", hilfe="Nur bei UDP."),
+            Feld("sollwert.udp_port", "Port der Steuerung", "ganzzahl",
+                 minimum=1, maximum=65535),
+            Feld("sollwert.rueckfall", "Ohne Karte", sofort=True,
+                 hilfe="Was gilt, wo die Karte keine Angabe macht: 'halten' (letzter "
+                       "Wert), 'aus' (null) oder eine feste Zahl. 'halten' überbrückt "
+                       "Lücken mitten im Schlag; 'aus' ist richtig, wenn die Karte am "
+                       "Feldrand aufhört."),
+            Feld("sollwert.require_rtk", "Nur mit RTK-Fix ausgeben", "schalter",
+                 sofort=True,
+                 hilfe="Ein Sprung um Dezimeter setzt an der Zonengrenze den "
+                       "falschen Wert."),
+        ],
+    ),
+    Gruppe(
         id="phidget",
         titel="Lenkmotor (Phidget)",
         hinweis="Erst nach dem Einbau abstimmen, und immer nur einen Wert je Fahrt "

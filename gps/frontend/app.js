@@ -188,10 +188,18 @@ function updateHud(s) {
   el('sollBox').hidden = !applikation.aktiv;
   if (applikation.aktiv) {
     const wert = applikation.sollwert;
+    const ausgabe = applikation.ausgabe;
     el('soll').textContent = wert == null ? '--' : formatZahl(wert);
     el('soll').className = wert == null ? 'warn' : '';
-    el('sollLabel').textContent = wert == null
-      ? 'ohne Karte' : (applikation.einheit || 'Sollwert');
+    // Die Beschriftung sagt, was mit der Zahl passiert. "Angezeigt" und
+    // "geht an den Streuer" sind zwei verschiedene Dinge, und der Unterschied
+    // kostet auf zwanzig Hektar Geld - er gehört neben die Zahl, nicht in ein
+    // Untermenü.
+    let text = wert == null ? 'ohne Karte' : (applikation.einheit || 'Sollwert');
+    if (ausgabe && ausgabe.freigegeben) {
+      text += ausgabe.befehl && ausgabe.befehl.aktiv ? ' · geht raus' : ' · hält';
+    }
+    el('sollLabel').textContent = text;
   }
 
   // Der Plan: wie viel ist durch, wie viel bleibt.
@@ -1273,6 +1281,23 @@ function fillKarte(uebersicht) {
       sub: `auf ${formatZahl(geplant.flaeche_ha)} ha` +
            (geplant.ohne_wert_ha ? ` · ${formatZahl(geplant.ohne_wert_ha)} ha ohne Karte` : ''),
     }));
+  }
+
+  // Ob der Sollwert die Kabine verlässt, steht neben den Mengen - dort wird
+  // die Karte geprüft, und dort fällt auf, wenn die Ausgabe noch aus ist.
+  const ausgabe = (state.live && state.live.applikation || {}).ausgabe;
+  if (ausgabe) {
+    const befehl = ausgabe.befehl || {};
+    const zeile = item({
+      title: ausgabe.freigegeben
+        ? (befehl.aktiv ? `Ausgabe läuft: ${formatZahl(befehl.wert)} ${befehl.einheit || ''}`
+                        : 'Ausgabe freigegeben, gibt gerade nichts aus')
+        : 'Ausgabe nicht freigegeben – der Wert bleibt in der Kabine',
+      sub: `${befehl.grund || ''} · Ausgang: ${(ausgabe.ausgang || {}).status || '–'}` +
+           ` · ohne Karte: ${ausgabe.rueckfall}`,
+    });
+    if (!ausgabe.freigegeben || !befehl.aktiv) zeile.classList.add('warn');
+    host.appendChild(zeile);
   }
 
   const ist = uebersicht.ausgebracht || {};

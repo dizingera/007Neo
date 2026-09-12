@@ -292,6 +292,12 @@ button.danger { background: color-mix(in srgb, var(--red) 16%, var(--panel)); bo
 /* Tag wie Nacht: der Grünstich kommt aus dem Grün des Themas, nicht aus einer
    festen Nachtfarbe - sonst steht am Tag dunkle Schrift auf dunklem Grün. */
 .item.active { border-color: var(--green); background: color-mix(in srgb, var(--green) 12%, var(--panel)); }
+/* Eine Zeile, die zum Hinsehen auffordert: die Hinweise einer frisch
+ * eingelesenen Karte, und der Vermerk, dass der Sollwert die Kabine nicht
+ * verlässt. Ohne eigene Farbe sieht sie aus wie jede andere Zeile - und dann
+ * liest sie niemand. */
+.item.warn { border-color: var(--amber); background: color-mix(in srgb, var(--amber) 10%, var(--panel)); }
+.item.warn .title { color: var(--amber); }
 .item .main { flex: 1; min-width: 0; }
 .item .title { font-size: 16px; font-weight: 600; }
 .item .sub { font-size: 12px; color: var(--muted); margin-top: 2px; }

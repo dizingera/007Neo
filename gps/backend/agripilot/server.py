@@ -30,7 +30,8 @@ from . import feldplan as feldplan_module
 from . import checklist as checklist_module
 from . import settings as settings_module
 from . import export, geraete as geraete_module, imu as imu_module
-from . import recorder as recorder_module, shapefile as shapefile_module, sync
+from . import recorder as recorder_module, shapefile as shapefile_module
+from . import sollwert as sollwert_module, sync
 from . import update as update_module
 from .actuators import build_output
 from .coverage import CoverageMap
@@ -63,6 +64,9 @@ class Application:
             config.steering, build_output(config, self.imu)
         )
         self.engine.steering = self.steering
+        self.sollwert = sollwert_module.SollwertRegler(
+            config.sollwert, sollwert_module.ausgang_bauen(config.sollwert))
+        self.engine.sollwert_regler = self.sollwert
         # Führt Buch über den Einbau und liest dabei mit, was sich erst
         # über die Zeit zeigt - etwa ob "RTK fix" dauerhaft steht.
         self.checklist = checklist_module.Checkliste(self.store)
@@ -163,6 +167,7 @@ class Application:
             cfg.network.role, VERSION,
         )
         await self.steering.start()
+        await self.sollwert.start()
         self._quellen_starten()
 
         if cfg.is_master:
@@ -195,6 +200,9 @@ class Application:
         with contextlib.suppress(Exception):
             self.aufzeichnung.stop()
         await self.steering.stop()
+        # Erst den Sollwert auf null, dann die Quelle schließen: sonst bliebe
+        # die letzte Menge an einem Streuer stehen, der noch läuft.
+        await self.sollwert.stop()
         await self.source.stop()
         if self.imu is not None:
             await self.imu.stop()
