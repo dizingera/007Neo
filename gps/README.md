@@ -22,6 +22,8 @@ gleichen Netz.
 |---|---|
 | **Spurführung** | AB-Linien, A+ (Punkt und Himmelsrichtung), aufgezeichnete Kurven, Kontur (die Feldgrenze als Ringspur). Lichtbalken und Abweichung in Zentimetern. Spurversatz („Nudge") in 10-cm-Schritten. Blick über die Haube in Perspektive, wahlweise flach oder Norden oben; Tag- und Nachtseite. |
 | **Vorgewende** | Tiefe in Arbeitsbreiten aus der Feldgrenze, Restdistanz in Metern, Annäherungsalarm. Zwei Wendemuster – Ω-Wende (weiter Bogen) und U-Wende (kompakt) – jeweils geplant, angesehen und erst dann gefahren. Geprüft wird jeder Punkt der Route gegen die Feldgrenze. Arbeitsreihenfolge „Vorgewende zuerst/zuletzt" als Hinweis, gelesen aus der bearbeiteten Fläche. |
+| **Arbeitsplan** | Aus der Feldgrenze gerechnet: die Arbeitsrichtung mit den wenigsten Wenden, die Ringe des Vorgewendes und die Bahnen dazwischen, dazu Reihenfolge (fortlaufend oder im Sprung, wenn der Wendekreis die Nachbarspur nicht hergibt), Bahnzahl, Strecke und geschätzte Dauer. Eine Bahn antippen macht sie zur Führungslinie. Was gefahren ist, liest der Plan aus der bearbeiteten Fläche – nicht daraus, was angetippt wurde. Der Plan liegt beim Feld und wird mit abgeglichen: der zweite Traktor hat dieselben Bahnnummern vor sich. |
+| **Applikationskarten** | Teilflächenspezifisch düngen, säen, spritzen. Karten aus Shapefile mit Wertespalte, aus GeoJSON oder als ISO-XML mit Rasterdatei (beide Rasterarten). Der Sollwert steht groß in der Kabine und wird an der Stelle des **Geräts** nachgeschlagen, nicht an der Antenne. Was ausgebracht wurde, wird je Zone mitgeschrieben, gegen den Plan gehalten und als CSV für die Schlagkartei ausgegeben. |
 | **Bearbeitete Fläche** | Wird live mitgezeichnet. Hektar, Überlappung in Prozent, Lücken sofort sichtbar. |
 | **Sektionen** | Bis zu 24 Teilbreiten, automatisch aus über bereits bearbeitetem Boden und außerhalb der Feldgrenze. |
 | **Gezogene Geräte** | Anhängerkinematik statt starrem Versatz: die Ausrichtung des Geräts läuft dem Fahrzeug nach, abhängig von Tempo und Deichsellänge. In der Kurve wird dort markiert, wo das Gerät wirklich ist. |
@@ -135,6 +137,9 @@ gps/
 │   ├── guidance.py   AB-Linien, Kurven, Kontur, Spurabstand, Abweichung,
 │                     Lenkwinkel, Nachlauf gezogener Geräte
 │   ├── headland.py   Vorgewende: Restdistanz, Alarm, Ω- und U-Wende, Route
+│   ├── feldplan.py   Arbeitsplan: Arbeitsrichtung, Bahnen, Reihenfolge, Stand
+│   ├── applikation.py Applikationskarten lesen, Sollwert nachschlagen,
+│                     Ausbringung mitschreiben
 │   ├── recorder.py   Rohdaten mitschreiben und wieder abspielen
 │   ├── update.py     Update-Paket prüfen und einspielen, git pull, Neustart
 │   ├── shapefile.py  Feldgrenzen aus .shp/.dbf/.prj, UTM-Umkehrung ohne Pakete
@@ -165,10 +170,19 @@ gps/
 cd gps/backend && python3 -m unittest discover -s tests -v
 ```
 
-254 Tests, ohne Zusatzpakete lauffähig. Geprüft wird vor allem, was im Feld Geld
+334 Tests, ohne Zusatzpakete lauffähig. Geprüft wird vor allem, was im Feld Geld
 kostet, wenn es falsch ist: Flächen, das Vorzeichen der Abweichung, der
 Hangausgleich und die Bedingungen, unter denen die Lenkautomatik einschalten
 darf.
+
+Beim Arbeitsplan fährt eine Probe ein Raster über den Kern des Feldes und
+verlangt für jeden Punkt eine Bahn in Reichweite. Eine Richtung mit einer Bahn
+weniger sieht in jeder Kennzahl besser aus – und lässt einen Streifen stehen,
+den erst der Fahrer im Herbst sieht.
+
+Bei den Applikationskarten wird der Sollwert nicht in der Liste geprüft,
+sondern an der Koordinate: ein verdrehtes Raster hat dieselben Zahlen in
+derselben Reihenfolge und düngt trotzdem die falsche Ecke des Feldes.
 
 Die Wende wird dabei einmal wirklich gefahren: Position hinein, Einschlag
 heraus, Einspurmodell bewegt die Maschine, von vorn – und am Ende die Frage,

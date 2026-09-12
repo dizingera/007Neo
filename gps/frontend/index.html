@@ -67,13 +67,25 @@
       <div><b id="pass">--</b><span id="passLabel">Spur</span></div>
       <div><b id="area">--</b><span>ha bearbeitet</span></div>
       <div id="tiltBox" hidden><b id="tilt">--</b><span id="tiltLabel">° Hang</span></div>
+      <div id="sollBox" hidden><b id="soll">--</b><span id="sollLabel">Sollwert</span></div>
       <div class="spark" aria-hidden="true"><svg viewBox="0 0 200 40" preserveAspectRatio="none"><line class="null" x1="0" y1="20" x2="200" y2="20"/><path class="band" d="M0 17 H200 V23 H0 Z"/><path id="spark" d=""/></svg></div>
       <div class="sections" id="sections" hidden></div>
     </div>
-    <!-- Bis zum Vorgewende, nicht bis zur Grenze: dort endet die Arbeit. -->
-    <div class="glas vg" id="restBox" hidden>
-      <div class="zeile"><span id="restLabel">bis Vorgewende</span><b id="rest">--</b></div>
-      <div class="bar"><i id="restBar"></i></div>
+    <!-- Zwei Balken übereinander statt nebeneinander: nebeneinander bleibt für
+         "Bahn 12 von 29" kein Platz, und der Text bricht mitten im Wort um.
+         Gestapelt teilen sie sich einen Platz in der Reihe und haben jeder die
+         volle Breite. Bis zum Vorgewende, nicht bis zur Grenze: dort endet
+         die Arbeit. -->
+    <div class="vgstapel" id="vgStapel" hidden>
+      <div class="glas vg" id="planBox" hidden>
+        <div class="zeile"><span id="planLabel">Plan</span><b id="planRest">--</b></div>
+        <div class="bar"><i id="planBar"></i></div>
+      </div>
+
+      <div class="glas vg" id="restBox" hidden>
+        <div class="zeile"><span id="restLabel">bis Vorgewende</span><b id="rest">--</b></div>
+        <div class="bar"><i id="restBar"></i></div>
+      </div>
     </div>
     <!-- Handlungsspalte: nach Wichtigkeit von unten nach oben -->
     <div class="spalte">
@@ -104,6 +116,7 @@
       <button data-tab="fields" class="tab active">Felder</button>
       <button data-tab="lines" class="tab">Spuren</button>
       <button data-tab="jobs" class="tab">Aufträge</button>
+      <button data-tab="plan" class="tab">Plan</button>
       <button data-tab="headland" class="tab">Vorgewende</button>
       <button data-tab="machine" class="tab">Maschine</button>
       <button data-tab="system" class="tab">System</button>
@@ -159,6 +172,61 @@
       wird gemerkt, bis eine andere eingetragen wird. Gestartet wird die Arbeit mit
       <b>Markieren</b> rechts in der Kabine.</p>
     <div class="list" id="jobList"></div>
+  </section>
+
+  <section class="tab-panel" data-panel="plan" hidden>
+    <h3>Arbeitsplan</h3>
+    <p class="note">Aus der Feldgrenze: die Arbeitsrichtung mit den wenigsten Wenden,
+      die Ringe des Vorgewendes und die Bahnen dazwischen. Was hier leer bleibt,
+      kommt aus der Maschine und dem Vorgewende – zweimal dasselbe einzutippen ist
+      die zuverlässigste Art, zwei verschiedene Werte zu bekommen.</p>
+    <div class="grid" id="planForm">
+      <label>Arbeitsbreite (m)<input type="number" step="0.1" min="0.5" max="60" name="arbeitsbreite_m"></label>
+      <label>Vorgewende (Arbeitsbreiten)<input type="number" step="0.5" min="0" max="10" name="vorgewende_breiten"></label>
+      <label>Wenderadius (m)<input type="number" step="0.5" min="1" max="30" name="wenderadius_m"></label>
+      <label>Geschwindigkeit (km/h)<input type="number" step="0.5" min="1" max="30" name="geschwindigkeit_kmh"></label>
+      <label>Richtung (° – leer = selbst suchen)<input type="number" step="1" min="0" max="359" name="richtung_grad" placeholder="automatisch"></label>
+      <label>Reihenfolge<select name="muster">
+        <option value="fortlaufend">fortlaufend – Bahn für Bahn</option>
+        <option value="sprung">im Sprung – für große Wendekreise</option>
+      </select></label>
+    </div>
+    <div class="row">
+      <button id="btnPlanRechnen" class="primary">Plan rechnen</button>
+      <button id="btnPlanNaechste">Nächste Bahn fahren</button>
+      <button id="btnPlanLoeschen" class="danger">Plan verwerfen</button>
+    </div>
+    <span class="note" id="planInfo" role="status" aria-atomic="true"></span>
+    <div class="list" id="planKennzahlen"></div>
+
+    <h3>Applikationskarte</h3>
+    <p class="note">Teilflächenspezifisch düngen, säen, spritzen: die Karte sagt für
+      jeden Punkt, wie viel dort ausgebracht werden soll. Der Sollwert steht dann
+      groß in der Kabine, und was gefahren wurde, steht danach in der Kartei.</p>
+    <div class="row">
+      <label class="button" for="karteDateien">Karte einlesen</label>
+      <input type="file" id="karteDateien" accept=".shp,.dbf,.prj,.json,.geojson,.xml,.bin,.BIN" multiple hidden>
+      <label>Einheit <select id="karteEinheit">
+        <option value="">aus der Datei</option>
+        <option value="kg/ha">kg/ha</option>
+        <option value="l/ha">l/ha</option>
+        <option value="Korn/m²">Korn/m²</option>
+      </select></label>
+      <a class="button" id="btnAusbringungCsv" href="/api/karte/ausbringung.csv">Ausbringung als CSV</a>
+    </div>
+    <p class="note">Shapefile mit Wertespalte (.shp, .dbf, .prj), GeoJSON, oder ISO-XML
+      aus dem Terminal (TASKDATA.XML zusammen mit der Rasterdatei .BIN). Steht im
+      ISO-XML eine Kennung, die das System nicht sicher kennt, wird die Menge
+      trotzdem gezeigt – aber mit Warnung und der Spanne, damit ein Faktor 100
+      hier auffällt und nicht auf dem Feld.</p>
+    <span class="note" id="karteInfo" role="status" aria-atomic="true"></span>
+    <div class="list" id="karteUebersicht"></div>
+
+    <h3>Bahnen</h3>
+    <p class="note">Die Reihenfolge, in der gefahren wird. Gefahrene Bahnen sind
+      als solche vermerkt – gezählt wird aus der bearbeiteten Fläche, nicht aus
+      dem, was angetippt wurde.</p>
+    <div class="list" id="planUebersicht"></div>
   </section>
 
   <section class="tab-panel" data-panel="headland" hidden>

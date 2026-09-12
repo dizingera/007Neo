@@ -19,6 +19,8 @@
   --f-vg: rgba(255,77,77,.85); --f-pass: rgba(255,255,255,.16); --f-aktiv: #5dff8e;
   --f-flaeche: rgba(93,255,142,.22); --f-wende: #6cb8ff; --f-spur: rgba(108,184,255,.5); --f-traktor: #eef3f0;
   --f-fahrgasse: rgba(255,92,92,.75);
+  --f-plan: rgba(108,184,255,.40); --f-plan-fertig: rgba(93,255,142,.30);
+  --f-plan-jetzt: #6cb8ff; --f-zone: rgba(255,176,32,.30);
   /* Menü */
   --bg: #0c1116; --panel: #131a20; --panel-2: #1a232b; --line: #263038;
   --green: #1f8a4b; --green-bright: #5dff8e; --red: #ff4d4d; --blue: #6cb8ff; --blue-solid: #2563eb;
@@ -34,6 +36,8 @@ body.tag {
   --f-vg: rgba(216,54,47,.8); --f-pass: rgba(20,32,26,.16); --f-aktiv: #15a350;
   --f-flaeche: rgba(21,163,80,.28); --f-wende: #1f63d6; --f-spur: rgba(31,99,214,.45); --f-traktor: #14201a;
   --f-fahrgasse: rgba(216,54,47,.75);
+  --f-plan: rgba(31,99,214,.35); --f-plan-fertig: rgba(21,163,80,.30);
+  --f-plan-jetzt: #1f63d6; --f-zone: rgba(181,124,14,.30);
   --bg: #eef1ec; --panel: #ffffff; --panel-2: #f1f4ee; --line: #d3d9d1;
   --green: #15a350; --green-bright: #0f7a3c; --red: #d8362f; --blue: #1f63d6; --blue-solid: #1f63d6;
 }
@@ -144,7 +148,12 @@ body.tag .hint { text-shadow: none; }
 .sections .sec.on { background: var(--leucht); color: var(--leucht-tinte); border-color: transparent; }
 .sections .sec.forced { background: color-mix(in srgb, var(--rot) 25%, transparent); color: var(--rot); border-color: var(--rot); }
 
-/* --- Vorgewende --- */
+/* --- Vorgewende und Planfortschritt --- */
+/* Der Stapel nimmt den Platz, den vorher ein einzelner Balken hatte; die
+ * Balken darin liegen übereinander und nutzen ihn jeder ganz. */
+.vgstapel { flex: 1 1 auto; min-width: 0; max-width: calc(30 * var(--u));
+  display: flex; flex-direction: column; justify-content: flex-end; gap: calc(.8 * var(--u)); }
+.vgstapel > .vg { flex: none; max-width: none; }
 .vg { flex: 1 1 auto; min-width: 0; max-width: calc(30 * var(--u)); padding: calc(1 * var(--u)) calc(1.4 * var(--u)) calc(.9 * var(--u)); }
 .vg .zeile { display: flex; justify-content: space-between; align-items: baseline; gap: calc(1 * var(--u)); font-size: calc(1.1 * var(--u)); font-weight: 600; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); }
 .vg .zeile span { min-width: 0; }
@@ -208,7 +217,7 @@ body.tag .hint { text-shadow: none; }
   .unten { flex-wrap: wrap; }
   .unten > .cluster { flex: 1 1 100%; grid-template-columns: auto auto auto auto; column-gap: calc(3 * var(--u)); }
   .cluster .kmh { grid-column: auto; }
-  .unten > .vg { flex: 1 1 100%; max-width: none; }
+  .unten > .vgstapel { flex: 1 1 100%; max-width: none; }
   .unten > .spalte { flex: 1 1 100%; width: auto; min-width: 0; margin-left: 0; flex-direction: row; flex-wrap: wrap; }
   .reihe:not(.klein) { flex: 1 1 40%; }
   .reihe.klein { flex: 1 1 100%; }

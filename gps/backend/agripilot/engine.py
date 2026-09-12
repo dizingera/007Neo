@@ -397,8 +397,16 @@ class Engine:
         bahn = self.plan.bahn(int(nummer))
         if bahn is None:
             raise KeyError(f"Bahn {nummer} steht nicht im Plan")
+        # Der Spurabstand kommt aus dem Plan, nicht aus dem Maschinenprofil.
+        # Die Bahnen des Plans liegen in seiner Arbeitsbreite nebeneinander;
+        # nähme die Führung hier die des Profils, lägen die angezeigten
+        # Nachbarspuren neben den geplanten Bahnen - und wer einer davon folgt,
+        # fährt am Plan vorbei. Beide Werte stimmen meist überein, weil der
+        # Plan sie aus dem Profil vorbelegt; auseinander gehen sie genau dann,
+        # wenn jemand im Plan bewusst etwas anderes eingetragen hat.
         self.line = GuidanceLine(
-            "ab", [bahn.start, bahn.ende], self.profile.spacing_m,
+            "ab", [bahn.start, bahn.ende],
+            self.plan.einstellungen.arbeitsbreite_m,
             name=f"Bahn {bahn.nummer}", line_id="", derived=True)
         self.plan_bahn = bahn.nummer
         self.note(f"Bahn {bahn.nummer} von {len(self.plan.bahnen)}")

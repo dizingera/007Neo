@@ -34,8 +34,8 @@ const stage = el('stage');
 let F = {};
 function farbenLesen() {
   const cs = getComputedStyle(document.body);
-  F = Object.fromEntries(['boden', 'raster', 'grenze', 'vg', 'pass', 'aktiv', 'flaeche', 'wende', 'spur', 'traktor', 'fahrgasse']
-    .map((k) => [k, cs.getPropertyValue('--f-' + k).trim()]));
+  F = Object.fromEntries(['boden', 'raster', 'grenze', 'vg', 'pass', 'aktiv', 'flaeche', 'wende', 'spur', 'traktor', 'fahrgasse', 'plan', 'planFertig', 'planJetzt', 'zone']
+    .map((k) => [k, cs.getPropertyValue('--f-' + k.replace(/[A-Z]/g, (c) => '-' + c.toLowerCase())).trim()]));
   coverCtx.fillStyle = F.flaeche;
 }
 
@@ -123,6 +123,14 @@ function onState(data) {
 /* -------------------------------------------------------------------- HUD */
 
 /* Ein Chip mit Leuchtpunkt: Text und Farbe, der Punkt bleibt. */
+/* Deutsche Schreibweise, und nur so viele Stellen, wie die Zahl trägt: 140
+ * statt 140,0, aber 0,85 statt 1. */
+function formatZahl(wert, stellen) {
+  if (wert == null || !isFinite(wert)) return '--';
+  const n = stellen != null ? stellen : (Math.abs(wert) >= 100 ? 0 : Math.abs(wert) >= 10 ? 1 : 2);
+  return wert.toFixed(n).replace('.', ',');
+}
+
 function chip(id, text, klasse) {
   const node = el(id);
   if (!node.dataset.aufgebaut) {
@@ -174,6 +182,33 @@ function updateHud(s) {
     el('tiltLabel').textContent = `Hang · ${correction.toFixed(0)} cm`;
   }
 
+  // Der Sollwert der Applikationskarte - die Zahl, nach der der Streuer läuft.
+  // "kein Wert" ist ausdrücklich etwas anderes als null: dort gilt keine Karte.
+  const applikation = s.applikation || {};
+  el('sollBox').hidden = !applikation.aktiv;
+  if (applikation.aktiv) {
+    const wert = applikation.sollwert;
+    el('soll').textContent = wert == null ? '--' : formatZahl(wert);
+    el('soll').className = wert == null ? 'warn' : '';
+    el('sollLabel').textContent = wert == null
+      ? 'ohne Karte' : (applikation.einheit || 'Sollwert');
+  }
+
+  // Der Plan: wie viel ist durch, wie viel bleibt.
+  const plan = s.plan;
+  const fortschritt = plan && plan.fortschritt;
+  el('planBox').hidden = !fortschritt;
+  if (fortschritt) {
+    const anteil = Math.max(0, Math.min(1, fortschritt.flaechen_anteil || 0));
+    el('planLabel').textContent = plan.bahn
+      ? `Bahn ${plan.bahn} von ${plan.bahnen_anzahl}`
+      : `${fortschritt.offen_anzahl} Bahnen offen`;
+    el('planRest').textContent = formatZahl(fortschritt.rest_ha) + ' ha';
+    el('planRest').className = '';
+    el('planBar').style.transform = `scaleX(${anteil.toFixed(3)})`;
+    el('planBar').className = '';
+  }
+
   // Verlauf der Abweichung: sieht man, ob der Regler ruhig arbeitet oder pendelt.
   state.xteVerlauf.push(cm === null ? 0 : Math.max(-30, Math.min(30, cm)));
   if (state.xteVerlauf.length > 200) state.xteVerlauf.shift();
@@ -187,6 +222,11 @@ function updateHud(s) {
   const turn = s.turn || {};
   const zeigen = !!(headland && headland.aktiv && headland.rest_m != null && headland.tiefe_m > 0) || !!turn.aktiv;
   el('restBox').hidden = !zeigen;
+  // Der Stapel verschwindet mit seinem Inhalt - sonst hielte er als leerer
+  // Kasten Platz in der Reihe fest, den die Fahrtzahlen brauchen. Erst hier,
+  // nachdem beide Balken entschieden sind: davor stünde der Stand des
+  // vorigen Bildes.
+  el('vgStapel').hidden = el('planBox').hidden && el('restBox').hidden;
   const ruf = el('ruf');
   if (turn.aktiv) {
     const anteil = turn.punkte && turn.punkte.length > 1 && turn.index != null
@@ -430,6 +470,7 @@ function render() {
   drawCoverage();
   drawBoundary();
   drawHeadland();
+  drawPlan();
   drawPasses();
   drawTrail();
   drawRecording();
@@ -528,6 +569,68 @@ function drawTurn() {
     ctx.lineWidth = 2.2 / state.view.scale;
   }
   ctx.stroke();
+  ctx.restore();
+}
+
+/* Der Arbeitsplan: die Ringe des Vorgewendes, die Bahnen und ihr Stand.
+ *
+ * Gefahrene Bahnen blass grün, offene blau, die gerade geführte kräftig und
+ * dicker. Die Nummern stehen nur dran, wenn genug Platz ist - bei achtzig
+ * Bahnen auf Feldübersicht wären es achtzig übereinanderliegende Zahlen.
+ * Gezeichnet wird vor den Spuren: die aktive Führungslinie muss obenauf
+ * bleiben, nach der wird gefahren. */
+function drawPlan() {
+  const plan = state.live && state.live.plan;
+  if (!plan || !plan.bahnen || !plan.bahnen.length) return;
+  const scale = state.view.scale;
+  const stand = {};
+  if (plan.fortschritt && plan.fortschritt.bahnen) {
+    plan.fortschritt.bahnen.forEach((b) => { stand[b.nummer] = b.erledigt; });
+  }
+
+  ctx.save();
+  (plan.ringe || []).forEach((ring) => {
+    if (ring.length < 3) return;
+    polyline(ring, true);
+    ctx.setLineDash([3 / scale, 7 / scale]);
+    ctx.strokeStyle = F.plan;
+    ctx.lineWidth = 1.2 / scale;
+    ctx.stroke();
+  });
+  ctx.setLineDash([]);
+
+  plan.bahnen.forEach((bahn) => {
+    const jetzt = plan.bahn === bahn.nummer;
+    ctx.beginPath();
+    ctx.moveTo(bahn.start[0], bahn.start[1]);
+    ctx.lineTo(bahn.ende[0], bahn.ende[1]);
+    ctx.strokeStyle = jetzt ? F.planJetzt : (stand[bahn.nummer] ? F.planFertig : F.plan);
+    ctx.lineWidth = (jetzt ? 3.0 : 1.4) / scale;
+    ctx.stroke();
+  });
+
+  // Die Nummer der geführten Bahn immer, die übrigen nur, wenn sie lesbar sind.
+  const beschriften = scale > 0.35;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  plan.bahnen.forEach((bahn) => {
+    const jetzt = plan.bahn === bahn.nummer;
+    if (!jetzt && !beschriften) return;
+    const x = (bahn.start[0] + bahn.ende[0]) / 2;
+    const y = (bahn.start[1] + bahn.ende[1]) / 2;
+    ctx.save();
+    ctx.translate(x, y);
+    // Die Weltansicht zurücknehmen, damit die Zahl aufrecht steht - und zwar
+    // in umgekehrter Reihenfolge: erst die Skalierung (sie spiegelt die
+    // Y-Achse), dann die Drehung. Andersherum bleibt die Spiegelung zwischen
+    // beiden Drehungen stehen, und die Zahl kippt mit doppeltem Winkel weg.
+    ctx.scale(1 / scale, -1 / scale);
+    ctx.rotate(-viewRotation());
+    ctx.fillStyle = jetzt ? F.planJetzt : F.plan;
+    ctx.font = (jetzt ? 'bold 15px' : '12px') + ' system-ui, sans-serif';
+    ctx.fillText(String(bahn.nummer), 0, 0);
+    ctx.restore();
+  });
   ctx.restore();
 }
 
@@ -1034,6 +1137,206 @@ function fillHeadland() {
     ` · Spurabstand ${((profil.width_m || 0) - (profil.overlap_m || 0)).toFixed(2)} m`;
 }
 
+/* ------------------------------------------------------------------- Plan */
+
+function fillPlan() {
+  const s = state.live || {};
+  const plan = s.plan;
+  const profil = s.profile || {};
+  const vorgewende = s.headland || {};
+  const breite = (profil.width_m || 0) - (profil.overlap_m || 0);
+  // Vorbelegt aus Maschine und Vorgewende - genau die Werte, die der Server
+  // auch nimmt, wenn das Feld leer bleibt. Was der Fahrer schon geändert hat,
+  // bleibt stehen.
+  const vorgabe = {
+    arbeitsbreite_m: breite > 0 ? breite.toFixed(2) : '',
+    vorgewende_breiten: breite > 0 && vorgewende.tiefe_m != null
+      ? (vorgewende.tiefe_m / breite).toFixed(1) : '',
+    wenderadius_m: vorgewende.radius_m != null ? vorgewende.radius_m : '',
+    geschwindigkeit_kmh: 8,
+  };
+  document.querySelectorAll('#planForm input, #planForm select').forEach((input) => {
+    if (input.dataset.beruehrt) return;
+    if (plan && plan.einstellungen && plan.einstellungen[input.name] != null) {
+      input.value = plan.einstellungen[input.name];
+    } else if (vorgabe[input.name] !== undefined) {
+      input.value = vorgabe[input.name];
+    }
+  });
+
+  const kennzahlen = el('planKennzahlen');
+  const host = el('planUebersicht');
+  kennzahlen.innerHTML = '';
+  host.innerHTML = '';
+  if (!plan) {
+    el('planInfo').textContent = s.field
+      ? 'Noch kein Plan für dieses Feld.'
+      : 'Erst ein Feld laden.';
+    return;
+  }
+  const f = plan.fortschritt;
+  el('planInfo').textContent =
+    `${plan.bahnen_anzahl} Bahnen · Richtung ${formatZahl(plan.richtung_grad, 0)}°` +
+    (plan.automatisch ? ' (selbst gesucht)' : ' (vorgegeben)') +
+    ` · ${plan.wenden} Wenden · ${formatZahl(plan.strecke_gesamt_m / 1000, 1)} km` +
+    ` · gut ${formatZahl(plan.dauer_min, 0)} min` +
+    (f ? ` · ${formatZahl(f.prozent, 0)} % durch` : '');
+
+  kennzahlen.appendChild(item({
+    title: `Bahnen: ${formatZahl(plan.bahnen_flaeche_ha)} ha`,
+    sub: `Vorgewende ${formatZahl(plan.vorgewende_flaeche_ha)} ha · ` +
+         `Feld ${formatZahl(plan.feld_flaeche_ha)} ha · ` +
+         `Arbeit ${formatZahl(plan.arbeitsstrecke_m / 1000, 1)} km, ` +
+         `Wenden ${formatZahl(plan.wendestrecke_m / 1000, 1)} km, ` +
+         `Ringe ${formatZahl(plan.ringstrecke_m / 1000, 1)} km`,
+  }));
+
+  const erledigt = {};
+  if (f) f.bahnen.forEach((b) => { erledigt[b.nummer] = b; });
+  plan.bahnen.forEach((bahn) => {
+    const stand = erledigt[bahn.nummer];
+    host.appendChild(item({
+      active: plan.bahn === bahn.nummer,
+      title: `Bahn ${bahn.nummer}`,
+      sub: `${formatZahl(bahn.laenge_m, 0)} m · Spur ${bahn.spur}` +
+           (stand ? (stand.erledigt ? ' · gefahren'
+                     : ` · ${formatZahl(stand.anteil * 100, 0)} %`) : ''),
+      actions: [['fahren', async () => {
+        if (await api('POST', `/api/plan/bahn/${bahn.nummer}`)) {
+          toast(`Bahn ${bahn.nummer}`); refreshLists();
+        }
+      }]],
+    }));
+  });
+}
+
+el('btnPlanRechnen').onclick = async () => {
+  const payload = {};
+  document.querySelectorAll('#planForm input, #planForm select').forEach((input) => {
+    const roh = String(input.value).trim();
+    if (roh === '') return;      // leer heißt: der Server nimmt seinen Wert
+    payload[input.name] = input.type === 'number' ? parseFloat(roh) : roh;
+  });
+  el('planInfo').textContent = 'wird gerechnet …';
+  const antwort = await api('POST', '/api/plan', payload);
+  if (antwort) {
+    toast(`${antwort.data.bahnen_anzahl} Bahnen, ${formatZahl(antwort.data.dauer_min, 0)} min`);
+    refreshLists();
+  } else {
+    el('planInfo').textContent = '';
+  }
+};
+
+el('btnPlanNaechste').onclick = async () => {
+  const antwort = await api('POST', '/api/plan/bahn/naechste');
+  if (antwort) { toast(`Nächste: ${antwort.data.name}`); refreshLists(); }
+};
+
+el('btnPlanLoeschen').onclick = async () => {
+  if (await api('DELETE', '/api/plan')) { toast('Plan verworfen'); refreshLists(); }
+};
+
+document.querySelectorAll('#planForm input, #planForm select').forEach((input) => {
+  // Einmal angefasst heißt: nicht mehr überschreiben. Sonst springt der Wert
+  // beim nächsten Zustandsbild zurück, während jemand tippt.
+  input.addEventListener('input', () => { input.dataset.beruehrt = '1'; });
+});
+
+/* ---------------------------------------------------- Applikationskarte */
+
+function fillKarte(uebersicht) {
+  const host = el('karteUebersicht');
+  host.innerHTML = '';
+  if (!uebersicht || !uebersicht.aktiv) {
+    el('karteInfo').textContent = 'Keine Applikationskarte für dieses Feld.';
+    return;
+  }
+  const einheit = uebersicht.einheit || '';
+  el('karteInfo').textContent = `${uebersicht.name} · ${uebersicht.quelle}`;
+
+  (uebersicht.hinweise || []).forEach((hinweis) => {
+    const zeile = item({ title: 'Bitte prüfen', sub: hinweis });
+    zeile.classList.add('warn');
+    host.appendChild(zeile);
+  });
+
+  const geplant = uebersicht.geplant || {};
+  (geplant.zonen || []).forEach((zone) => {
+    host.appendChild(item({
+      title: `${formatZahl(zone.wert)} ${einheit}`,
+      sub: `${formatZahl(zone.flaeche_ha)} ha · ${formatZahl(zone.menge, 0)} gesamt`,
+    }));
+  });
+  if (geplant.menge != null) {
+    host.appendChild(item({
+      title: `Geplant: ${formatZahl(geplant.menge, 0)}`,
+      sub: `auf ${formatZahl(geplant.flaeche_ha)} ha` +
+           (geplant.ohne_wert_ha ? ` · ${formatZahl(geplant.ohne_wert_ha)} ha ohne Karte` : ''),
+    }));
+  }
+
+  const ist = uebersicht.ausgebracht || {};
+  const abgleich = uebersicht.abgleich;
+  host.appendChild(item({
+    title: `Ausgebracht: ${formatZahl(ist.menge, 0)}`,
+    sub: `auf ${formatZahl(ist.flaeche_ha)} ha · Grundlage: ${ist.art}` +
+         (abgleich && abgleich.menge_abweichung_prozent != null
+           ? ` · ${abgleich.menge_abweichung_prozent > 0 ? '+' : ''}` +
+             `${formatZahl(abgleich.menge_abweichung_prozent, 1)} % gegen Plan` : ''),
+    actions: [['abwählen', async () => {
+      if (await api('DELETE', '/api/karte')) { toast('Karte abgewählt'); refreshLists(); }
+    }]],
+  }));
+}
+
+/* Applikationskarte einlesen. Drei Wege, erkannt an den Dateiendungen:
+ * Shapefile, GeoJSON, oder ISO-XML mit Rasterdatei. */
+el('karteDateien').onchange = async (event) => {
+  const dateien = [...event.target.files];
+  event.target.value = '';
+  const finde = (...endungen) => dateien.find((d) =>
+    endungen.some((e) => d.name.toLowerCase().endsWith(e)));
+  const info = el('karteInfo');
+  const einheit = el('karteEinheit').value || null;
+  const b64 = dateiAlsBase64;
+
+  const shp = finde('.shp'), geo = finde('.geojson', '.json'), xml = finde('.xml');
+  const raster = finde('.bin');
+  let payload = null;
+  if (xml) {
+    if (!raster) { toast('Zur TASKDATA.XML gehört die Rasterdatei (.BIN)', true); return; }
+    payload = { taskdata: await b64(xml), raster: await b64(raster),
+                rastername: raster.name, einheit, name: xml.name };
+  } else if (geo) {
+    payload = { geojson: await geo.text(), einheit, name: geo.name };
+  } else if (shp) {
+    const dbf = finde('.dbf'), prj = finde('.prj');
+    if (!dbf) { toast('Zum Shapefile gehört die .dbf mit den Sollwerten', true); return; }
+    // Erst fragen, welche Spalte der Sollwert ist - raten wäre hier teuer.
+    const spalten = await api('POST', '/api/karte/spalten', { dbf: await b64(dbf) });
+    if (!spalten) return;
+    const auswahl = spalten.data.spalten;
+    let spalte = auswahl[0];
+    if (auswahl.length > 1) {
+      spalte = window.prompt(`Welche Spalte ist der Sollwert?\n${auswahl.join(', ')}`,
+                             auswahl[0]);
+      if (!spalte) return;
+    }
+    payload = { shp: await b64(shp), dbf: await b64(dbf),
+                prj: prj ? await prj.text() : null, spalte, einheit, name: shp.name };
+  } else {
+    toast('Keine passende Datei dabei', true); return;
+  }
+
+  info.textContent = 'wird gelesen …';
+  const antwort = await api('POST', '/api/karte/import', payload);
+  if (!antwort) { info.textContent = ''; return; }
+  const hinweise = antwort.data.hinweise || [];
+  toast(hinweise.length ? 'Karte eingelesen – bitte Hinweise prüfen'
+                        : 'Applikationskarte eingelesen');
+  refreshLists();
+};
+
 el('btnSaveHeadland').onclick = async () => {
   const payload = {};
   document.querySelectorAll('#headlandForm input, #headlandForm select, ' +
@@ -1240,6 +1543,10 @@ async function refreshLists() {
     const [jobs, fields] = await Promise.all([
       fetch('/api/jobs').then((r) => r.json()), fetch('/api/fields').then((r) => r.json())]);
     renderJobs(jobs, fields);
+  }
+  if (active === 'plan') {
+    fillPlan();
+    fillKarte(await (await fetch('/api/karte')).json());
   }
   if (active === 'machine') { fillProfile(); renderProfiles(await (await fetch('/api/profiles')).json()); }
   if (active === 'headland') fillHeadland();

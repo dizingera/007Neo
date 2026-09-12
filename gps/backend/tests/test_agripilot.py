@@ -3875,6 +3875,17 @@ class FeldplanFortschrittTest(unittest.TestCase):
             return False
         return bearbeitet
 
+    def test_der_anteil_bleibt_zwischen_null_und_eins(self):
+        """Aus gerundeten Anteilen summiert, kann der Rest minimal überlaufen.
+
+        "-0,0 % durch" sieht auf dem Bildschirm nach einem Fehler aus.
+        """
+        for bearbeitet in (lambda p: False, lambda p: True):
+            stand = self.plan_fortschritt(bearbeitet)
+            self.assertGreaterEqual(stand.flaechen_anteil, 0.0)
+            self.assertLessEqual(stand.flaechen_anteil, 1.0)
+            self.assertGreaterEqual(stand.to_dict()["prozent"], 0.0)
+
     def test_leeres_feld_ist_nichts_erledigt(self):
         stand = self.plan_fortschritt(lambda p: False)
         self.assertEqual(stand.erledigt_anzahl, 0)
@@ -4432,6 +4443,42 @@ class FeldplanApiTest(unittest.TestCase):
                     client.post(f"/api/plan/{plan_id}/load").status_code, 200)
                 self.assertEqual(client.delete("/api/plan").status_code, 200)
                 self.assertFalse(client.get("/api/plan").json()["aktiv"])
+
+    def test_die_gewaehlte_bahn_fuehrt_im_spurabstand_des_plans(self):
+        """Sonst liegen die angezeigten Nachbarspuren neben den geplanten Bahnen."""
+        from agripilot import config as config_module
+        from agripilot.engine import Engine
+
+        with tempfile.TemporaryDirectory() as ordner:
+            config = config_module.load("/kein-solcher-pfad.yaml")
+            config.server.data_dir = ordner
+            store = Storage(os.path.join(ordner, "t.db"))
+            motor = Engine(config, store)
+            feld = store.save_field({"name": "Planfeld", "datum_lat": 48.0,
+                                     "datum_lon": 11.0})
+            motor.load_field(feld["id"])
+            motor.save_boundary([(0.0, 0.0), (300.0, 0.0),
+                                 (300.0, 150.0), (0.0, 150.0)])
+            # Die Maschine ist 3 m breit, geplant wird mit 12 m.
+            motor.update_profile({"width_m": 3.0, "overlap_m": 0.0})
+            plan = motor.plan_rechnen({"arbeitsbreite_m": 12.0})
+            self.assertAlmostEqual(motor.profile.spacing_m, 3.0)
+
+            motor.bahn_waehlen(plan["bahnen"][0]["nummer"])
+            self.assertAlmostEqual(motor.line.spacing, 12.0)
+
+            # Und die Nachbarspur der Führung liegt auf der Nachbarbahn.
+            erste, zweite = plan["bahnen"][0], None
+            for bahn in plan["bahnen"]:
+                if bahn["spur"] == erste["spur"] + 1:
+                    zweite = bahn
+                    break
+            self.assertIsNotNone(zweite)
+            abstand = abs(geo.project_on_segment(
+                tuple(zweite["start"]), tuple(erste["start"]),
+                tuple(erste["ende"]))[2])
+            self.assertAlmostEqual(abstand, motor.line.spacing, places=2)
+            store.close()
 
     def test_ein_geladener_plan_behaelt_seine_bahnnummern(self):
         """Zwei Traktoren müssen mit "Bahn 12" dieselbe Stelle meinen.

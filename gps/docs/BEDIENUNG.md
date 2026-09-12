@@ -29,15 +29,21 @@ nur noch die Mitte brennt. Eine Lampe sind 5 cm. Grün heißt unter 5 cm, gelb b
 dieselbe Richtung: wohin zu lenken ist.
 
 **Links unten** die Fahrt: Geschwindigkeit, Spur- oder Ringnummer, bearbeitete
-Hektar, Hang mit Ausgleich. Die kleine Kurve darunter ist der Verlauf der
+Hektar, Hang mit Ausgleich. Ist eine Applikationskarte gewählt, steht der
+**Sollwert** daneben – die Zahl, nach der der Streuer läuft; wo keine Karte
+gilt, steht *ohne Karte*. Die kleine Kurve darunter ist der Verlauf der
 Abweichung der letzten Sekunden – man sieht, ob die Führung ruhig arbeitet oder
 pendelt. Bei mehreren Teilbreiten steht der Sektionsbalken darunter.
 
-**Unten Mitte** die Strecke bis zum Vorgewende – bis zum *Beginn* des
-Vorgewendes, nicht bis zur Grenze. Sie erscheint nur, wenn eine Feldgrenze
-gespeichert und eine Vorgewendetiefe eingestellt ist. Unter 20 m wird sie
-bernsteinfarben und ruft es über der Karte aus. Während einer Wende zeigt
-dieselbe Fläche den Fortschritt der Wende.
+**Unten Mitte** zwei Balken übereinander, je nachdem, was gerade gilt:
+
+* Der **Plan**: welche Bahn von wie vielen läuft und wie viel Hektar noch offen
+  sind. Er erscheint, sobald ein Arbeitsplan für das Feld gerechnet ist.
+* Die Strecke **bis zum Vorgewende** – bis zum *Beginn* des Vorgewendes, nicht
+  bis zur Grenze. Sie erscheint nur, wenn eine Feldgrenze gespeichert und eine
+  Vorgewendetiefe eingestellt ist. Unter 20 m wird sie bernsteinfarben und ruft
+  es über der Karte aus. Während einer Wende zeigt dieselbe Fläche den
+  Fortschritt der Wende.
 
 **Rechts** die Handlungsspalte, nach Wichtigkeit von unten nach oben – unten
 liegt die Hand am montierten Tablet ohnehin:
@@ -49,6 +55,12 @@ liegt die Hand am montierten Tablet ohnehin:
 | **A setzen / B setzen · A+ · Kontur** | eine Spur anlegen – siehe unten. Kontur ist zugleich die Grenze: einmal um das Feld fahren, fertig. |
 | **◀ 10 cm · 10 cm ▶** | das ganze Spurmuster um zehn Zentimeter versetzen. |
 | **Wende · Kurve · Menü** | klein, weil selten gebraucht. |
+
+**Auf der Karte** liegt, wenn ein Arbeitsplan gerechnet ist, seine Einteilung:
+blasse blaue Linien mit Bahnnummern, dazu die gepunkteten Ringe des
+Vorgewendes. Gefahrene Bahnen werden grün, die gerade geführte kräftig blau und
+dicker. Die Nummern erscheinen erst, wenn weit genug hineingezoomt ist – bei
+achtzig Bahnen auf Feldübersicht lägen achtzig Zahlen übereinander.
 
 **Oben rechts** unter den Statuschips: Näher, Weiter, Ansicht, Tag/Nacht. Die
 Ansicht wechselt zwischen **Perspektive** (Blick über die Haube), **Flach**
@@ -221,6 +233,115 @@ schließt.
 
 Antippen schaltet eine Sektion von Hand ab und wieder frei. Die Automatik
 insgesamt lässt sich unter **Menü → Maschine** abschalten.
+
+## Arbeitsplan (Menü → Plan)
+
+Eine Spur setzt man beim Fahren: A drücken, B drücken, los. Das ist richtig für
+den ersten Schlag. Wer ein Feld zum dritten Mal bearbeitet, weiß aber vorher,
+wie es am wenigsten Wenden kostet – und genau das rechnet der Arbeitsplan aus
+der Feldgrenze aus.
+
+**Voraussetzung ist die Feldgrenze.** Ohne sie gibt es keinen Plan, und das
+steht dann auch so da. Einmal umfahren (siehe *Ein Feld anlegen und vermessen*)
+oder ein Shapefile einlesen.
+
+**Rechnen:** Menü → Plan → *Plan rechnen*. Was im Formular leer bleibt, kommt
+aus der Maschine und aus den Vorgewende-Einstellungen – Arbeitsbreite,
+Vorgewendetiefe und Wendekreis stehen dort schon. Zweimal dasselbe einzutippen
+ist die zuverlässigste Art, zwei verschiedene Werte zu bekommen.
+
+| Feld | Wofür |
+|---|---|
+| **Arbeitsbreite** | Der Abstand der Bahnen. Vorbelegt mit dem Spurabstand der Maschine. |
+| **Vorgewende** | Tiefe in Arbeitsbreiten, wie im Reiter Vorgewende. |
+| **Wenderadius** | Der kleinste Wendekreis. Er entscheidet, ob die Reihenfolge „im Sprung" sinnvoll ist. |
+| **Geschwindigkeit** | Nur für die Zeitschätzung. |
+| **Richtung** | Leer lassen heißt: das Programm sucht sie selbst. Eine eingetragene Zahl wird nicht überstimmt. |
+| **Reihenfolge** | *fortlaufend* fährt Bahn für Bahn. *Im Sprung* lässt so viele Spuren aus, wie der Wendekreis braucht, und holt sie danach nach. |
+
+**Was dabei herauskommt**, steht als Zeile über der Liste: Anzahl der Bahnen,
+die gewählte Richtung (und ob sie selbst gesucht wurde), die Zahl der Wenden,
+die Gesamtstrecke und eine geschätzte Dauer. Darunter die Flächen – was die
+Bahnen abdecken, was aufs Vorgewende entfällt, und die Feldfläche daneben.
+
+**Die Richtung** sucht das Programm, indem es ausprobiert: jede Kante der
+Feldgrenze ist ein Kandidat, dazu ein Raster über alle Richtungen und eine
+feine Nachsuche um den Sieger. Gewonnen hat, wer mit den wenigsten Bahnen
+auskommt; bei Gleichstand die kürzere Gesamtstrecke. Auf einem rechteckigen
+Schlag kommt genau die lange Seite heraus.
+
+**Im Feld sichtbar** wird der Plan als blasse blaue Linien mit Nummern, dazu
+die gepunkteten Ringe des Vorgewendes. Gefahrene Bahnen werden grün, die gerade
+geführte kräftig blau und dicker. Unten steht, welche Bahn von wie vielen läuft
+und wie viel Hektar noch offen sind.
+
+**Eine Bahn fahren:** in der Liste auf *fahren* tippen, oder *Nächste Bahn
+fahren*. Daraus wird eine ganz normale AB-Spur zwischen den beiden Enden der
+Bahn – Lichtbalken, Abweichung, Lenkung und Wende arbeiten wie sonst auch. Der
+Spurabstand kommt dabei aus dem Plan, nicht aus dem Maschinenprofil: sonst
+lägen die angezeigten Nachbarspuren neben den geplanten Bahnen.
+
+„Nächste Bahn" ist die **nächstgelegene** offene, nicht die nächste in der
+Liste. Wer die Reihenfolge einmal verlassen hat, soll nicht ans andere Feldende
+geschickt werden, nur weil dort eine Lücke blieb.
+
+**Was als gefahren gilt**, liest der Plan aus der bearbeiteten Fläche, nicht
+daraus, was angetippt wurde: eine Bahn ist durch, wenn neun Zehntel ihrer Länge
+markiert sind. An den Enden fehlen fast immer ein paar Meter, weil die Wende
+früher beginnt als die Bahn endet. Was ohne **Markieren** gefahren wurde, zählt
+nicht – das Programm sieht nur, was es gemalt hat.
+
+**Der Plan gehört zum Feld** und wird mit abgeglichen. Der zweite Traktor
+bekommt beim Laden des Feldes denselben Plan mit denselben Bahnnummern – auch
+dann, wenn jemand inzwischen die Grenze nachgemessen hat. Neu gerechnet ergäbe
+eine andere Einteilung, und dann meinen zwei Fahrer mit „Bahn 12"
+verschiedene Stellen im Feld. Wer wirklich neu einteilen will, drückt *Plan
+rechnen* noch einmal.
+
+## Applikationskarten (Menü → Plan)
+
+Eine Applikationskarte sagt für jeden Punkt des Feldes, wie viel dort
+ausgebracht werden soll – 140 kg/ha auf dem guten Boden, 90 auf der Kuppe. Sie
+kommt vom Berater, aus dem Satellitenbild oder aus der Ertragskarte des
+Vorjahres.
+
+**Einlesen:** Menü → Plan → *Karte einlesen*. Drei Wege, erkannt an den
+Dateiendungen:
+
+* **Shapefile** mit einer Wertespalte: `.shp`, `.dbf` und möglichst `.prj`
+  zusammen auswählen. Enthält die Tabelle mehrere Zahlenspalten, wird gefragt,
+  welche der Sollwert ist – geraten wird hier nicht.
+* **GeoJSON**: eine Datei, die Eigenschaft mit der Zahl wird gesucht.
+* **ISO-XML** aus dem Terminal: `TASKDATA.XML` **zusammen mit** der Rasterdatei
+  (`.BIN`) auswählen. Ohne die Rasterdatei ist die Karte leer, und das sagt der
+  Import auch, statt eine halbe Karte anzulegen.
+
+**Die Einheit ist der gefährliche Teil.** Im ISO-XML steht nicht die Menge,
+sondern eine ganze Zahl und eine Kennung, die sagt, wie sie gemeint ist. Ein
+Faktor 100 daneben, und der Streuer legt das Hundertfache ab. Deshalb zeigt der
+Import die kleinste, größte und mittlere Menge an und warnt, wenn sie außerhalb
+dessen liegt, was eine Ausbringmenge üblicherweise ist. Abgelehnt wird nichts –
+die Karte kann recht haben –, aber der Fahrer sieht es, bevor der Streuer
+läuft. Ist die Kennung nicht hinterlegt, bleiben die Zahlen unverändert stehen
+und sagen es. Über **Einheit** lässt sich die Umrechnung ausdrücklich vorgeben.
+
+**Im Feld** steht der Sollwert groß bei den Fahrtzahlen. Nachgeschlagen wird er
+an der Stelle des **Geräts**, nicht an der Antenne: bei einem gezogenen Gerät
+liegen dazwischen in der Kurve mehrere Meter, genug, um an der Zonengrenze die
+falsche Menge zu nehmen. Wo keine Karte gilt, steht **ohne Karte** – das ist
+ausdrücklich etwas anderes als null.
+
+**Was ausgebracht wurde**, wird beim Fahren mitgeschrieben: jede neu markierte
+Stelle wird auf den Sollwert gebucht, der dort galt. Unter der Karte stehen die
+geplanten Mengen je Zone, die ausgebrachte Menge und die Abweichung in Prozent.
+*Ausbringung als CSV* gibt das für die Schlagkartei aus, und dieselben Zahlen
+hängen an der Arbeit im Reiter Aufträge.
+
+Diese Zahl ist ehrlich beschränkt, und sie sagt das auch von sich: als
+Grundlage steht **Sollwert der Karte** dabei. Das System weiß, wo die Maschine
+gefahren ist und was die Karte dort verlangt hat. Ob der Streuer die Menge auch
+wirklich abgelegt hat, weiß es nur, wenn die Maschine es zurückmeldet – dann
+steht dort **Istwert der Maschine**.
 
 ## Vorgewende und Wenden (Menü → Vorgewende)
 

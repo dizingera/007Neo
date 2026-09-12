@@ -757,7 +757,11 @@ def fortschritt(plan: Feldplan, ist_bearbeitet,
         bahnen=stand,
         erledigt_anzahl=len(stand) - len(offen),
         offen_anzahl=len(offen),
-        flaechen_anteil=(1.0 - rest_m / gesamt_m) if gesamt_m > 0 else 0.0,
+        # Festgeklemmt: die Restlänge ist aus gerundeten Anteilen summiert und
+        # kann die Gesamtlänge um Zentimeter überschreiten. "-0,0 %" auf dem
+        # Bildschirm sieht nach einem Fehler aus, und genau das ist es nicht.
+        flaechen_anteil=(max(0.0, min(1.0, 1.0 - rest_m / gesamt_m))
+                         if gesamt_m > 0 else 0.0),
         rest_ha=rest_m * breite / 10_000.0,
         naechste=naechste,
     )
