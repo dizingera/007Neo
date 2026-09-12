@@ -1,0 +1,32 @@
+[Unit]
+Description=AgriPilot GPS-Spurführung
+Documentation=file:///opt/agripilot/README.md
+After=network.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=agripilot
+Group=agripilot
+WorkingDirectory=/opt/agripilot/backend
+Environment=AGRIPILOT_CONFIG=/etc/agripilot/config.yaml
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/opt/agripilot/venv/bin/python -m agripilot.server
+
+# Ein Traktor wird über den Hauptschalter ausgeschaltet, nicht heruntergefahren.
+# Deshalb: immer neu starten, und beim Beenden Zeit zum Sauber-Wegschreiben lassen.
+Restart=always
+RestartSec=3
+TimeoutStopSec=15
+KillSignal=SIGINT
+
+# Datenverzeichnis gehört dem Dienst, sonst nichts
+StateDirectory=agripilot
+ReadWritePaths=/var/lib/agripilot
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,361 @@
+/* Kabinen-Oberfläche: der Blick über die Haube.
+
+   Dunkel als Grundzustand, weil das Display nachts direkt im Blickfeld sitzt;
+   ein Tag-Zustand mit hellem Grund, weil ein schwarzer Bildschirm in praller
+   Sonne die wenigsten Reserven hat. Große Flächen, weil bedient wird mit
+   Arbeitshandschuhen auf einem rüttelnden Sitz.
+
+   Farben sagen etwas: Phosphorgrün ist die Spur und nur die Spur. Bernstein
+   warnt, Blau ist die Wende, Rot ist "nicht". Was leuchtet, will etwas. */
+
+:root {
+  --grund: #05090c; --himmel: #0d2a25;
+  --text: #eef3f0; --muted: #86938d;
+  --glas: rgba(9,15,19,.66); --haar: rgba(255,255,255,.09);
+  --leucht: #5dff8e; --leucht-tinte: #06130a; --amber: #ffb020; --rot: #ff4d4d; --blau: #6cb8ff;
+  --led-aus: rgba(255,255,255,.07);
+  /* Karte */
+  --f-boden: #0a1216; --f-raster: rgba(255,255,255,.035); --f-grenze: #ffb020;
+  --f-vg: rgba(255,77,77,.85); --f-pass: rgba(255,255,255,.16); --f-aktiv: #5dff8e;
+  --f-flaeche: rgba(93,255,142,.22); --f-wende: #6cb8ff; --f-spur: rgba(108,184,255,.5); --f-traktor: #eef3f0;
+  --f-fahrgasse: rgba(255,92,92,.75);
+  /* Menü */
+  --bg: #0c1116; --panel: #131a20; --panel-2: #1a232b; --line: #263038;
+  --green: #1f8a4b; --green-bright: #5dff8e; --red: #ff4d4d; --blue: #6cb8ff; --blue-solid: #2563eb;
+  --touch: 52px;
+}
+body.tag {
+  --grund: #dfe6dc; --himmel: #f4f7ef;
+  --text: #14201a; --muted: #57645d;
+  --glas: rgba(255,255,255,.70); --haar: rgba(20,32,26,.12);
+  --leucht: #15a350; --leucht-tinte: #ffffff; --amber: #c96f0c; --rot: #d8362f; --blau: #1f63d6;
+  --led-aus: rgba(20,32,26,.10);
+  --f-boden: #cfd9c9; --f-raster: rgba(20,32,26,.05); --f-grenze: #b57c0e;
+  --f-vg: rgba(216,54,47,.8); --f-pass: rgba(20,32,26,.16); --f-aktiv: #15a350;
+  --f-flaeche: rgba(21,163,80,.28); --f-wende: #1f63d6; --f-spur: rgba(31,99,214,.45); --f-traktor: #14201a;
+  --f-fahrgasse: rgba(216,54,47,.75);
+  --bg: #eef1ec; --panel: #ffffff; --panel-2: #f1f4ee; --line: #d3d9d1;
+  --green: #15a350; --green-bright: #0f7a3c; --red: #d8362f; --blue: #1f63d6; --blue-solid: #1f63d6;
+}
+
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+[hidden] { display: none !important; }
+
+html, body {
+  margin: 0; height: 100%; overflow: hidden;
+  background: var(--grund); color: var(--text);
+  font-family: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  user-select: none;
+}
+body { height: 100dvh; }
+button { font: inherit; color: inherit; }
+
+/* Maßeinheit der Kabine: 1 vw der Bühne. Damit skaliert alles mit dem Tablet,
+   ohne dass irgendwo ein Pixelwert zu klein wird. */
+.stage { position: relative; width: 100%; height: 100%; overflow: hidden; --u: 1vw; }
+@media (orientation: portrait) { .stage { --u: 1.6vw; } }
+
+/* --- Das Feld --- */
+.buehne { position: absolute; inset: 0; perspective: calc(110 * var(--u)); perspective-origin: 50% 26%; overflow: hidden; }
+/* Der Ankerpunkt (wo der Traktor sitzt) liegt bei 78 % der Leinwand und soll
+   auf 74 % der Bühnenhöhe landen - unabhängig davon, ob das Tablet 16:10,
+   16:9 oder 4:3 ist. Deshalb wird die Leinwand von dort aus nach oben gesetzt,
+   nicht von oben herab. Gedreht wird um genau diesen Punkt, damit er beim
+   Kippen stehen bleibt. */
+.feld {
+  position: absolute; left: 50%; top: calc(74% - 109.2 * var(--u)); width: calc(140 * var(--u)); height: calc(140 * var(--u));
+  margin-left: calc(-70 * var(--u)); transform-origin: 50% 78%;
+  transform: rotateX(54deg); will-change: transform;
+  transition: transform .5s ease;   /* nicht top: das springt beim Laden sonst von 0 herunter */
+}
+.stage.flach .feld { transform: rotateX(0deg); }
+.stage.nord .feld { top: calc(50% - 70 * var(--u)); transform: rotateX(0deg); }
+.feld canvas { width: 100%; height: 100%; display: block; touch-action: none; }
+.himmel { position: absolute; inset: 0; pointer-events: none;
+  background: linear-gradient(180deg, var(--himmel) 0%, var(--grund) 34%, transparent 60%); transition: opacity .5s; }
+.stage.flach .himmel, .stage.nord .himmel { opacity: 0; }
+.vignette { position: absolute; inset: 0; pointer-events: none;
+  background: radial-gradient(120% 90% at 50% 70%, transparent 55%, rgba(0,0,0,.45) 100%); }
+body.tag .vignette { background: radial-gradient(120% 90% at 50% 70%, transparent 60%, rgba(20,32,26,.18) 100%); }
+
+/* --- Lichtbalken --- */
+.balken { position: absolute; left: 50%; top: calc(2.2 * var(--u)); transform: translateX(-50%); width: calc(46 * var(--u)); z-index: 3; text-align: center; pointer-events: none; }
+.leds { display: grid; grid-template-columns: repeat(21, 1fr); gap: calc(.45 * var(--u)); height: calc(1.5 * var(--u)); }
+.leds .led { border-radius: calc(.3 * var(--u)); background: var(--led-aus); transition: background 80ms linear, box-shadow 80ms linear;
+  transform: translateY(calc(var(--h, 0) * -1 * var(--u))); }
+.leds .led.centre { background: color-mix(in srgb, var(--text) 25%, transparent); }
+.leds .led.on-green { background: var(--leucht); box-shadow: 0 0 calc(1.2 * var(--u)) var(--leucht); }
+.leds .led.on-amber { background: var(--amber); box-shadow: 0 0 calc(1.2 * var(--u)) var(--amber); }
+.leds .led.on-red { background: var(--rot); box-shadow: 0 0 calc(1.2 * var(--u)) var(--rot); }
+.mitte { position: absolute; left: 50%; top: calc(-.5 * var(--u)); width: calc(.25 * var(--u)); height: calc(2.6 * var(--u)); margin-left: calc(-.125 * var(--u)); background: var(--text); opacity: .6; }
+.abw { margin-top: calc(1.1 * var(--u)); font-family: "Rajdhani", "Bahnschrift", "Roboto Condensed", sans-serif; font-weight: 700;
+  font-size: calc(7.6 * var(--u)); line-height: .9; letter-spacing: -.01em; font-variant-numeric: tabular-nums;
+  display: flex; align-items: baseline; justify-content: center; gap: calc(.7 * var(--u)); }
+.abw .pfeil { font-size: calc(4 * var(--u)); color: var(--muted); }
+.abw b.ok, .abw .pfeil.ok { color: var(--leucht); } .abw b.warn { color: var(--amber); } .abw b.bad { color: var(--rot); }
+.abw small { font-family: "IBM Plex Sans", sans-serif; font-size: calc(1.3 * var(--u)); font-weight: 600; color: var(--muted); letter-spacing: .14em; text-transform: uppercase; }
+
+/* --- Glas --- */
+.glas { position: absolute; background: var(--glas); backdrop-filter: blur(16px) saturate(1.2); -webkit-backdrop-filter: blur(16px) saturate(1.2);
+  border: 1px solid var(--haar); border-radius: calc(1.6 * var(--u)); z-index: 3; }
+.chips { position: absolute; top: calc(2.2 * var(--u)); display: flex; flex-direction: column; gap: calc(.7 * var(--u)); z-index: 3; pointer-events: none; }
+.chips.l { left: calc(2.2 * var(--u)); align-items: flex-start; max-width: calc(50% - 26.4 * var(--u)); } .chips.r { right: calc(2.2 * var(--u)); align-items: flex-end; }
+.chip { display: inline-flex; align-items: center; gap: calc(.6 * var(--u)); padding: calc(.55 * var(--u)) calc(1.1 * var(--u)); border-radius: 999px;
+  background: var(--glas); border: 1px solid var(--haar); font-size: calc(1.25 * var(--u)); font-weight: 600; white-space: nowrap; backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); }
+.chip i { width: calc(.8 * var(--u)); height: calc(.8 * var(--u)); border-radius: 50%; background: var(--muted); flex: none; }
+.chip.good { color: var(--leucht); } .chip.good i { background: var(--leucht); box-shadow: 0 0 calc(.8 * var(--u)) var(--leucht); }
+.chip.warn { color: var(--amber); } .chip.warn i { background: var(--amber); box-shadow: 0 0 calc(.8 * var(--u)) var(--amber); }
+.chip.bad { color: var(--rot); } .chip.bad i { background: var(--rot); }
+.chip.titel { font-family: "Rajdhani", "Bahnschrift", sans-serif; font-weight: 700; font-size: calc(1.9 * var(--u)); letter-spacing: .03em; text-transform: uppercase; padding: calc(.5 * var(--u)) calc(1.3 * var(--u)); }
+.hint { margin-top: calc(.4 * var(--u)); font-size: calc(1.3 * var(--u)); font-weight: 600; color: var(--amber); max-width: calc(34 * var(--u)); white-space: pre-line; text-shadow: 0 1px 6px rgba(0,0,0,.6); }
+body.tag .hint { text-shadow: none; }
+.hint.alarm { color: var(--rot); animation: alarm 1s steps(2) infinite; }
+@keyframes alarm { 50% { opacity: .35; } }
+
+/* --- Ansicht --- */
+.ansicht { position: absolute; right: calc(2.2 * var(--u)); top: calc(9.8 * var(--u)); display: flex; flex-direction: row; gap: calc(.7 * var(--u)); z-index: 3; }
+.rund { width: calc(4.6 * var(--u)); height: calc(4.6 * var(--u)); min-width: 44px; min-height: 44px; border-radius: 50%; display: grid; place-items: center;
+  background: var(--glas); color: var(--text); border: 1px solid var(--haar); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); font-size: calc(2.2 * var(--u)); font-weight: 600; cursor: pointer; }
+.rund svg { width: calc(2.4 * var(--u)); height: calc(2.4 * var(--u)); min-width: 22px; min-height: 22px; stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.rund.an { color: var(--leucht); border-color: color-mix(in srgb, var(--leucht) 40%, transparent); }
+
+/* --- Die untere Reihe --- */
+.unten { position: absolute; left: calc(2.2 * var(--u)); right: calc(2.2 * var(--u)); bottom: calc(2.2 * var(--u));
+  display: flex; align-items: flex-end; gap: calc(1.2 * var(--u)); z-index: 3; pointer-events: none; }
+.unten > * { pointer-events: auto; }
+.unten > .glas { position: static; }
+
+/* --- Fahrt-Cluster --- */
+.cluster { padding: calc(1.3 * var(--u)) calc(1.6 * var(--u)) calc(1.1 * var(--u)); flex: none;
+  display: grid; grid-template-columns: auto auto auto; gap: calc(.9 * var(--u)) calc(2.2 * var(--u)); font-variant-numeric: tabular-nums; }
+.cluster .kmh { grid-column: 1 / -1; display: flex; align-items: baseline; gap: calc(.8 * var(--u)); }
+.cluster .kmh b { font-family: "Rajdhani", "Bahnschrift", sans-serif; font-weight: 700; font-size: calc(6.2 * var(--u)); line-height: .9; }
+.cluster .kmh span, .cluster div span { font-size: calc(1.05 * var(--u)); font-weight: 600; color: var(--muted); letter-spacing: .12em; text-transform: uppercase; }
+.cluster div b { display: block; font-family: "Rajdhani", "Bahnschrift", sans-serif; font-weight: 600; font-size: calc(2.6 * var(--u)); line-height: 1; }
+.cluster div b.warn { color: var(--amber); }
+.cluster .spark { grid-column: 1 / -1; height: calc(3 * var(--u)); }
+.cluster .spark svg { width: 100%; height: 100%; display: block; }
+.cluster .spark path { fill: none; stroke: var(--leucht); stroke-width: 2; vector-effect: non-scaling-stroke; }
+.cluster .spark .band { fill: color-mix(in srgb, var(--leucht) 10%, transparent); stroke: none; }
+.cluster .spark .null { stroke: var(--haar); stroke-width: 1; }
+.cluster .sections { grid-column: 1 / -1; display: flex; gap: calc(.3 * var(--u)); }
+.sections .sec { flex: 1; height: calc(2.2 * var(--u)); min-height: 24px; border-radius: calc(.4 * var(--u)); background: var(--led-aus);
+  border: 1px solid var(--haar); font-size: calc(1 * var(--u)); color: var(--muted); display: grid; place-items: center; cursor: pointer; }
+.sections .sec.on { background: var(--leucht); color: var(--leucht-tinte); border-color: transparent; }
+.sections .sec.forced { background: color-mix(in srgb, var(--rot) 25%, transparent); color: var(--rot); border-color: var(--rot); }
+
+/* --- Vorgewende --- */
+.vg { flex: 1 1 auto; min-width: 0; max-width: calc(30 * var(--u)); padding: calc(1 * var(--u)) calc(1.4 * var(--u)) calc(.9 * var(--u)); }
+.vg .zeile { display: flex; justify-content: space-between; align-items: baseline; gap: calc(1 * var(--u)); font-size: calc(1.1 * var(--u)); font-weight: 600; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); }
+.vg .zeile span { min-width: 0; }
+.vg .zeile b { flex: none; white-space: nowrap; font-family: "Rajdhani", "Bahnschrift", sans-serif; font-weight: 700; font-size: calc(2.8 * var(--u)); letter-spacing: 0; color: var(--text); font-variant-numeric: tabular-nums; }
+.vg .zeile b.warn { color: var(--amber); } .vg .zeile b.turn { color: var(--blau); }
+.vg .bar { height: calc(.7 * var(--u)); border-radius: 999px; background: var(--led-aus); margin-top: calc(.7 * var(--u)); overflow: hidden; }
+.vg .bar i { display: block; height: 100%; width: 100%; background: var(--leucht); border-radius: 999px; transform-origin: left; transition: background .3s; }
+.vg .bar i.warn { background: var(--amber); } .vg .bar i.turn { background: var(--blau); }
+.ruf { position: absolute; left: 50%; transform: translateX(-50%); bottom: calc(24 * var(--u)); z-index: 3; pointer-events: none;
+  font-family: "Rajdhani", "Bahnschrift", sans-serif; font-weight: 700; font-size: calc(2 * var(--u)); letter-spacing: .06em; text-transform: uppercase;
+  color: var(--amber); text-shadow: 0 0 calc(2 * var(--u)) color-mix(in srgb, var(--amber) 60%, transparent); opacity: 0; transition: opacity .3s; }
+.ruf.an { opacity: 1; }
+
+/* --- Handlungsspalte --- */
+.spalte { flex: none; width: calc(28 * var(--u)); min-width: 270px; margin-left: auto;
+  display: flex; flex-direction: column; gap: calc(.8 * var(--u)); }
+.reihe { display: flex; gap: calc(.8 * var(--u)); }
+.reihe .taste { flex: 1; justify-content: center; padding: 0 calc(.6 * var(--u)); }
+.taste { display: flex; align-items: center; gap: calc(.6 * var(--u)); padding: 0 calc(1.2 * var(--u)); height: calc(5 * var(--u)); min-height: 48px;
+  border-radius: calc(1.2 * var(--u)); background: var(--glas); border: 1px solid var(--haar); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+  font-size: calc(1.4 * var(--u)); font-weight: 600; white-space: nowrap; cursor: pointer; text-align: left; color: var(--text); }
+.taste svg { width: calc(2.2 * var(--u)); height: calc(2.2 * var(--u)); min-width: 18px; min-height: 18px; stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+.taste:active { background: color-mix(in srgb, var(--text) 12%, var(--glas)); }
+.taste:focus-visible { outline: calc(.3 * var(--u)) solid var(--text); outline-offset: 2px; }
+.taste:disabled { opacity: .4; cursor: default; }
+.taste.recording { color: var(--rot); border-color: color-mix(in srgb, var(--rot) 50%, transparent); }
+.reihe.klein .taste { height: calc(3.6 * var(--u)); min-height: 40px; font-size: calc(1.1 * var(--u)); color: var(--muted); border-radius: 999px; padding: 0 calc(.5 * var(--u)); gap: calc(.35 * var(--u)); }
+.reihe.klein .taste svg { width: calc(1.6 * var(--u)); height: calc(1.6 * var(--u)); min-width: 14px; min-height: 14px; }
+.taste.turn { position: relative; overflow: hidden; color: var(--blau); border-color: color-mix(in srgb, var(--blau) 35%, transparent); flex: 1.15; }
+.taste.turn .fuellung { position: absolute; left: 0; top: 0; bottom: 0; width: 0; background: color-mix(in srgb, var(--blau) 22%, transparent); z-index: -1; }
+.taste.turn.geplant { border-color: var(--blau); }
+.taste.turn.aktiv { color: #fff; background: var(--blau); border-color: transparent; }
+.taste.mark, .taste.lenk { gap: calc(1 * var(--u)); font-family: "Rajdhani", "Bahnschrift", sans-serif; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
+.taste.mark span, .taste.lenk span { display: flex; flex-direction: column; line-height: 1; flex: 1; }
+.taste.mark small, .taste.lenk small { font-family: "IBM Plex Sans", sans-serif; font-weight: 600; font-size: calc(1.05 * var(--u)); letter-spacing: .02em; text-transform: none; margin-top: calc(.35 * var(--u)); opacity: .8; white-space: normal; line-height: 1.15; }
+.taste.mark i, .taste.lenk i { border-radius: 50%; background: var(--muted); flex: none; }
+.taste.mark { height: calc(6.2 * var(--u)); min-height: 56px; border-radius: calc(1.4 * var(--u)); font-size: calc(2 * var(--u)); }
+.taste.mark i { width: calc(1 * var(--u)); height: calc(1 * var(--u)); }
+.taste.mark svg { width: calc(2.6 * var(--u)); height: calc(2.6 * var(--u)); }
+.taste.mark.an { color: var(--leucht); border-color: color-mix(in srgb, var(--leucht) 45%, transparent); }
+.taste.mark.an i { background: var(--leucht); box-shadow: 0 0 calc(.9 * var(--u)) var(--leucht); }
+.taste.lenk { height: calc(9 * var(--u)); min-height: 72px; padding: 0 calc(1.6 * var(--u)) 0 calc(1.8 * var(--u)); border-radius: calc(1.6 * var(--u)); font-size: calc(2.6 * var(--u)); }
+.taste.lenk i { width: calc(1.2 * var(--u)); height: calc(1.2 * var(--u)); }
+.taste.lenk svg { width: calc(3.4 * var(--u)); height: calc(3.4 * var(--u)); stroke-width: 1.8; }
+.taste.lenk.an { color: var(--leucht-tinte); background: var(--leucht); border-color: transparent;
+  box-shadow: 0 0 calc(3.4 * var(--u)) color-mix(in srgb, var(--leucht) 45%, transparent), inset 0 calc(-.3 * var(--u)) 0 rgba(0,0,0,.15); }
+.taste.lenk.an i { background: var(--leucht-tinte); animation: puls 1.6s ease-in-out infinite; }
+.taste.lenk.scharf { color: var(--amber); border-color: color-mix(in srgb, var(--amber) 55%, transparent); }
+.taste.lenk.scharf i { background: var(--amber); box-shadow: 0 0 calc(.9 * var(--u)) var(--amber); animation: puls 1.6s ease-in-out infinite; }
+.taste.lenk:not(.an):not(.scharf) i { background: var(--rot); }
+@keyframes puls { 50% { opacity: .3; } }
+@media (prefers-reduced-motion: reduce) { .taste i { animation: none !important; } .hint.alarm { animation: none; } .feld { transition: none; } }
+
+/* Hochkant: die Spalte wird zur unteren Leiste, zwei Tasten je Zeile; die
+   Zahlen rücken nach oben unter die Chips, das Vorgewende sitzt über der
+   Leiste. Entschieden nach Ausrichtung, nicht nach Breite - ein Tablet
+   hochkant ist 768 px breit und damit kein "schmaler Bildschirm". */
+@media (orientation: portrait) {
+  /* Hochkant stapelt sich die Reihe: Zahlen als Streifen, darunter Vorgewende,
+     darunter die Tasten in zwei Spalten. Alles im Fluss, nichts überlappt. */
+  .unten { flex-wrap: wrap; }
+  .unten > .cluster { flex: 1 1 100%; grid-template-columns: auto auto auto auto; column-gap: calc(3 * var(--u)); }
+  .cluster .kmh { grid-column: auto; }
+  .unten > .vg { flex: 1 1 100%; max-width: none; }
+  .unten > .spalte { flex: 1 1 100%; width: auto; min-width: 0; margin-left: 0; flex-direction: row; flex-wrap: wrap; }
+  .reihe:not(.klein) { flex: 1 1 40%; }
+  .reihe.klein { flex: 1 1 100%; }
+  .taste.mark { flex: 1 1 40%; height: calc(9 * var(--u)); }
+  .taste.lenk { flex: 1 1 50%; }
+  .ruf { bottom: calc(50 * var(--u)); }
+  .balken { width: calc(60 * var(--u)); }
+  /* Die Chips rücken unter den Balken - nebeneinander ist hochkant kein Platz. */
+  .chips { top: calc(13 * var(--u)); }
+  .chips.l { max-width: 60%; }
+  .ansicht { top: calc(25 * var(--u)); }
+}
+
+/* --- Menü --- */
+.sheet {
+  position: fixed; inset: 0; background: color-mix(in srgb, var(--bg) 96%, transparent); z-index: 20;
+  display: flex; flex-direction: column;
+}
+.sheet-head {
+  display: flex; align-items: center; gap: 8px; padding: 10px;
+  border-bottom: 1px solid var(--line);
+}
+.tabs { display: flex; gap: 6px; flex-wrap: wrap; }
+.tab {
+  padding: 11px 16px; border-radius: 8px; background: var(--panel-2);
+  color: var(--muted); border: 1px solid var(--line); font-size: 15px;
+}
+.tab.active { background: var(--panel); color: var(--text); border-color: var(--blue); }
+.close { margin-left: auto; width: 48px; height: 48px; border-radius: 8px;
+  background: var(--panel-2); color: var(--text); border: 1px solid var(--line); font-size: 18px; }
+.tab-panel { padding: 14px; overflow-y: auto; flex: 1; }
+
+.row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 12px; }
+.row input[type=text], .row input:not([type]) { flex: 1; min-width: 200px; }
+input, select {
+  padding: 12px; border-radius: 8px; background: var(--panel-2);
+  border: 1px solid var(--line); color: var(--text); font-size: 16px; width: 100%;
+}
+button, .button {
+  padding: 12px 18px; border-radius: 8px; background: var(--panel-2);
+  border: 1px solid var(--line); color: var(--text); font-size: 15px;
+  cursor: pointer; text-decoration: none;
+  /* inline-flex statt inline-block: sonst klebt die Beschriftung oben,
+     sobald die Mindesthöhe den Knopf streckt. */
+  display: inline-flex; align-items: center; justify-content: center;
+  /* Bedient wird mit Arbeitshandschuhen auf einem rüttelnden Sitz. 44 px ist
+     das Maß, unter dem daneben gegriffen wird - auch in den Listen. */
+  min-height: 44px;
+}
+button.primary, .button.primary { background: var(--blue-solid); border-color: var(--blue-solid); color: #fff; }
+button.danger { background: color-mix(in srgb, var(--red) 16%, var(--panel)); border-color: var(--red); color: var(--red); }
+.note { color: var(--muted); font-size: 13px; line-height: 1.5; margin: 6px 0 14px; }
+
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 10px; }
+.grid label { font-size: 12px; color: var(--muted); display: flex; flex-direction: column; gap: 5px; }
+.switch { display: flex; flex-direction: row; align-items: center; gap: 8px; font-size: 14px; color: var(--text); }
+/* Zwischenüberschrift in einem Reiter, der zwei Dinge nebeneinander zeigt. */
+.abschnitt { margin: 22px 0 8px; font-size: 15px; color: var(--muted);
+             font-weight: 600; border-top: 1px solid var(--line); padding-top: 16px; }
+.switch input { width: 22px; height: 22px; }
+
+.list { display: flex; flex-direction: column; gap: 8px; }
+.item {
+  display: flex; align-items: center; gap: 12px; padding: 12px 14px;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+}
+/* Tag wie Nacht: der Grünstich kommt aus dem Grün des Themas, nicht aus einer
+   festen Nachtfarbe - sonst steht am Tag dunkle Schrift auf dunklem Grün. */
+.item.active { border-color: var(--green); background: color-mix(in srgb, var(--green) 12%, var(--panel)); }
+.item .main { flex: 1; min-width: 0; }
+.item .title { font-size: 16px; font-weight: 600; }
+.item .sub { font-size: 12px; color: var(--muted); margin-top: 2px; }
+.item .actions { display: flex; gap: 6px; }
+.item .actions button, .item .actions a { padding: 9px 12px; font-size: 13px; }
+.item .actions button.an { border-color: var(--green); color: var(--green); }
+/* Die Spuren eines Feldes: eingerückt unter dem Feld, gleiche Zeilen, kleiner. */
+.unterliste { display: flex; flex-direction: column; gap: 6px; margin: -2px 0 6px 22px;
+  padding-left: 12px; border-left: 2px solid var(--line); }
+.unterliste .item { padding: 8px 10px; }
+.unterliste .item .title { font-size: 14px; }
+.unterliste:empty { display: none; }
+.gruppe { display: flex; align-items: baseline; justify-content: space-between; gap: 10px;
+  margin: 18px 0 6px; font-size: 15px; color: var(--muted); }
+.gruppe b { color: var(--text); font-size: 16px; }
+.gruppe:first-child { margin-top: 0; }
+.row select { padding: 10px 12px; }
+label.button { display: inline-flex; align-items: center; cursor: pointer; }
+
+/* --- Einstellungen --- */
+.sticky-save {
+  position: sticky; top: 0; z-index: 2; margin: -14px -14px 12px; padding: 12px 14px;
+  background: var(--bg); border-bottom: 1px solid var(--line);
+}
+.setting-group {
+  border: 1px solid var(--line); border-radius: 10px; background: var(--panel);
+  margin-bottom: 12px; overflow: hidden;
+}
+.setting-group > summary {
+  padding: 14px; font-size: 16px; font-weight: 600; cursor: pointer;
+  min-height: 44px; display: flex; align-items: center; gap: 10px;
+}
+.setting-group > summary::marker { color: var(--muted); }
+.setting-group .group-note { color: var(--muted); font-size: 13px; line-height: 1.5;
+  padding: 0 14px 10px; }
+.setting-field { padding: 10px 14px; border-top: 1px solid var(--line); }
+.setting-field > label { display: block; font-size: 13px; color: var(--muted);
+  margin-bottom: 6px; }
+.setting-field .unit { color: var(--muted); font-size: 12px; margin-left: 6px; }
+.setting-field .help { color: var(--muted); font-size: 12px; line-height: 1.5; margin-top: 6px; }
+.setting-field .warn { color: var(--red); font-size: 12px; line-height: 1.5; margin-top: 6px; }
+.setting-field .restart { color: var(--amber); font-size: 12px; margin-top: 6px; }
+.setting-field.changed { background: color-mix(in srgb, var(--blue) 12%, var(--panel)); }
+.setting-field.changed > label { color: var(--blue); }
+
+/* --- Inbetriebnahme --- */
+.progress {
+  flex: 1; min-width: 160px; height: 10px; border-radius: 5px;
+  background: var(--panel-2); border: 1px solid var(--line); overflow: hidden;
+}
+.progress-bar { height: 100%; width: 0; background: var(--green); transition: width .3s; }
+
+.step { display: block; }
+.step .head { display: flex; align-items: center; gap: 12px; }
+.step .nr {
+  flex: none; width: 30px; height: 30px; border-radius: 50%;
+  background: var(--panel-2); border: 1px solid var(--line);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 14px; font-weight: 700; color: var(--muted);
+}
+.step.done .nr { background: color-mix(in srgb, var(--green) 15%, var(--panel)); border-color: var(--green); color: var(--green-bright); }
+.step.now { border-color: var(--blue); }
+.step.now .nr { background: color-mix(in srgb, var(--blue) 15%, var(--panel)); border-color: var(--blue); color: var(--blue); }
+.step .why { font-size: 13px; color: var(--muted); line-height: 1.5; margin: 8px 0 0 42px; }
+.step .check { font-size: 13px; margin: 8px 0 0 42px; }
+.step .check.good { color: var(--green-bright); }
+.step .check.bad { color: var(--red); }
+.step .check.unknown { color: var(--muted); }
+.step .foot { display: flex; align-items: center; gap: 10px; margin: 10px 0 0 42px; }
+.step .foot .quittung { font-size: 13px; color: var(--text); flex: 1; }
+
+.toast {
+  /* Oben unter dem Balken, nicht unten: dort liegen die Zahlen und der
+     Vorgewende-Kasten, und eine Meldung darüber verdeckte genau das. */
+  position: fixed; left: 50%; top: calc(13 * var(--u)); transform: translateX(-50%); max-width: 70vw;
+  background: var(--panel-2); border: 1px solid var(--line); border-left: 4px solid var(--blue);
+  padding: 13px 18px; border-radius: 8px; font-size: 15px; z-index: 30;
+  max-width: 80vw; box-shadow: 0 8px 24px #0008;
+}
+.toast.error { border-left-color: var(--red); }
+
