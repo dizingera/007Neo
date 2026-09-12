@@ -43,11 +43,19 @@ Fahrer sieht, dass gerade kein Wert aus der Karte kommt.
 
 from __future__ import annotations
 
+import threading
 import time
 from dataclasses import dataclass
-from typing import Optional
+from typing import Any, Optional
 
 RUECKFALL_ARTEN = ("halten", "aus")
+
+# Obergrenze für alles, was auf den Draht geht. Kein Maß, sondern eine
+# Plausibilitätsschranke: die größte Einheit, die hier vorkommt, ist Stück je
+# Hektar mit ein paar Millionen. Eine Milliarde ist unter keiner Einheit eine
+# Ausbringmenge, sondern ein kaputter Wert - und eine 31-stellige Zahl sprengt
+# das Eingabefeld jeder Gegenstelle.
+WERT_MAX = 1e9
 
 # Kleiner als das ist kein neuer Sollwert, sondern Rauschen an einer
 # Zonengrenze. Ohne diese Schwelle schickt eine Rasterkarte bei jeder
@@ -58,6 +66,57 @@ AENDERUNG_MIN = 0.5
 # Auch ohne Änderung wird regelmäßig gesendet: die Gegenstelle hat meist einen
 # Wachhund, der ohne frische Befehle abschaltet.
 HERZSCHLAG_S = 1.0
+
+
+def sendbar(wert: Optional[float]) -> bool:
+    """Taugt diese Zahl als Sollwert für eine Maschine?
+
+    Die eine Stelle, an der entschieden wird, was den Rechner verlassen darf.
+    Eine kaputte Karte liefert ohne Weiteres ein NaN - aus einer leeren Zelle,
+    aus einer Division, aus einer Umrechnung mit einem fehlenden Faktor -, und
+    ``f"{nan:.2f}"`` schreibt anstandslos ``SOLL nan kg/ha`` auf den Draht. Was
+    eine Gegenstelle daraus macht, weiß niemand: im besten Fall lehnt sie ab,
+    im schlechtesten liest sie eine Null oder Müll.
+
+    Negativ ist ebenso wenig ein Sollwert. Eine Maschine kann nichts
+    *ent*streuen, und ein Minuszeichen an der falschen Stelle einer Karte darf
+    nicht als Anweisung durchgehen.
+    """
+    if wert is None:
+        return False
+    try:
+        zahl = float(wert)
+    except (TypeError, ValueError):
+        return False
+    if zahl != zahl or zahl in (float("inf"), float("-inf")):
+        return False
+    return 0.0 <= zahl <= WERT_MAX
+
+
+def rueckfall_lesen(text: Any) -> tuple[str, Optional[float], str]:
+    """Die Einstellung "Ohne Karte" auswerten.
+
+    Liefert die Art (``halten``, ``aus`` oder ``zahl``), bei einer Zahl deren
+    Wert, und einen Klartext für die Anzeige. Was nicht zu verstehen ist, wird
+    zu ``halten`` - mit einem Vermerk, damit es nicht stillschweigend
+    geschieht.
+
+    Das Komma zählt wie der Punkt: die ganze Oberfläche ist deutsch, und
+    ``140,5`` ist hier die naheliegendste Schreibweise. Ohne diese Zeile würde
+    daraus stumm "halten", und der Fahrer suchte den Fehler bei sich.
+    """
+    roh = str(text if text is not None else "").strip()
+    if roh == "aus":
+        return "aus", 0.0, "aus (null)"
+    if roh in ("", "halten"):
+        return "halten", None, "halten (letzter Wert)"
+    try:
+        zahl = float(roh.replace(",", "."))
+    except ValueError:
+        return "halten", None, f"'{roh}' nicht verstanden - es gilt halten"
+    if not sendbar(zahl):
+        return "halten", None, f"'{roh}' ist kein Sollwert - es gilt halten"
+    return "zahl", zahl, f"fest {zahl:g}"
 
 
 @dataclass
@@ -120,6 +179,18 @@ class NurAnzeige(SollwertAusgang):
         self.status = "nur Anzeige (kein Ausgang)"
 
 
+def satz(befehl: SollwertBefehl) -> str:
+    """Der Satz, der auf den Draht geht.
+
+    Ohne Wert geht die Null hinaus, nicht ein leeres Feld: die Gegenstelle
+    bekommt immer eine Zahl, und "nichts ausbringen" ist eine klare Anweisung.
+    Was hier ankommt, ist durch ``sendbar`` gegangen - eine Zahl also, keine
+    Überraschung.
+    """
+    wert = befehl.wert if sendbar(befehl.wert) else 0.0
+    return f"SOLL {wert:.2f} {befehl.einheit or '-'}"
+
+
 class SeriellerAusgang(SollwertAusgang):
     """Eine Zeile je Befehl auf eine serielle Schnittstelle.
 
@@ -128,6 +199,20 @@ class SeriellerAusgang(SollwertAusgang):
     ohne dass jemand ein Protokoll nachbauen muss. Wer ISOBUS hat, hängt hier
     seine Brücke an; das Kabel ist derselbe USB-Seriell-Adapter, der ohnehin
     im Schrank liegt.
+
+    Geschrieben wird in einem eigenen Faden, und ``send`` legt nur ab
+    ---------------------------------------------------------------
+
+    Ein serielles Schreiben blockiert, wenn der Puffer voll ist - weil das
+    Gerät aus ist, das Kabel ab oder die Gegenstelle klemmt. Aufgerufen wird
+    ``send`` aber aus der Schleife, in der auch der Empfänger gelesen und die
+    Lenkung gerechnet wird; eine halbe Sekunde im ``write`` ist eine halbe
+    Sekunde ohne Regelung. Bei 10 km/h sind das anderthalb Meter.
+
+    Deshalb ein Fach mit **einem** Platz: ``send`` legt den neuesten Befehl
+    hinein und kehrt sofort zurück, ein Faden schreibt ihn. Dass dabei ein
+    überholter Befehl verfällt, ist kein Verlust, sondern der Punkt - ein
+    Sollwert ist ein Zustand und keine Ereigniskette. Was gilt, ist der letzte.
     """
 
     name = "seriell"
@@ -137,6 +222,10 @@ class SeriellerAusgang(SollwertAusgang):
         self.port = port
         self.baud = baud
         self._seriell = None
+        self._fach: Optional[SollwertBefehl] = None
+        self._wecker = threading.Event()
+        self._schluss = threading.Event()
+        self._faden: Optional[threading.Thread] = None
 
     async def start(self) -> None:
         try:
@@ -146,14 +235,29 @@ class SeriellerAusgang(SollwertAusgang):
             self.ready = False
             return
         try:
-            self._seriell = serial.Serial(self.port, self.baud, timeout=0.2)
+            # write_timeout als zweite Sicherung: hängt das Gerät trotz allem,
+            # bricht das Schreiben ab, statt den Faden für immer zu binden.
+            self._seriell = serial.Serial(self.port, self.baud, timeout=0.2,
+                                          write_timeout=0.5)
             self.ready = True
             self.status = f"{self.port} @ {self.baud}"
         except Exception as exc:                       # pragma: no cover - Hardware
             self.ready = False
             self.status = f"{self.port}: {exc}"
+            return
+        self._schluss.clear()
+        self._faden = threading.Thread(target=self._schreiben, name="sollwert",
+                                       daemon=True)
+        self._faden.start()
 
     async def stop(self) -> None:
+        self._schluss.set()
+        self._wecker.set()
+        faden, self._faden = self._faden, None
+        if faden is not None:
+            # Kurz warten, damit die letzte Null noch hinausgeht - aber nicht
+            # länger, als ein Herunterfahren dauern darf.
+            faden.join(timeout=1.0)
         self.ready = False
         if self._seriell is not None:
             try:
@@ -163,18 +267,28 @@ class SeriellerAusgang(SollwertAusgang):
             self._seriell = None
 
     def send(self, befehl: SollwertBefehl) -> None:
-        if self._seriell is None or not self.ready:
-            return
-        wert = 0.0 if befehl.wert is None else befehl.wert
-        zeile = f"SOLL {wert:.2f} {befehl.einheit or '-'}\r\n".encode("ascii", "replace")
-        try:
-            self._seriell.write(zeile)
-            self.gesendet += 1
-            self.letzter_fehler = ""
-        except Exception as exc:                       # pragma: no cover - Hardware
-            self.letzter_fehler = str(exc)
-            self.ready = False
-            self.status = f"Schreibfehler: {exc}"
+        """Nur ablegen und wecken - hier wird nichts geschrieben."""
+        self._fach = befehl
+        self._wecker.set()
+
+    def _schreiben(self) -> None:
+        """Der Faden: nimmt, was im Fach liegt, und schreibt es."""
+        while not self._schluss.is_set():
+            self._wecker.wait(timeout=0.5)
+            self._wecker.clear()
+            befehl, self._fach = self._fach, None
+            if befehl is None or self._seriell is None:
+                continue
+            zeile = (satz(befehl) + "\r\n").encode("ascii", "replace")
+            try:
+                self._seriell.write(zeile)
+                self.gesendet += 1
+                self.letzter_fehler = ""
+            except Exception as exc:                   # pragma: no cover - Hardware
+                self.letzter_fehler = str(exc)
+                self.ready = False
+                self.status = f"Schreibfehler: {exc}"
+                return
 
 
 class UdpAusgang(SollwertAusgang):
@@ -182,17 +296,36 @@ class UdpAusgang(SollwertAusgang):
 
     name = "udp"
 
+    # So oft darf ein Senden hintereinander scheitern, bevor der Ausgang als
+    # gestört gilt. Ein einzelnes verlorenes Paket ist bei UDP normal; ein
+    # Name, der sich nicht auflösen lässt, oder ein Netz, das weg ist, sind es
+    # nicht - und dann soll in der Kabine "Ausgang gestört" stehen und nicht
+    # weiter "gibt aus".
+    FEHLER_BIS_GESTOERT = 5
+
     def __init__(self, host: str, port: int) -> None:
         super().__init__()
         self.host = host
         self.port = port
         self._socket = None
+        self._fehler_am_stueck = 0
 
     async def start(self) -> None:
         import socket
+        # Die Konfigurationsdatei ist handgeschrieben, und ein Port außerhalb
+        # des Bereichs lässt sendto mit einem OverflowError platzen - der käme
+        # aus der Schleife heraus, in der der Empfänger gelesen wird.
+        if not (0 < int(self.port) < 65536):
+            self.ready = False
+            self.status = f"Port {self.port} liegt außerhalb von 1 bis 65535"
+            return
         try:
             self._socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            # Nicht blockierend: ein voller Sendepuffer soll einen Fehler
+            # geben, nicht die Schleife anhalten, in der die Lenkung rechnet.
+            self._socket.setblocking(False)
             self.ready = True
+            self._fehler_am_stueck = 0
             self.status = f"{self.host}:{self.port}"
         except OSError as exc:                         # pragma: no cover - Netz
             self.ready = False
@@ -207,14 +340,22 @@ class UdpAusgang(SollwertAusgang):
     def send(self, befehl: SollwertBefehl) -> None:
         if self._socket is None or not self.ready:
             return
-        wert = 0.0 if befehl.wert is None else befehl.wert
-        paket = f"SOLL {wert:.2f} {befehl.einheit or '-'}".encode("ascii", "replace")
         try:
-            self._socket.sendto(paket, (self.host, self.port))
+            self._socket.sendto(satz(befehl).encode("ascii", "replace"),
+                                (self.host, self.port))
             self.gesendet += 1
             self.letzter_fehler = ""
-        except OSError as exc:                         # pragma: no cover - Netz
+            self._fehler_am_stueck = 0
+        except Exception as exc:
+            # Bewusst weit gefasst: was hier herausfliegt, fliegt bis in die
+            # Schleife, die den Empfänger liest. Ein Sollwert, der nicht
+            # ankommt, ist ein Ärgernis - eine Positionsverarbeitung, die
+            # daran stirbt, ist ein Ausfall.
             self.letzter_fehler = str(exc)
+            self._fehler_am_stueck += 1
+            if self._fehler_am_stueck >= self.FEHLER_BIS_GESTOERT:
+                self.ready = False
+                self.status = f"{self.host}:{self.port} - {exc}"
 
 
 def ausgang_bauen(config) -> SollwertAusgang:
@@ -247,15 +388,12 @@ class SollwertRegler:
 
     def _rueckfall(self) -> Optional[float]:
         """Der Wert, der ohne Karte gilt - siehe der Hinweis oben im Modul."""
-        art = str(getattr(self.config, "rueckfall", "halten"))
+        art, zahl, _ = rueckfall_lesen(getattr(self.config, "rueckfall", "halten"))
         if art == "aus":
             return 0.0
-        if art == "halten":
-            return self._letzter_wert
-        try:
-            return float(art)
-        except (TypeError, ValueError):
-            return self._letzter_wert
+        if art == "zahl":
+            return zahl
+        return self._letzter_wert
 
     # -- Hauptschleife ----------------------------------------------------
 
@@ -279,8 +417,26 @@ class SollwertRegler:
             self._senden(now, erzwingen=True)
             return self.befehl
 
+        # Ein Wert, der keiner ist, ist ein Fehler in der Karte und kein Loch
+        # in ihr. Deshalb wird er nicht über den Rückfall überbrückt, sondern
+        # sperrt: bei einem Loch weiß man, dass dort nichts steht; bei einem
+        # NaN weiß man nur, dass die Karte kaputt ist - und dann über die
+        # Stelle weiterzustreuen, wäre geraten.
+        if sollwert is not None and not sendbar(sollwert):
+            if self.befehl.aktiv:
+                self.abschaltungen += 1
+            self.befehl = SollwertBefehl(
+                aktiv=False, wert=None, einheit=einheit,
+                grund=f"Sollwert der Karte ist kein gültiger Wert ({sollwert!r})",
+                aus_karte=False)
+            self._letzter_wert = None
+            self._senden(now, erzwingen=True)
+            return self.befehl
+
         aus_karte = sollwert is not None
         wert = sollwert if aus_karte else self._rueckfall()
+        if not sendbar(wert):
+            wert = None
         self.befehl = SollwertBefehl(
             aktiv=wert is not None, wert=wert, einheit=einheit,
             grund="gibt aus" if aus_karte else "ohne Karte - Rückfall",
@@ -340,9 +496,13 @@ class SollwertRegler:
         await self.ausgang.stop()
 
     def status(self) -> dict:
+        _, _, rueckfall_text = rueckfall_lesen(
+            getattr(self.config, "rueckfall", "halten"))
         return {
             "freigegeben": bool(getattr(self.config, "enabled", False)),
-            "rueckfall": str(getattr(self.config, "rueckfall", "halten")),
+            # Nicht die rohe Eingabe, sondern was daraus geworden ist: wer
+            # "140,5" eingetragen hat und "halten" liest, weiß sofort Bescheid.
+            "rueckfall": rueckfall_text,
             "befehl": self.befehl.to_dict(),
             "ausgang": self.ausgang.status_dict(),
             "abschaltungen": self.abschaltungen,

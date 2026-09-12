@@ -5243,7 +5243,8 @@ class SollwertAusgabeTest(unittest.TestCase):
         self.regler.update(140.0, "kg/ha", self._fix(), True, True, now=1000.0)
         stand = self.regler.status()
         self.assertTrue(stand["freigegeben"])
-        self.assertEqual(stand["rueckfall"], "halten")
+        # Nicht die rohe Eingabe, sondern was daraus geworden ist.
+        self.assertIn("halten", stand["rueckfall"])
         self.assertEqual(stand["ausgang"]["typ"], "test")
         self.assertAlmostEqual(stand["befehl"]["wert"], 140.0)
 
@@ -5280,6 +5281,55 @@ class SollwertAusgangTest(unittest.TestCase):
             asyncio.run(ausgang.stop())
         finally:
             empfaenger.close()
+
+    def test_ein_port_ausserhalb_des_bereichs_wird_abgefangen(self):
+        """Die Konfigurationsdatei ist handgeschrieben.
+
+        Ohne die Prüfung platzt sendto mit einem OverflowError - und der käme
+        aus der Schleife heraus, in der der Empfänger gelesen wird.
+        """
+        from agripilot import sollwert as modul
+        for port in (0, -1, 999999):
+            with self.subTest(port):
+                ausgang = modul.UdpAusgang("127.0.0.1", port)
+                asyncio.run(ausgang.start())
+                self.assertFalse(ausgang.ready)
+                self.assertIn("Port", ausgang.status)
+                # Und ein Senden darauf wirft nichts.
+                ausgang.send(modul.SollwertBefehl(aktiv=True, wert=140.0,
+                                                  einheit="kg/ha"))
+                asyncio.run(ausgang.stop())
+
+    def test_ein_totes_netz_meldet_sich_als_gestoert(self):
+        """Sonst steht in der Kabine "gibt aus", während nichts ankommt."""
+        from agripilot import sollwert as modul
+        ausgang = modul.UdpAusgang("kein.solcher.name.invalid", 9999)
+        asyncio.run(ausgang.start())
+        try:
+            self.assertTrue(ausgang.ready)     # das Anlegen gelingt noch
+            for _ in range(modul.UdpAusgang.FEHLER_BIS_GESTOERT):
+                ausgang.send(modul.SollwertBefehl(aktiv=True, wert=140.0,
+                                                  einheit="kg/ha"))
+            self.assertFalse(ausgang.ready)
+            self.assertTrue(ausgang.letzter_fehler)
+        finally:
+            asyncio.run(ausgang.stop())
+
+    def test_ein_kaputter_ausgang_in_der_konfiguration_wird_zur_anzeige(self):
+        from agripilot.config import SollwertConfig
+        from agripilot import sollwert as modul
+        for art in ("unfug", "", None):
+            with self.subTest(repr(art)):
+                config = SollwertConfig()
+                config.ausgang = art
+                self.assertIsInstance(modul.ausgang_bauen(config), modul.NurAnzeige)
+
+    def test_abbauen_ohne_aufbauen_geht_sauber(self):
+        from agripilot import sollwert as modul
+        from agripilot.config import SollwertConfig
+        asyncio.run(modul.SeriellerAusgang("/dev/gibtsnicht").stop())
+        asyncio.run(modul.SollwertRegler(SollwertConfig(),
+                                         modul.UdpAusgang("127.0.0.1", 9)).stop())
 
     def test_serieller_ausgang_ohne_pyserial_sagt_es(self):
         from agripilot import sollwert as modul
@@ -5422,3 +5472,193 @@ class SollwertUeberDieSchnittstelleTest(unittest.TestCase):
                                     f"am Draht: {gesehen}")
             finally:
                 empfaenger.close()
+
+
+class SollwertSchrankeTest(unittest.TestCase):
+    """Was den Rechner verlassen darf - und was nicht."""
+
+    def test_nur_endliche_werte_ab_null(self):
+        from agripilot import sollwert as modul
+        for wert in (None, float("nan"), float("inf"), float("-inf"),
+                     -0.01, -50.0, modul.WERT_MAX + 1, "keine Zahl"):
+            self.assertFalse(modul.sendbar(wert), f"{wert!r} sollte nicht hinaus")
+        for wert in (0.0, 0.5, 140.0, modul.WERT_MAX):
+            self.assertTrue(modul.sendbar(wert), f"{wert!r} sollte hinaus dürfen")
+
+    def test_kaputter_kartenwert_sperrt_statt_zu_ueberbruecken(self):
+        """Ein Loch ist bekannt, ein NaN ist ein Fehler - das ist ein Unterschied.
+
+        Bei einem Loch weiß man, dass dort nichts steht. Bei einem NaN weiß
+        man nur, dass die Karte kaputt ist; über die Stelle weiterzustreuen
+        wäre geraten.
+        """
+        from agripilot.config import SollwertConfig
+        from agripilot import sollwert as modul
+        from agripilot.nmea import Fix
+
+        gesendet = []
+
+        class Mitschreiber(modul.SollwertAusgang):
+            name = "test"
+
+            def __init__(self):
+                super().__init__()
+                self.ready, self.status = True, "bereit"
+
+            def send(self, befehl):
+                gesendet.append(modul.satz(befehl))
+
+        regler = modul.SollwertRegler(SollwertConfig(enabled=True), Mitschreiber())
+        fix = Fix(lat=48.0, lon=11.0, fix_quality=4, speed_ms=2.0)
+        fix.received_at = 1000.0
+
+        # Erst ein guter Wert, damit "halten" etwas zu halten hätte.
+        regler.update(140.0, "kg/ha", fix, True, True, now=1000.0)
+        self.assertEqual(gesendet[-1], "SOLL 140.00 kg/ha")
+
+        for kaputt in (float("nan"), float("inf"), -50.0, 1e30):
+            with self.subTest(repr(kaputt)):
+                befehl = regler.update(kaputt, "kg/ha", fix, True, True, now=1001.0)
+                self.assertFalse(befehl.aktiv)
+                self.assertIn("kein gültiger Wert", befehl.grund)
+                self.assertEqual(gesendet[-1], "SOLL 0.00 kg/ha")
+
+    def test_der_satz_traegt_immer_eine_zahl(self):
+        from agripilot import sollwert as modul
+        self.assertEqual(modul.satz(modul.SollwertBefehl(
+            aktiv=True, wert=142.5, einheit="kg/ha")), "SOLL 142.50 kg/ha")
+        self.assertEqual(modul.satz(modul.SollwertBefehl(
+            aktiv=False, wert=None, einheit="kg/ha")), "SOLL 0.00 kg/ha")
+        # Auch wenn doch einmal Unfug durchkäme: eine Zahl bleibt es.
+        self.assertEqual(modul.satz(modul.SollwertBefehl(
+            aktiv=True, wert=float("nan"), einheit="kg/ha")), "SOLL 0.00 kg/ha")
+        self.assertEqual(modul.satz(modul.SollwertBefehl(
+            aktiv=True, wert=90.0, einheit="")), "SOLL 90.00 -")
+
+    def test_das_komma_zaehlt_wie_der_punkt(self):
+        """Die Oberfläche ist deutsch; 140,5 ist die naheliegende Schreibweise."""
+        from agripilot import sollwert as modul
+        self.assertEqual(modul.rueckfall_lesen("140,5")[:2], ("zahl", 140.5))
+        self.assertEqual(modul.rueckfall_lesen("140.5")[:2], ("zahl", 140.5))
+        self.assertEqual(modul.rueckfall_lesen("  90  ")[:2], ("zahl", 90.0))
+
+    def test_unbrauchbarer_rueckfall_haelt_und_sagt_es(self):
+        from agripilot import sollwert as modul
+        for text in ("-100", "nan", "inf", "1e400", "vielleicht"):
+            with self.subTest(text):
+                art, wert, klartext = modul.rueckfall_lesen(text)
+                self.assertEqual(art, "halten")
+                self.assertIsNone(wert)
+                self.assertIn(text.strip(), klartext)
+                self.assertIn("halten", klartext)
+        self.assertEqual(modul.rueckfall_lesen("aus")[:2], ("aus", 0.0))
+        self.assertEqual(modul.rueckfall_lesen("")[0], "halten")
+        self.assertEqual(modul.rueckfall_lesen(None)[0], "halten")
+
+    def test_der_status_zeigt_was_aus_der_eingabe_wurde(self):
+        """Wer "140,5" eingetragen hat und "halten" liest, weiß sofort Bescheid."""
+        from agripilot.config import SollwertConfig
+        from agripilot import sollwert as modul
+        config = SollwertConfig(enabled=True)
+        regler = modul.SollwertRegler(config, modul.NurAnzeige())
+        config.rueckfall = "140,5"
+        self.assertIn("140.5", regler.status()["rueckfall"])
+        config.rueckfall = "vielleicht"
+        self.assertIn("nicht verstanden", regler.status()["rueckfall"])
+
+
+class SollwertFadenTest(unittest.TestCase):
+    """Der serielle Ausgang darf die Schleife nicht anhalten."""
+
+    class Haengende:
+        """Ein Gerät mit vollem Puffer: write dauert."""
+
+        def __init__(self, dauer=0.3):
+            self.dauer = dauer
+            self.geschrieben = []
+
+        def write(self, daten):
+            time.sleep(self.dauer)
+            self.geschrieben.append(daten)
+            return len(daten)
+
+        def close(self):
+            pass
+
+    def _ausgang(self, geraet):
+        from agripilot import sollwert as modul
+        import threading
+        ausgang = modul.SeriellerAusgang("/dev/gibtsnicht")
+        ausgang._seriell = geraet
+        ausgang.ready = True
+        ausgang._schluss.clear()
+        ausgang._faden = threading.Thread(target=ausgang._schreiben, daemon=True)
+        ausgang._faden.start()
+        return ausgang
+
+    def test_senden_kehrt_sofort_zurueck(self):
+        """Eine halbe Sekunde im write ist eine halbe Sekunde ohne Regelung."""
+        from agripilot import sollwert as modul
+        geraet = self.Haengende(dauer=0.3)
+        ausgang = self._ausgang(geraet)
+        try:
+            start = time.perf_counter()
+            for i in range(10):
+                ausgang.send(modul.SollwertBefehl(aktiv=True, wert=140.0 + i,
+                                                  einheit="kg/ha"))
+            dauer = time.perf_counter() - start
+        finally:
+            asyncio.run(ausgang.stop())
+        self.assertLess(dauer, 0.05, f"send hat {dauer * 1000:.0f} ms blockiert")
+
+    def test_ueberholte_befehle_verfallen(self):
+        """Ein Sollwert ist ein Zustand, keine Ereigniskette - der letzte gilt."""
+        from agripilot import sollwert as modul
+        geraet = self.Haengende(dauer=0.2)
+        ausgang = self._ausgang(geraet)
+        try:
+            for i in range(8):
+                ausgang.send(modul.SollwertBefehl(aktiv=True, wert=100.0 + i,
+                                                  einheit="kg/ha"))
+            time.sleep(0.8)
+        finally:
+            asyncio.run(ausgang.stop())
+        zeilen = [z.decode().strip() for z in geraet.geschrieben]
+        self.assertTrue(zeilen, "gar nichts geschrieben")
+        self.assertLess(len(zeilen), 8, f"nichts verfallen: {zeilen}")
+        self.assertIn("SOLL 107.00 kg/ha", zeilen)
+
+    def test_ein_schreibfehler_nimmt_den_ausgang_aus_dem_betrieb(self):
+        from agripilot import sollwert as modul
+
+        class Kaputt:
+            def write(self, daten):
+                raise OSError("Kabel ab")
+
+            def close(self):
+                pass
+
+        ausgang = self._ausgang(Kaputt())
+        try:
+            ausgang.send(modul.SollwertBefehl(aktiv=True, wert=140.0, einheit="kg/ha"))
+            for _ in range(40):
+                if not ausgang.ready:
+                    break
+                time.sleep(0.05)
+        finally:
+            asyncio.run(ausgang.stop())
+        self.assertIn("Kabel ab", ausgang.letzter_fehler)
+
+    def test_der_regler_meldet_einen_gestoerten_ausgang_als_sperre(self):
+        """Ist der Ausgang weg, wird nicht so getan, als ginge etwas hinaus."""
+        from agripilot.config import SollwertConfig
+        from agripilot import sollwert as modul
+        from agripilot.nmea import Fix
+        ausgang = modul.NurAnzeige()
+        ausgang.ready, ausgang.status = False, "Kabel ab"
+        regler = modul.SollwertRegler(SollwertConfig(enabled=True), ausgang)
+        fix = Fix(lat=48.0, lon=11.0, fix_quality=4, speed_ms=2.0)
+        fix.received_at = 1000.0
+        befehl = regler.update(140.0, "kg/ha", fix, True, True, now=1000.0)
+        self.assertFalse(befehl.aktiv)
+        self.assertIn("Kabel ab", befehl.grund)

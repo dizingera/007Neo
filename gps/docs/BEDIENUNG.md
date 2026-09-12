@@ -389,6 +389,18 @@ Zappeln um ein halbes Kilo an einer Zellgrenze löst dagegen keinen Befehl aus:
 ein Streuer, der jedem Zappeln folgt, streut ungleichmäßiger als einer, der
 Stufen fährt.
 
+**Ein kaputter Kartenwert sperrt**, statt überbrückt zu werden. Ein Loch in
+der Karte ist bekannt – dort steht nichts, und dafür gibt es den Rückfall.
+Eine Zahl, die keine ist (NaN, unendlich, negativ), heißt dagegen, dass die
+Karte kaputt ist; über die Stelle weiterzustreuen wäre geraten. Der Grund
+steht im Klartext.
+
+**Geht der Ausgang verloren** – Kabel ab, Steuerung aus, Netz weg –, steht in
+der Kabine **Ausgang gestört** in Bernstein, und es geht nichts mehr hinaus.
+Das ist ausdrücklich etwas anderes als *hält*: *hält* ist der Normalfall
+(Markieren aus, keine Karte), *gestört* heißt, dass gestreut wird und nichts
+ankommt.
+
 **Ohne Karte** – dort, wo die Karte keine Angabe macht – gilt, was unter
 *Ohne Karte* eingestellt ist:
 
@@ -397,6 +409,10 @@ Stufen fährt.
 | `halten` | der letzte Wert bleibt stehen | Lücken mitten im Schlag; am Feldrand streut die Maschine damit weiter |
 | `aus` | null | wenn die Karte am Feldrand aufhört; ein Loch mitten im Feld wird zum unbehandelten Fleck |
 | eine Zahl | dieser Wert | der Betriebsdurchschnitt, den der Berater ohnehin genannt hat |
+
+Die Zahl darf mit Komma geschrieben werden (`140,5`). Was nicht zu verstehen
+ist, wird zu `halten` – und das Menü sagt es dann auch, statt es
+stillschweigend zu tun.
 
 Ab Werk `halten`. In der Kabine steht in diesem Fall neben der Zahl **ohne
 Karte**, damit sichtbar bleibt, dass der Wert gerade nicht aus der Karte kommt.

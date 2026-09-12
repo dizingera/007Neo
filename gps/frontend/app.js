@@ -195,11 +195,20 @@ function updateHud(s) {
     // "geht an den Streuer" sind zwei verschiedene Dinge, und der Unterschied
     // kostet auf zwanzig Hektar Geld - er gehört neben die Zahl, nicht in ein
     // Untermenü.
+    //
+    // "Gestört" steht dabei getrennt von "hält": das eine ist der Normalfall
+    // (Markieren aus, keine Karte), das andere heißt, dass gestreut wird und
+    // nichts ankommt. Beides "hält" zu nennen, verdeckt genau den Fall, auf
+    // den es ankommt.
     let text = wert == null ? 'ohne Karte' : (applikation.einheit || 'Sollwert');
+    let gestoert = false;
     if (ausgabe && ausgabe.freigegeben) {
-      text += ausgabe.befehl && ausgabe.befehl.aktiv ? ' · geht raus' : ' · hält';
+      gestoert = !(ausgabe.ausgang && ausgabe.ausgang.bereit);
+      text += gestoert ? ' · Ausgang gestört'
+            : (ausgabe.befehl && ausgabe.befehl.aktiv ? ' · geht raus' : ' · hält');
     }
     el('sollLabel').textContent = text;
+    el('sollLabel').className = gestoert ? 'warn' : '';
   }
 
   // Der Plan: wie viel ist durch, wie viel bleibt.

@@ -142,6 +142,9 @@ body.tag .hint { text-shadow: none; }
 .cluster .kmh span, .cluster div span { font-size: calc(1.05 * var(--u)); font-weight: 600; color: var(--muted); letter-spacing: .12em; text-transform: uppercase; }
 .cluster div b { display: block; font-family: "Rajdhani", "Bahnschrift", sans-serif; font-weight: 600; font-size: calc(2.6 * var(--u)); line-height: 1; }
 .cluster div b.warn { color: var(--amber); }
+/* Auch die Beschriftung darunter kann warnen - "Ausgang gestört" heißt, dass
+ * gestreut wird und nichts ankommt. In Grau gesetzt läse es niemand. */
+.cluster div span.warn { color: var(--amber); }
 .cluster .spark { grid-column: 1 / -1; height: calc(3 * var(--u)); }
 .cluster .spark svg { width: 100%; height: 100%; display: block; }
 .cluster .spark path { fill: none; stroke: var(--leucht); stroke-width: 2; vector-effect: non-scaling-stroke; }
