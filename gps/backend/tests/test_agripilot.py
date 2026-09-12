@@ -4205,6 +4205,49 @@ class ApplikationIsoXmlTest(unittest.TestCase):
         self.assertIn("Zellen", str(fehler.exception))
 
 
+class ApplikationKaputteDateienTest(unittest.TestCase):
+    """Was nicht verstanden wird, wird abgelehnt - mit Begründung, nicht mit
+    einem Programmabsturz und nicht mit einer halben Karte."""
+
+    KAPUTT = [
+        ("leere Datei", b""),
+        ("gar kein XML", b"nicht xml"),
+        ("GRD ohne Zahlen",
+         b'<ISO11783_TaskData><TSK A="1">'
+         b'<GRD A="x" B="y" C="1" D="1" E="2" F="2" G="G" H="2"/>'
+         b'</TSK></ISO11783_TaskData>'),
+        ("Raster ohne Zellen",
+         b'<ISO11783_TaskData><TSK A="1">'
+         b'<GRD A="48" B="11" C="1e-4" D="1e-4" E="0" F="0" G="G" H="2"/>'
+         b'</TSK></ISO11783_TaskData>'),
+        ("negative Zellzahl",
+         b'<ISO11783_TaskData><TSK A="1">'
+         b'<GRD A="48" B="11" C="1e-4" D="1e-4" E="-5" F="3" G="G" H="2"/>'
+         b'</TSK></ISO11783_TaskData>'),
+    ]
+
+    def test_kaputtes_isoxml_wird_abgelehnt(self):
+        for name, roh in self.KAPUTT:
+            with self.subTest(name):
+                with self.assertRaises(applikation.KartenFehler):
+                    applikation.aus_isoxml(roh, {"G.BIN": b"\x00" * 64})
+
+    def test_kaputtes_geojson_wird_abgelehnt(self):
+        for name, text in (("leer", ""), ("Liste statt Objekt", "[]"),
+                           ("features null", '{"features": null}'),
+                           ("Geometrie fehlt", '{"features":[{"properties":{"a":1}}]}'),
+                           ("Koordinatenpaar zu kurz",
+                            '{"features":[{"properties":{"a":1},"geometry":'
+                            '{"type":"Polygon","coordinates":[[[1],[2]]]}}]}')):
+            with self.subTest(name):
+                with self.assertRaises(applikation.KartenFehler):
+                    applikation.aus_geojson(text)
+
+    def test_kaputtes_shapefile_wird_abgelehnt(self):
+        with self.assertRaises((applikation.KartenFehler, ValueError)):
+            applikation.aus_shapefile(b"kein shapefile", b"keine dbf")
+
+
 class ApplikationZonenTest(unittest.TestCase):
     """Zonenkarten aus GeoJSON und Shapefile."""
 
