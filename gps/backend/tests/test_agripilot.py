@@ -20,7 +20,7 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from agripilot import geo, nmea, sync
+from agripilot import feldplan, geo, headland, nmea, sync
 from agripilot.coverage import CoverageMap, build_sections
 from agripilot.guidance import GuidanceLine, HeadingFilter, VehicleProfile, lightbar_offset
 from agripilot.storage import Storage
@@ -3598,3 +3598,287 @@ class MenueApiTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+class FeldplanGeometrieTest(unittest.TestCase):
+    """Die Geometrie des Arbeitsplans: Richtung, Bahnen, Kern."""
+
+    RECHTECK_OST = [(0.0, 0.0), (200.0, 0.0), (200.0, 100.0), (0.0, 100.0)]
+
+    def test_arbeitsrichtung_folgt_der_langen_seite(self):
+        """Auf einem Rechteck gewinnt die lange Seite - und zwar genau."""
+        plan = feldplan.planen(
+            self.RECHTECK_OST,
+            feldplan.PlanEinstellungen(arbeitsbreite_m=10.0, vorgewende_breiten=2.0))
+        self.assertTrue(plan.automatisch)
+        self.assertAlmostEqual(plan.richtung_grad, 90.0, places=6)
+
+        hoch = [(0.0, 0.0), (100.0, 0.0), (100.0, 200.0), (0.0, 200.0)]
+        plan_hoch = feldplan.planen(
+            hoch, feldplan.PlanEinstellungen(arbeitsbreite_m=10.0))
+        self.assertAlmostEqual(plan_hoch.richtung_grad, 0.0, places=6)
+
+    def test_arbeitsrichtung_auch_bei_gedrehtem_feld(self):
+        """Ein um 30° gedrehtes Rechteck bekommt die um 30° gedrehte Richtung.
+
+        Der Test, der den fast richtigen Winkel entlarvt: eine Richtung, die
+        einen Hauch schief zur langen Seite steht, hat genauso viele Bahnen und
+        wäre ohne die Längenbewertung nicht zu unterscheiden.
+        """
+        w = math.radians(30.0)
+        gedreht = [(x * math.cos(w) - y * math.sin(w),
+                    x * math.sin(w) + y * math.cos(w))
+                   for x, y in self.RECHTECK_OST]
+        plan = feldplan.planen(
+            gedreht, feldplan.PlanEinstellungen(arbeitsbreite_m=10.0))
+        self.assertAlmostEqual(plan.richtung_grad, 60.0, places=6)
+
+    def test_vorgegebene_richtung_wird_nicht_ueberstimmt(self):
+        plan = feldplan.planen(
+            self.RECHTECK_OST,
+            feldplan.PlanEinstellungen(arbeitsbreite_m=10.0, richtung_grad=0.0))
+        self.assertFalse(plan.automatisch)
+        self.assertAlmostEqual(plan.richtung_grad, 0.0, places=6)
+        # Quer zum Feld: 100 m Breite, 10 m Bahnen - deutlich mehr Bahnen als längs.
+        self.assertGreater(len(plan.bahnen), 10)
+
+    def test_bahnen_liegen_im_kern_und_enden_am_vorgewende(self):
+        """Kein Punkt einer Bahn darf näher an der Grenze liegen als erlaubt.
+
+        Das ist die Zusage, auf die sich alles andere stützt: wer den Plan
+        abfährt, fährt nicht ins Vorgewende und nicht aus dem Feld.
+        """
+        tiefe = 20.0
+        plan = feldplan.planen(
+            self.RECHTECK_OST,
+            feldplan.PlanEinstellungen(arbeitsbreite_m=10.0, vorgewende_breiten=2.0))
+        self.assertTrue(plan.bahnen)
+        for bahn in plan.bahnen:
+            for i in range(21):
+                t = i / 20.0
+                punkt = (bahn.start[0] + t * (bahn.ende[0] - bahn.start[0]),
+                         bahn.start[1] + t * (bahn.ende[1] - bahn.start[1]))
+                abstand = headland.distance_to_boundary(punkt, self.RECHTECK_OST)
+                self.assertIsNotNone(abstand)
+                # Eine Zehntel Toleranz für die Intervallhalbierung an den Enden.
+                self.assertGreaterEqual(abstand, tiefe - 0.1,
+                                        f"Bahn {bahn.nummer} bei t={t}")
+
+    def test_kernflaeche_stimmt_mit_der_nachgerechneten_ueberein(self):
+        """200x100 mit 20 m Vorgewende: 160x60 bleiben übrig."""
+        plan = feldplan.planen(
+            self.RECHTECK_OST,
+            feldplan.PlanEinstellungen(arbeitsbreite_m=10.0, vorgewende_breiten=2.0))
+        self.assertAlmostEqual(plan.feld_flaeche_ha, 2.0, places=6)
+        self.assertAlmostEqual(plan.kern_flaeche_ha, 160.0 * 60.0 / 10_000.0, places=2)
+        self.assertAlmostEqual(plan.vorgewende_flaeche_ha,
+                               2.0 - 160.0 * 60.0 / 10_000.0, places=2)
+
+    def test_ohne_vorgewende_reicht_die_bahn_bis_an_die_grenze(self):
+        plan = feldplan.planen(
+            self.RECHTECK_OST,
+            feldplan.PlanEinstellungen(arbeitsbreite_m=10.0, vorgewende_breiten=0.0,
+                                       richtung_grad=90.0))
+        self.assertEqual(len(plan.bahnen), 10)
+        for bahn in plan.bahnen:
+            self.assertAlmostEqual(bahn.laenge_m, 200.0, places=6)
+        self.assertAlmostEqual(plan.kern_flaeche_ha, 2.0, places=6)
+
+    def test_einbuchtung_teilt_die_bahn_in_zwei_stuecke(self):
+        """Ein U-förmiger Schlag: quer gefahren zerfällt jede Bahn.
+
+        Genau hier versagt der naheliegende Weg über ein nach innen versetztes
+        Vieleck - und genau hier muss der Plan zwei Stücke liefern, nicht eine
+        Bahn quer über die Lücke.
+        """
+        u_feld = [(0.0, 0.0), (300.0, 0.0), (300.0, 300.0), (220.0, 300.0),
+                  (220.0, 80.0), (80.0, 80.0), (80.0, 300.0), (0.0, 300.0)]
+        plan = feldplan.planen(
+            u_feld,
+            feldplan.PlanEinstellungen(arbeitsbreite_m=6.0, vorgewende_breiten=1.0,
+                                       richtung_grad=90.0))
+        nach_spur = {}
+        for bahn in plan.bahnen:
+            nach_spur.setdefault(bahn.spur, []).append(bahn)
+        geteilt = [s for s, bahnen in nach_spur.items() if len(bahnen) > 1]
+        self.assertTrue(geteilt, "keine einzige Bahn ist an der Lücke geteilt")
+        # Und keine der Bahnen läuft durch die Lücke in der Mitte.
+        for bahn in plan.bahnen:
+            mitte = ((bahn.start[0] + bahn.ende[0]) / 2.0,
+                     (bahn.start[1] + bahn.ende[1]) / 2.0)
+            self.assertTrue(geo.point_in_polygon(mitte, u_feld))
+
+    def test_zu_kleine_grenze_wird_abgelehnt(self):
+        with self.assertRaises(ValueError):
+            feldplan.planen([(0.0, 0.0), (10.0, 0.0)],
+                            feldplan.PlanEinstellungen(arbeitsbreite_m=3.0))
+
+    def test_bahnen_werden_abwechselnd_hin_und_zurueck_gefahren(self):
+        """Sonst stünde nach jeder Bahn die ganze Feldlänge als Leerfahrt an."""
+        plan = feldplan.planen(
+            self.RECHTECK_OST,
+            feldplan.PlanEinstellungen(arbeitsbreite_m=10.0, vorgewende_breiten=2.0))
+        for vorher, nachher in zip(plan.bahnen, plan.bahnen[1:]):
+            self.assertLess(geo.distance(vorher.ende, nachher.start), 40.0,
+                            f"Bahn {nachher.nummer} beginnt am falschen Ende")
+
+    def test_vorgewende_ringe_liegen_innerhalb_der_grenze(self):
+        plan = feldplan.planen(
+            self.RECHTECK_OST,
+            feldplan.PlanEinstellungen(arbeitsbreite_m=10.0, vorgewende_breiten=2.0))
+        self.assertEqual(len(plan.ringe), 2)
+        for ring_punkte in plan.ringe:
+            for punkt in ring_punkte:
+                self.assertTrue(geo.point_in_polygon(punkt, self.RECHTECK_OST))
+        self.assertGreater(plan.ringstrecke_m, 0.0)
+
+
+class FeldplanReihenfolgeTest(unittest.TestCase):
+    """Die Reihenfolge der Bahnen und was sie an Strecke kostet."""
+
+    def test_sprungweite_folgt_dem_wendekreis(self):
+        # 6 m Wenderadius, 3 m Arbeitsbreite: 12 m Versatz, also 4 Spuren.
+        self.assertEqual(feldplan.sprungweite(6.0, 3.0), 4)
+        # Breite Maschine, enger Kreis: die Nachbarspur genügt.
+        self.assertEqual(feldplan.sprungweite(4.0, 12.0), 1)
+
+    def test_fortlaufend_faehrt_der_reihe_nach(self):
+        self.assertEqual(feldplan.reihenfolge([2, 0, 1, 3], "fortlaufend", 3),
+                         [0, 1, 2, 3])
+
+    def test_sprungmuster_laesst_spuren_aus_und_holt_sie_nach(self):
+        folge = feldplan.reihenfolge(range(9), "sprung", 3)
+        self.assertEqual(folge, [0, 3, 6, 1, 4, 7, 2, 5, 8])
+        # Jede Spur genau einmal.
+        self.assertEqual(sorted(folge), list(range(9)))
+
+    def test_sprungmuster_haelt_den_wendekreis_ein(self):
+        """Innerhalb eines Durchgangs liegt zwischen zwei Wenden der Sprung."""
+        sprung = 3
+        folge = feldplan.reihenfolge(range(12), "sprung", sprung)
+        enge_wenden = sum(1 for a, b in zip(folge, folge[1:])
+                          if abs(a - b) < sprung)
+        # Nur beim Wechsel des Durchgangs (zweimal bei 3) springt es zurück.
+        self.assertLessEqual(enge_wenden, sprung - 1)
+
+    def test_sprung_eins_ist_fortlaufend(self):
+        self.assertEqual(feldplan.reihenfolge(range(5), "sprung", 1), [0, 1, 2, 3, 4])
+
+    def test_wendestrecke_ist_nie_kuerzer_als_der_halbkreis(self):
+        """Die Maschine dreht nicht auf der Stelle - das muss die Schätzung wissen."""
+        plan = feldplan.planen(
+            [(0.0, 0.0), (200.0, 0.0), (200.0, 100.0), (0.0, 100.0)],
+            feldplan.PlanEinstellungen(arbeitsbreite_m=10.0, wenderadius_m=6.0))
+        self.assertGreaterEqual(plan.wendestrecke_m,
+                                plan.wenden * math.pi * 6.0 - 1e-6)
+        self.assertGreater(plan.dauer_min, 0.0)
+        self.assertAlmostEqual(
+            plan.strecke_gesamt_m,
+            plan.arbeitsstrecke_m + plan.wendestrecke_m + plan.ringstrecke_m,
+            places=6)
+
+    def test_einstellungen_werden_in_die_schranken_gewiesen(self):
+        e = feldplan.PlanEinstellungen.from_dict(
+            {"arbeitsbreite_m": 999.0, "vorgewende_breiten": -3.0,
+             "muster": "unfug", "wenderadius_m": 0.1, "geschwindigkeit_kmh": 400.0})
+        self.assertEqual(e.arbeitsbreite_m, 60.0)
+        self.assertEqual(e.vorgewende_breiten, 0.0)
+        self.assertEqual(e.muster, "fortlaufend")
+        self.assertEqual(e.wenderadius_m, 1.0)
+        self.assertEqual(e.geschwindigkeit_kmh, 30.0)
+        self.assertIsNone(e.richtung_grad)
+        # Und wieder zurück, unverändert.
+        self.assertEqual(feldplan.PlanEinstellungen.from_dict(e.to_dict()), e)
+
+    def test_bahn_umgedreht_behaelt_laenge_und_dreht_die_richtung(self):
+        bahn = feldplan.Bahn(nummer=1, spur=0, start=(0.0, 0.0), ende=(100.0, 0.0),
+                             richtung=90.0, laenge_m=100.0)
+        zurueck = bahn.umgedreht()
+        self.assertEqual(zurueck.start, bahn.ende)
+        self.assertEqual(zurueck.ende, bahn.start)
+        self.assertAlmostEqual(zurueck.richtung, 270.0)
+        self.assertAlmostEqual(zurueck.laenge_m, 100.0)
+
+
+class FeldplanFortschrittTest(unittest.TestCase):
+    """Was ist abgearbeitet, was kommt als nächstes."""
+
+    def setUp(self):
+        self.grenze = [(0.0, 0.0), (200.0, 0.0), (200.0, 100.0), (0.0, 100.0)]
+        self.plan = feldplan.planen(
+            self.grenze,
+            feldplan.PlanEinstellungen(arbeitsbreite_m=10.0, vorgewende_breiten=2.0))
+
+    def _entlang(self, bahnen, toleranz=6.0):
+        """Eine Prüffunktion, die nur nahe den genannten Bahnen wahr ist."""
+        def bearbeitet(punkt):
+            for bahn in bahnen:
+                fuss, _, _ = geo.project_on_segment(punkt, bahn.start, bahn.ende)
+                if geo.distance(punkt, fuss) < toleranz:
+                    return True
+            return False
+        return bearbeitet
+
+    def test_leeres_feld_ist_nichts_erledigt(self):
+        stand = self.plan_fortschritt(lambda p: False)
+        self.assertEqual(stand.erledigt_anzahl, 0)
+        self.assertEqual(stand.offen_anzahl, len(self.plan.bahnen))
+        self.assertAlmostEqual(stand.flaechen_anteil, 0.0, places=6)
+        self.assertAlmostEqual(stand.rest_ha, self.plan.kern_flaeche_ha, places=2)
+        self.assertEqual(stand.naechste, 1)
+
+    def test_vollstaendig_bearbeitet_laesst_nichts_offen(self):
+        stand = self.plan_fortschritt(lambda p: True)
+        self.assertEqual(stand.offen_anzahl, 0)
+        self.assertAlmostEqual(stand.flaechen_anteil, 1.0, places=6)
+        self.assertAlmostEqual(stand.rest_ha, 0.0, places=6)
+        self.assertIsNone(stand.naechste)
+
+    def test_eine_gefahrene_bahn_zaehlt_und_die_naechste_folgt(self):
+        stand = self.plan_fortschritt(self._entlang([self.plan.bahnen[0]]))
+        self.assertEqual(stand.erledigt_anzahl, 1)
+        self.assertEqual(stand.naechste, 2)
+        self.assertAlmostEqual(stand.flaechen_anteil, 1.0 / len(self.plan.bahnen),
+                               places=2)
+
+    def test_naechste_bahn_ist_die_naechstgelegene(self):
+        """Wer die Reihenfolge verlässt, soll nicht ans andere Feldende geschickt werden."""
+        offen_gelassen = self.plan.bahnen[0]
+        erledigt = self.plan.bahnen[1:]
+        stand = feldplan.fortschritt(self.plan, self._entlang(erledigt),
+                                     ab_position=offen_gelassen.ende)
+        self.assertEqual(stand.naechste, offen_gelassen.nummer)
+        self.assertEqual(stand.offen_anzahl, 1)
+
+    def test_halb_gefahrene_bahn_bleibt_offen(self):
+        bahn = self.plan.bahnen[0]
+        mitte = ((bahn.start[0] + bahn.ende[0]) / 2.0,
+                 (bahn.start[1] + bahn.ende[1]) / 2.0)
+        halbe = feldplan.Bahn(bahn.nummer, bahn.spur, bahn.start, mitte,
+                              bahn.richtung, bahn.laenge_m / 2.0)
+        stand = self.plan_fortschritt(self._entlang([halbe]))
+        eintrag = next(b for b in stand.bahnen if b.nummer == bahn.nummer)
+        self.assertFalse(eintrag.erledigt)
+        self.assertAlmostEqual(eintrag.anteil, 0.5, delta=0.08)
+        self.assertEqual(stand.naechste, bahn.nummer)
+
+    def test_fortschritt_arbeitet_mit_der_echten_flaechenkarte(self):
+        """Nicht nur mit einer Prüffunktion aus dem Test: mit der CoverageMap."""
+        karte = CoverageMap(cell_size=0.5)
+        teilbreiten = build_sections(10.0, 1)
+        bahn = self.plan.bahnen[0]
+        schritte = 40
+        vorher = bahn.start
+        for i in range(1, schritte + 1):
+            t = i / schritte
+            jetzt = (bahn.start[0] + t * (bahn.ende[0] - bahn.start[0]),
+                     bahn.start[1] + t * (bahn.ende[1] - bahn.start[1]))
+            karte.add_swath(vorher, jetzt, bahn.richtung, teilbreiten)
+            vorher = jetzt
+        stand = feldplan.fortschritt(self.plan, karte.is_covered)
+        eintrag = next(b for b in stand.bahnen if b.nummer == bahn.nummer)
+        self.assertTrue(eintrag.erledigt)
+        self.assertEqual(stand.erledigt_anzahl, 1)
+
+    def plan_fortschritt(self, bearbeitet):
+        return feldplan.fortschritt(self.plan, bearbeitet)
