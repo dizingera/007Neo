@@ -59,6 +59,10 @@ def main() -> int:
     config.imu.source = "simulator"
     config.corrections.source = "aus"
     config.steering.output = "none"
+    # Am Schreibtisch darf die Lenkung scharf: es bewegt sich kein Motor, der
+    # Simulator schließt die Schleife selbst. Sonst fährt der virtuelle
+    # Traktor geradeaus aus dem Feld und niemand sieht die Automatik arbeiten.
+    config.steering.enabled = True
     config.server.host = args.host
     config.server.port = args.port
     config.server.data_dir = str(daten)

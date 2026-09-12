@@ -255,7 +255,10 @@
         Sektionen automatisch schalten</label>
     </div>
     <p class="note">Die Antennenwerte sind entscheidend: gemessen wird ab Mitte
-      Hinterachse. Stimmen sie nicht, liegt jede Spur um genau diesen Betrag daneben.</p>
+      Hinterachse. Stimmen sie nicht, liegt jede Spur um genau diesen Betrag daneben.
+      <b>Gerät hinter Achse</b> bestimmt, wo markiert wird – gelenkt wird immer auf
+      die Hinterachse, nie auf das Gerät (ein Punkt hinter der Achse schwenkt beim
+      Einlenken erst zur falschen Seite und die Führung schaukelt sich auf).</p>
     <p class="note"><b>Absenkung ab / Restfaktor:</b> dieselbe Einstellung, die im
       Schritttempo sauber nachführt, schaukelt bei zwölf km/h auf. Ab der Schwelle
       wird die Lenkung linear weicher, bei doppelter Schwelle bleibt der Restfaktor
@@ -349,6 +352,10 @@
     <div class="row" id="simRow" hidden>
       <label>Simulator km/h <input type="range" id="simSpeed" min="0" max="15" step="0.5" value="9"></label>
       <label>Lenken <input type="range" id="simSteer" min="-30" max="30" step="1" value="0"></label>
+      <button id="btnSimInsFeld">Traktor ins Feld setzen</button>
+      <span class="note">Ohne scharfe Lenkung fährt der virtuelle Traktor geradeaus
+        davon – außerhalb der Grenze schalten die Sektionen ab und es wird nichts
+        markiert. Der Knopf setzt ihn auf den Anfang der Spur.</span>
     </div>
   </section>
 </div>

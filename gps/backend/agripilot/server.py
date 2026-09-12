@@ -830,6 +830,15 @@ def create_app(config=None) -> FastAPI:
                 float(payload["east"]), float(payload["north"]),
                 float(payload.get("heading", simulator_source.heading)),
             )
+        if payload.get("ins_feld"):
+            # Zurück ins Feld: auf die aktive Spur (Anfang, in ihrer Richtung),
+            # sonst in die Mitte der Grenze. Der virtuelle Traktor fährt ohne
+            # Lenkung geradeaus davon - nach einer Minute ist er außerhalb.
+            ziel = engine.startpunkt_im_feld()
+            if ziel is None:
+                raise HTTPException(400, "Kein Feld geladen")
+            simulator_source.teleport(*ziel)
+            simulator_source.set_steer(0.0)
         return ok({"speed_kmh": simulator_source.speed_ms * 3.6,
                    "steer_deg": simulator_source.steer_deg})
 

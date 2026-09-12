@@ -113,6 +113,26 @@ class VehicleProfile:
             antenna[1] - forward[1] * back + right[1] * side,
         )
 
+    def steer_position(self, antenna: Point, heading: float) -> Point:
+        """Der Punkt, auf den gelenkt wird: die Hinterachse, seitlich um den
+        Geräteversatz verschoben - nie das Gerät selbst.
+
+        Ein Punkt hinter der Achse wandert beim Einlenken erst zur falschen
+        Seite (die Achse dreht, das Heck schwenkt aus). Ein Regler, der diesen
+        Punkt auf die Spur zwingen soll, schaukelt sich auf: bei fünf Metern
+        Abstand im Simulator auf ±3,5 m, mit der Lenkung im Sekundentakt an und
+        aus. Auf gerader Spur läuft das Gerät ohnehin in der Achsspur, also
+        reicht es, die Achse zu führen; ein seitlicher Geräteversatz wird als
+        Versatz der Achse mitgenommen. Markiert wird weiter am Gerät.
+        """
+        forward = _forward_vector(heading)
+        right = _right_vector(heading)
+        side = self.tool_offset_m - self.antenna_right_m
+        return (
+            antenna[0] - forward[0] * self.antenna_forward_m + right[0] * side,
+            antenna[1] - forward[1] * self.antenna_forward_m + right[1] * side,
+        )
+
     def hitch_position(self, antenna: Point, heading: float) -> Point:
         """Der Zugpunkt - Mitte Hinterachse, seitlicher Antennenversatz heraus."""
         forward = _forward_vector(heading)
@@ -165,6 +185,11 @@ class GuidanceState:
     distance_along_m: float = 0.0
     lightbar: int = 0              # LED offset, + = drift to the right
     message: str = ""
+    # Was "rechts vom Fahrer" im Muster bedeutet: +1, wenn ein positiver Versatz
+    # des Musters nach rechts des Fahrers geht, -1 sonst (rückwärts gefahrene
+    # AB-Spur, Kontur gegen den Uhrzeigersinn). Damit "10 cm rechts" immer
+    # rechts vom Sitz aus heißt - nicht rechts von A nach B, nicht "nach innen".
+    right_sign: float = 1.0
 
     def to_dict(self) -> dict:
         return {
@@ -306,14 +331,15 @@ class GuidanceLine:
         heading_error = angle_difference(target, vehicle_heading)
 
         # On a reversed pass "right of the line" flips too.
-        signed_xte = -cross_track if reversed_dir else cross_track
+        right_sign = -1.0 if reversed_dir else 1.0
         if innen is not None:
             # Auf dem Ring wurde nach innen gemessen. Der Lichtbalken zeigt aber
             # "links/rechts der Spur" - also zurück in die Fahrtrichtung drehen.
             # Beide Vektoren stehen senkrecht auf derselben Kante, das Produkt
             # ist damit +1 oder -1: es kehrt das Vorzeichen um oder lässt es.
             rx, ry = _right_vector(target)
-            signed_xte = cross_track * (innen[0] * rx + innen[1] * ry)
+            right_sign = 1.0 if innen[0] * rx + innen[1] * ry >= 0 else -1.0
+        signed_xte = cross_track * right_sign
 
         steer = self._steer_angle(signed_xte, heading_error, speed_ms, profile)
 
@@ -328,6 +354,7 @@ class GuidanceLine:
             reversed_direction=reversed_dir,
             distance_along_m=along,
             lightbar=lightbar_offset(signed_xte),
+            right_sign=right_sign,
         )
 
     def _steer_angle(self, cross_track: float, heading_error: float,

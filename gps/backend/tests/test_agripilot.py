@@ -3021,6 +3021,199 @@ class GrenzeZuKleinTest(unittest.TestCase):
                 store.close()
 
 
+class VersatzVomSitzAusTest(unittest.TestCase):
+    """„10 cm rechts" heißt rechts vom Fahrer - auch rückwärts auf der AB-Spur
+    und auf dem Ring gegen den Uhrzeigersinn. Vorher hieß es rechts von A nach
+    B bzw. nach innen, und der Fahrer sah die Spur zur falschen Seite springen."""
+
+    def _motor(self):
+        from agripilot import config as config_module
+        from agripilot.engine import Engine
+        ordner = tempfile.TemporaryDirectory()
+        self.addCleanup(ordner.cleanup)
+        store = Storage(os.path.join(ordner.name, "n.db"))
+        self.addCleanup(store.close)
+        motor = Engine(config_module.load("/kein-solcher-pfad.yaml"), store)
+        motor.update_profile({"width_m": 3.0, "antenna_forward_m": 0.0, "tool_trailing_m": 0.0})
+        feld = store.save_field({"name": "Feld", "datum_lat": 48.0, "datum_lon": 11.0,
+                                 "boundary": [list(p) for p in QUADRAT], "area_ha": 1.0})
+        motor.load_field(feld["id"])
+        return motor
+
+    def _fuehren(self, motor, position, heading):
+        motor.tool_position, motor.heading, motor.position = position, heading, position
+        motor._update_guidance(_fix(speed_ms=2.0))
+        return motor.guidance
+
+    def test_reverse_pass_right_is_still_the_drivers_right(self):
+        motor = self._motor()
+        motor.line = GuidanceLine("ab", [(50.0, 0.0), (50.0, 100.0)], 3.0)
+        # Nach Süden, also entgegen A→B. Rechts vom Fahrer ist Westen.
+        vorher = self._fuehren(motor, (50.0, 50.0), 180.0)
+        self.assertTrue(vorher.reversed_direction)
+        motor.nudge(0.10)
+        nachher = self._fuehren(motor, (50.0, 50.0), 180.0)
+        # Die Spur liegt jetzt 10 cm rechts vom Fahrer: er steht links davon.
+        self.assertAlmostEqual(nachher.cross_track_m, -0.10, places=3)
+        self.assertAlmostEqual(motor.line.nudge_m, -0.10, places=3)   # im Muster: nach Westen
+
+    def test_forward_pass_unchanged(self):
+        motor = self._motor()
+        motor.line = GuidanceLine("ab", [(50.0, 0.0), (50.0, 100.0)], 3.0)
+        self._fuehren(motor, (50.0, 50.0), 0.0)
+        motor.nudge(0.10)
+        nachher = self._fuehren(motor, (50.0, 50.0), 0.0)
+        self.assertAlmostEqual(nachher.cross_track_m, -0.10, places=3)
+        self.assertAlmostEqual(motor.line.nudge_m, 0.10, places=3)
+
+    def test_contour_right_is_the_drivers_right_either_way_round(self):
+        motor = self._motor()
+        motor.use_contour()
+        # Auf der Westkante (x = 0) nach Norden: innen ist rechts (Osten).
+        self._fuehren(motor, (0.0, 50.0), 0.0)
+        motor.nudge(0.10)
+        nachher = self._fuehren(motor, (0.0, 50.0), 0.0)
+        self.assertAlmostEqual(nachher.cross_track_m, -0.10, places=2)
+        # Dieselbe Kante nach Süden: innen ist jetzt links. "Rechts" muss
+        # trotzdem rechts vom Fahrer liegen, also nach Westen (aus dem Feld).
+        motor.line.nudge_m = 0.0
+        self._fuehren(motor, (0.0, 50.0), 180.0)
+        motor.nudge(0.10)
+        nachher = self._fuehren(motor, (0.0, 50.0), 180.0)
+        self.assertAlmostEqual(nachher.cross_track_m, -0.10, places=2)
+
+    def test_startpunkt_im_feld(self):
+        motor = self._motor()
+        self.assertEqual(motor.startpunkt_im_feld(), (50.0, 50.0, 0.0))
+        motor.line = GuidanceLine("ab", [(20.0, 10.0), (20.0, 90.0)], 3.0)
+        self.assertEqual(motor.startpunkt_im_feld(), (20.0, 10.0, 0.0))
+
+
+class GeraetHinterAchseTest(unittest.TestCase):
+    """Andys Spritze: 5 m hinter der Achse, gezogen. Die Führung schaukelte
+    sich im Simulator auf ±1,75 m auf und die Lenkung schaltete im Sekundentakt
+    ab - weil auf einen Punkt hinter der Hinterachse gelenkt wurde. Der wandert
+    beim Einlenken erst zur falschen Seite. Gelenkt wird jetzt auf die Achse;
+    markiert wird weiterhin am Gerät."""
+
+    def _motor(self, **profil):
+        from agripilot import config as config_module
+        from agripilot.engine import Engine
+        ordner = tempfile.TemporaryDirectory()
+        self.addCleanup(ordner.cleanup)
+        store = Storage(os.path.join(ordner.name, "s.db"))
+        self.addCleanup(store.close)
+        motor = Engine(config_module.load("/kein-solcher-pfad.yaml"), store)
+        motor.update_profile({"width_m": 21.0, "antenna_forward_m": 1.2, "wheelbase_m": 2.6,
+                              "tool_trailing_m": 5.0, "trailed": True, "hitch_length_m": 4.0,
+                              "steer_gain": 0.9, "max_steer_deg": 35.0, **profil})
+        feld = store.save_field({"name": "Feld", "datum_lat": 48.0, "datum_lon": 11.0,
+                                 "boundary": [[0, 0], [400, 0], [400, 400], [0, 400]], "area_ha": 16.0})
+        motor.load_field(feld["id"])
+        motor.line = GuidanceLine("ab", [(100.0, 0.0), (100.0, 400.0)], motor.profile.spacing_m)
+        return motor
+
+    def _fahren(self, motor, start, kurs, sekunden, tempo=2.5, dt=0.1):
+        from agripilot.nmea import Fix
+        ost, nord, heading = start[0], start[1], kurs
+        uhr = 1_000_000.0
+        fehler = []
+        for i in range(int(sekunden / dt)):
+            lat, lon = motor.plane.to_wgs(ost, nord)
+            motor.on_fix(Fix(lat=lat, lon=lon, fix_quality=4, speed_ms=tempo,
+                             course_deg=heading, received_at=uhr))
+            einschlag = motor.guidance.steer_angle_deg if motor.guidance.active else 0.0
+            # Der Lenkmotor braucht seine Zeit: höchstens 25°/s wie im Profil.
+            drehrate = math.degrees(tempo / 2.6 * math.tan(math.radians(einschlag)))
+            heading = (heading + drehrate * dt) % 360.0
+            h = math.radians(heading)
+            ost += math.sin(h) * tempo * dt
+            nord += math.cos(h) * tempo * dt
+            uhr += dt
+            fehler.append(ost - 100.0)     # Abstand der Antenne von der Spur
+        return fehler
+
+    def test_the_sprayer_settles_on_the_line_instead_of_oscillating(self):
+        motor = self._motor()
+        fehler = self._fahren(motor, (101.0, 20.0), 0.0, sekunden=40)
+        spaet = fehler[len(fehler) // 2:]
+        self.assertLess(max(abs(f) for f in spaet), 0.10,
+                        f"schaukelt: {[round(f, 2) for f in spaet[::20]]}")
+
+    def test_marking_still_happens_at_the_implement(self):
+        motor = self._motor()
+        self._fahren(motor, (100.0, 20.0), 0.0, sekunden=4)
+        # Das Gerät hängt 5 m hinter der Achse: es liegt südlich der Antenne.
+        self.assertLess(motor.implement_position[1], motor.position[1] - 4.0)
+        # Gelenkt wird auf die Achse - der Führungspunkt liegt nicht hinten am Gerät.
+        self.assertGreater(motor.steer_position[1], motor.implement_position[1] + 3.0)
+
+
+class APlusErsetztTest(unittest.TestCase):
+    """A+ zweimal gedrückt ist eine Spur, nicht zwei - außer die erste ist Saisonspur."""
+
+    def _motor(self):
+        from agripilot import config as config_module
+        from agripilot.engine import Engine
+        ordner = tempfile.TemporaryDirectory()
+        self.addCleanup(ordner.cleanup)
+        store = Storage(os.path.join(ordner.name, "a.db"))
+        self.addCleanup(store.close)
+        motor = Engine(config_module.load("/kein-solcher-pfad.yaml"), store)
+        feld = store.save_field({"name": "Feld", "datum_lat": 48.0, "datum_lon": 11.0,
+                                 "boundary": [list(p) for p in QUADRAT], "area_ha": 1.0})
+        motor.load_field(feld["id"])
+        motor.tool_position, motor.heading = (50.0, 50.0), 0.0
+        motor.fix = _fix()
+        return motor, store
+
+    def test_pressing_a_plus_again_replaces_the_previous_a_plus_line(self):
+        motor, store = self._motor()
+        erste = motor.set_ab_from_heading(0.0)
+        zweite = motor.set_ab_from_heading(90.0)
+        self.assertEqual(erste["id"], zweite["id"])
+        self.assertEqual(len(store.list_lines()), 1)
+        self.assertEqual(zweite["name"], "A+ 90°")
+        self.assertEqual(motor.line.id, zweite["id"])
+
+    def test_a_season_line_and_a_named_line_are_not_overwritten(self):
+        motor, store = self._motor()
+        erste = motor.set_ab_from_heading(0.0)
+        motor.update_line(erste["id"], {"fahrgasse_m": 24})
+        zweite = motor.set_ab_from_heading(45.0)
+        self.assertNotEqual(erste["id"], zweite["id"])
+        dritte = motor.set_ab_from_heading(10.0, name="Hauptrichtung")
+        self.assertNotEqual(zweite["id"], dritte["id"])
+        self.assertEqual(len(store.list_lines()), 3)
+
+
+class ArbeitVerworfenTest(unittest.TestCase):
+    """Markieren an, Markieren aus, nichts gefahren - keine Zeile in der Liste."""
+
+    def test_a_job_without_distance_is_discarded(self):
+        from agripilot import config as config_module
+        from agripilot.engine import Engine
+        with tempfile.TemporaryDirectory() as ordner:
+            store = Storage(os.path.join(ordner, "v.db"))
+            try:
+                motor = Engine(config_module.load("/kein-solcher-pfad.yaml"), store)
+                feld = store.save_field({"name": "Feld", "datum_lat": 48.0, "datum_lon": 11.0,
+                                         "boundary": [], "area_ha": 0.0})
+                motor.load_field(feld["id"])
+                motor.start_job("Grubbern")
+                ergebnis = motor.stop_job()
+                self.assertTrue(ergebnis["verworfen"])
+                self.assertEqual(store.list_jobs(), [])
+                # Mit Strecke bleibt die Arbeit.
+                motor.start_job("Grubbern")
+                motor.distance_m = 40.0
+                ergebnis = motor.stop_job()
+                self.assertNotIn("verworfen", ergebnis)
+                self.assertEqual(len(store.list_jobs()), 1)
+            finally:
+                store.close()
+
+
 class VerwaisteArbeitTest(unittest.TestCase):
     """Zündung aus statt „Arbeit beenden": beim nächsten Start wird die offene
     Arbeit dieses Geräts abgeschlossen - die eines anderen Traktors nicht."""

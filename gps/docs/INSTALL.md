@@ -29,7 +29,10 @@ Einmal durchspielen:
    **B setzen** → erste Spur. Sie leuchtet grün und läuft zum Horizont.
 3. **Markieren** drücken. Die bearbeitete Fläche wird grün mitgemalt.
 4. **Menü → System**: mit den Reglern lenken und Gas geben. Der Lichtbalken
-   oben wandert, die Zahl darunter zählt die Zentimeter.
+   oben wandert, die Zahl darunter zählt die Zentimeter. Oder **Lenkung**
+   antippen: im Simulator ist die Automatik freigegeben, der Traktor zieht
+   selbst auf die Spur. Fährt er aus dem Feld (außerhalb der Grenze wird nichts
+   markiert, das steht dann oben links), **Traktor ins Feld setzen** drücken.
 5. **Menü → Aufträge**: die Fahrt als GPX oder CSV herunterladen.
 
 Damit ist klar, wie sich das System verhält, bevor es im Traktor hängt.

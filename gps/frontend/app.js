@@ -248,6 +248,15 @@ function updateHud(s) {
                            : 'Wende geplant, liegt aber nicht im Feld – Richtung oder Wendekreis ändern');
   }
   if (headland && headland.hinweis) hint.push(headland.hinweis);
+  // Markieren an, aber jede Sektion automatisch aus: die Maschine steht
+  // außerhalb der Grenze (oder auf schon bearbeiteter Fläche). Ohne den Satz
+  // sieht es aus, als würde das Markieren nicht funktionieren.
+  if (s.job && s.field && s.field.boundary.length >= 3 && s.sections.length
+      && s.sections.every((sec) => sec.auto && !sec.enabled && !sec.forced_off)) {
+    hint.push(s.field.im_feld === false
+      ? 'Außerhalb der Feldgrenze – Sektionen aus, es wird nichts markiert'
+      : 'Alle Sektionen aus – außerhalb der Grenze oder Fläche schon bearbeitet');
+  }
   if (!state.connected) hint.push('Keine Verbindung zum Gerät');
   el('hint').textContent = hint.join('\n');
   el('hint').classList.toggle('alarm', !state.connected);
@@ -797,7 +806,10 @@ function arbeitBezeichnung() {
 el('btnJob').onclick = async () => {
   if (state.live && state.live.job) {
     const result = await api('POST', '/api/job/stop');
-    if (result) toast(`Markieren aus – ${result.data.area_ha.toFixed(2)} ha`);
+    if (result) {
+      toast(result.data.verworfen ? 'Markieren aus – nichts gefahren, Arbeit verworfen'
+                                  : `Markieren aus – ${result.data.area_ha.toFixed(2)} ha`);
+    }
   } else if (await api('POST', '/api/job/start', { operation: arbeitBezeichnung() })) {
     toast(`Markieren an – ${arbeitBezeichnung()}`);
   }
@@ -1121,6 +1133,13 @@ el('simSpeed').oninput = (event) =>
   api('POST', '/api/simulator', { speed_kmh: parseFloat(event.target.value) });
 el('simSteer').oninput = (event) =>
   api('POST', '/api/simulator', { steer_deg: parseFloat(event.target.value) });
+el('btnSimInsFeld').onclick = async () => {
+  if (await api('POST', '/api/simulator', { ins_feld: true })) {
+    el('simSteer').value = 0;
+    toast('Traktor steht wieder im Feld');
+    el('sheet').hidden = true;
+  }
+};
 
 async function refreshLists() {
   if (el('sheet').hidden) return;

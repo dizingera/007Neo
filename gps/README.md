@@ -67,7 +67,11 @@ python3 ../scripts/run_sim.py
 ```
 
 Dann `http://localhost:8088` öffnen. Unter **Menü → System** stehen zwei Regler
-für Geschwindigkeit und Lenkung des virtuellen Traktors.
+für Geschwindigkeit und Lenkung des virtuellen Traktors und der Knopf
+**Traktor ins Feld setzen** – ohne scharfe Lenkung fährt er geradeaus aus dem
+Feld, und außerhalb der Grenze wird nichts markiert. Am Schreibtisch ist die
+Lenkautomatik freigegeben (es bewegt sich kein Motor): **Lenkung** antippen,
+und der virtuelle Traktor zieht selbst auf die Spur.
 
 `run_sim.py` legt Konfiguration und Datenbank in `gps/.simulator/` ab und lässt
 damit die Einstellungen einer echten Anlage unangetastet. Wer stattdessen
@@ -159,7 +163,7 @@ gps/
 cd gps/backend && python3 -m unittest discover -s tests -v
 ```
 
-238 Tests, ohne Zusatzpakete lauffähig. Geprüft wird vor allem, was im Feld Geld
+247 Tests, ohne Zusatzpakete lauffähig. Geprüft wird vor allem, was im Feld Geld
 kostet, wenn es falsch ist: Flächen, das Vorzeichen der Abweichung, der
 Hangausgleich und die Bedingungen, unter denen die Lenkautomatik einschalten
 darf.

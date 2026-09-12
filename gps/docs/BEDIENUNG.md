@@ -185,6 +185,12 @@ Büro.
 
 ## Spurversatz (Nudge)
 
+**Rechts heißt rechts vom Sitz aus** – auch auf einer Spur, die gerade
+rückwärts (von B nach A) gefahren wird, und auf der Kontur, egal ob im oder
+gegen den Uhrzeigersinn. Nach **10 cm ▶** leuchtet der Balken rechts, der Pfeil
+zeigt nach rechts, und die Lenkung zieht nach rechts auf die versetzte Spur.
+
+
 Die Tasten **◀ 10 cm** und **10 cm ▶** verschieben das **ganze Spurmuster** um
 zehn Zentimeter – das ist der Schritt, den man im Feld braucht. Dafür gibt es zwei gute Gründe:
 
@@ -335,6 +341,15 @@ unter neuem Namen; danach nur ändern, was anders ist. Die Auswahl gilt sofort:
 Spurabstand, Sektionen und Werkzeugpunkt springen um, die Spur bleibt. Die
 gewählte Maschine steht auch im Chip oben rechts und in jeder aufgezeichneten
 Arbeit. Die letzte Maschine lässt sich nicht löschen – eine muss es geben.
+
+**Gerät hinter Achse, gezogen oder angebaut.** Diese Maße bestimmen, wo
+markiert wird – die grüne Fläche entsteht am Gerät, beim gezogenen Gerät mit
+seinem Nachlauf in der Kurve. **Gelenkt wird immer auf die Hinterachse**, nie auf
+das Gerät: ein Punkt fünf Meter hinter der Achse schwenkt beim Einlenken erst
+zur falschen Seite, und eine Führung, die ihn auf die Spur zwingen will,
+schaukelt sich auf (im Simulator auf ±3,5 m, mit der Lenkung im Sekundentakt
+an und aus). Auf gerader Spur läuft das Gerät ohnehin in der Achsspur; ein
+seitlicher Versatz des Geräts wird als Versatz der Achse mitgenommen.
 
 ## Abstimmung bei Tempo, Latenz und Teilbreiten (Menü → Maschine)
 

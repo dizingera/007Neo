@@ -350,7 +350,9 @@ label.button { display: inline-flex; align-items: center; cursor: pointer; }
 .step .foot .quittung { font-size: 13px; color: var(--text); flex: 1; }
 
 .toast {
-  position: fixed; left: 50%; bottom: 100px; transform: translateX(-50%);
+  /* Oben unter dem Balken, nicht unten: dort liegen die Zahlen und der
+     Vorgewende-Kasten, und eine Meldung darüber verdeckte genau das. */
+  position: fixed; left: 50%; top: calc(13 * var(--u)); transform: translateX(-50%); max-width: 70vw;
   background: var(--panel-2); border: 1px solid var(--line); border-left: 4px solid var(--blue);
   padding: 13px 18px; border-radius: 8px; font-size: 15px; z-index: 30;
   max-width: 80vw; box-shadow: 0 8px 24px #0008;

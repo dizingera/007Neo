@@ -40,6 +40,11 @@ TRACK_MIN_DISTANCE_M = 1.0
 TRACK_FLUSH_COUNT = 25
 
 
+# Unter dieser Strecke gilt eine Arbeit als nicht begonnen: Markieren an und
+# gleich wieder aus, ohne zu fahren. Fünf Meter ist eine Traktorlänge.
+MINDESTSTRECKE_ARBEIT_M = 5.0
+
+
 class Engine:
     def __init__(self, config: Config, store: storage.Storage) -> None:
         self.config = config
@@ -60,6 +65,7 @@ class Engine:
         self.fix: Optional[Fix] = None
         self.position: Optional[geo.Point] = None      # antenna, local metres
         self.tool_position: Optional[geo.Point] = None
+        self.steer_position: Optional[geo.Point] = None   # worauf gelenkt wird: die Achse
         # Beim starren Anbau dasselbe wie tool_position; beim gezogenen Gerät
         # nicht - dort wird hier markiert, und in der Kurve liegt das spürbar
         # innerhalb der Fahrspur.
@@ -376,7 +382,18 @@ class Engine:
         h = math.radians(heading)
         b = (a[0] + math.sin(h) * 200.0, a[1] + math.cos(h) * 200.0)
         self._pending_a = None
-        return self._save_line("ab", [a, b], name or f"A+ {heading:.0f}°")
+        # A+ noch einmal gedrückt heißt: die Richtung neu nehmen - nicht eine
+        # weitere Spur in die Liste stellen. Die eben angelegte A+-Spur wird
+        # überschrieben, solange sie keine Saisonspur ist (die hat jemand
+        # bewusst so festgelegt; sie bleibt).
+        ersetzen = ""
+        if (self.line is not None and not name and self.line.mode == "ab"
+                and self.line.name.startswith("A+") and not self.line.fahrgasse_m
+                and self.field is not None):
+            alt = self.store.get_line(self.line.id)
+            if alt is not None and alt["field_id"] == self.field["id"]:
+                ersetzen = self.line.id
+        return self._save_line("ab", [a, b], name or f"A+ {heading:.0f}°", line_id=ersetzen)
 
     def start_recording(self, mode: str) -> None:
         if mode not in ("boundary", "curve"):
@@ -428,10 +445,12 @@ class Engine:
             self.line.nudge_m = nudge
         return field
 
-    def _save_line(self, mode: str, points: list[geo.Point], name: str) -> dict:
+    def _save_line(self, mode: str, points: list[geo.Point], name: str,
+                   line_id: str = "") -> dict:
         if self.field is None:
             raise RuntimeError("Kein Feld ausgewählt")
         record = self.store.save_line({
+            **({"id": line_id} if line_id else {}),
             "field_id": self.field["id"],
             "name": name,
             "mode": mode,
@@ -440,6 +459,26 @@ class Engine:
         })
         self.load_line(record["id"])
         return record
+
+    def startpunkt_im_feld(self) -> Optional[tuple[float, float, float]]:
+        """Ost, Nord, Kurs für einen Neuanfang im Feld - für den Simulator.
+
+        Auf der aktiven AB-Spur: an ihrem Anfang, in ihrer Richtung. Sonst in
+        der Mitte der Grenze, nach Norden.
+        """
+        if self.field is None:
+            return None
+        if self.line is not None and self.line.mode == "ab" and len(self.line.points) >= 2:
+            a, b = self.line.points[0], self.line.points[-1]
+            kurs = geo.heading_deg(a, b)
+            rx, ry = math.cos(math.radians(kurs)), -math.sin(math.radians(kurs))
+            versatz = self.line.nudge_m
+            return a[0] + rx * versatz, a[1] + ry * versatz, kurs
+        grenze = self.field.get("boundary") or []
+        if len(grenze) >= 3:
+            return (sum(p[0] for p in grenze) / len(grenze),
+                    sum(p[1] for p in grenze) / len(grenze), 0.0)
+        return 0.0, 0.0, 0.0
 
     def nudge(self, metres: float) -> float:
         """Trim the whole pattern sideways.
@@ -450,6 +489,12 @@ class Engine:
         """
         if self.line is None:
             raise RuntimeError("Keine Spur aktiv")
+        # "Rechts" heißt rechts vom Sitz aus. Auf einer rückwärts gefahrenen
+        # AB-Spur und auf dem Ring gegen den Uhrzeigersinn liegt rechts vom
+        # Fahrer links vom Muster - die Führung weiß das (right_sign), also
+        # wird der Wunsch des Fahrers hier in die Sprache des Musters übersetzt.
+        if self.guidance.active:
+            metres *= self.guidance.right_sign
         self.line.nudge_m += metres
         if self.line.derived:
             # Die Kontur ist keine gespeicherte Spur. Sie hier anzulegen würde
@@ -600,6 +645,13 @@ class Engine:
         )
         job = self.store.get_job(self.job["id"])
         self.job = None
+        if self.distance_m < MINDESTSTRECKE_ARBEIT_M:
+            # Markieren an, Markieren aus, nichts gefahren: das war ein Versehen
+            # oder ein Versuch, keine Arbeit. In der Liste und im CSV fürs Büro
+            # wäre es eine Zeile mit 0,00 ha, die niemand haben will.
+            self.store.delete_job(job["id"])
+            self.note("Arbeit verworfen: nichts gefahren")
+            return {**job, "verworfen": True}
         self.note(f"Arbeit beendet: {job['area_ha']:.2f} ha")
         return job
 
@@ -636,6 +688,7 @@ class Engine:
         previous_tool = self.tool_position
         previous_implement = self.implement_position
         self.tool_position = self.profile.tool_position(self.position, heading)
+        self.steer_position = self.profile.steer_position(self.position, heading)
 
         # Das gezogene Gerät schwenkt dem Fahrzeug nach, statt sich mit ihm zu
         # drehen. Erst die Ausrichtung fortschreiben, dann daraus die Lage - in
@@ -732,7 +785,7 @@ class Engine:
             # Lenkung weiter gegen etwas Sinnvolles statt gegen die verlassene
             # Spur, von der man in einer Wende zwangsläufig weit weg ist.
             zustand = self.turn.solve(
-                self.tool_position, self.heading, fix.speed_ms, self.profile
+                self._lenkpunkt(), self.heading, fix.speed_ms, self.profile
             )
             if self.turn.abgebrochen:
                 # Die Maschine folgt der Route nicht mehr. Jetzt übernimmt der
@@ -764,15 +817,25 @@ class Engine:
         # einem Augenblick war - in schnellen Kurven läuft sie deshalb hinterher.
         # Geführt wird deshalb auf den Punkt, an dem sie sein wird; markiert
         # wird weiterhin dort, wo sie wirklich war.
-        fuehrungspunkt = self.tool_position
+        fuehrungspunkt = self._lenkpunkt()
         vorhalt_m = self.profile.actuator_latency_ms / 1000.0 * max(0.0, fix.speed_ms)
         if vorhalt_m > 0.01:
             h = math.radians(self.heading)
-            fuehrungspunkt = (self.tool_position[0] + math.sin(h) * vorhalt_m,
-                              self.tool_position[1] + math.cos(h) * vorhalt_m)
+            fuehrungspunkt = (fuehrungspunkt[0] + math.sin(h) * vorhalt_m,
+                              fuehrungspunkt[1] + math.cos(h) * vorhalt_m)
         self.guidance = self.line.solve(
             fuehrungspunkt, self.heading, fix.speed_ms, self.profile
         )
+
+    def _lenkpunkt(self) -> Optional[geo.Point]:
+        """Worauf geführt wird: die Hinterachse (siehe VehicleProfile.steer_position).
+
+        Ohne Antennenposition - in Tests, die den Werkzeugpunkt direkt setzen -
+        bleibt es der Werkzeugpunkt.
+        """
+        if self.steer_position is not None and self.position is not None:
+            return self.steer_position
+        return self.tool_position
 
     def _update_coverage(self, previous_implement: Optional[geo.Point]) -> None:
         """Mark the ground swept since the previous position.
@@ -921,6 +984,9 @@ class Engine:
                 "area_ha": self.field["area_ha"],
                 "boundary": self.field["boundary"],
                 "datum": [self.field["datum_lat"], self.field["datum_lon"]],
+                # Steht die Maschine im Feld? None ohne Grenze oder Position.
+                "im_feld": (geo.point_in_polygon(self.position, [tuple(p) for p in self.field["boundary"]])
+                            if self.position is not None and len(self.field["boundary"]) >= 3 else None),
             } if self.field else None,
             "profile": asdict(self.profile),
             "sections": [asdict(s) for s in self.sections],
