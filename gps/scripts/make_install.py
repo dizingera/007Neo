@@ -90,6 +90,10 @@ Danach läuft AgriPilot bei jeder Anmeldung von selbst. Am Ende der Einrichtung
 stehen die Adressen im Fenster: eine für dieses Tablet, eine für das
 Android-Tablet im selben WLAN.
 
+AgriPilot hat kein eigenes Fenster - es ist ein Server, und die Anzeige läuft
+im Browser. Auf dem Desktop liegt dafür das Symbol "AgriPilot": antippen, und
+es startet den Server, falls nötig, und öffnet die Anzeige.
+
 
 Das Android-Tablet
 ------------------

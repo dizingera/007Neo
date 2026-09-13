@@ -15,6 +15,7 @@ import base64
 import json
 import math
 import os
+import pathlib
 import sqlite3
 import struct
 import sys
@@ -5694,3 +5695,47 @@ class SollwertFadenTest(unittest.TestCase):
         befehl = regler.update(140.0, "kg/ha", fix, True, True, now=1000.0)
         self.assertFalse(befehl.aktiv)
         self.assertIn("Kabel ab", befehl.grund)
+
+
+class WindowsSymbolTest(unittest.TestCase):
+    """frontend/icon.ico - das Bild auf der Verknüpfung in der Kabine.
+
+    Die Datei wird von scripts/make_icons.py von Hand zusammengesetzt, ohne
+    Fremdpaket. Ein Fehler darin fällt sonst erst auf dem Tablet auf, und zwar
+    als leeres Symbol - also hier nachmessen, was ausgeliefert wird.
+    """
+
+    def test_die_ico_datei_ist_in_sich_stimmig(self):
+        pfad = (pathlib.Path(__file__).resolve().parents[2]
+                / "frontend" / "icon.ico")
+        daten = pfad.read_bytes()
+        reserviert, art, anzahl = struct.unpack("<HHH", daten[:6])
+        self.assertEqual((reserviert, art), (0, 1))   # 1 = Symbol, nicht Zeiger
+        self.assertGreater(anzahl, 0)
+
+        verzeichnis_ende = 6 + 16 * anzahl
+        kanten = []
+        for i in range(anzahl):
+            breite, hoehe, _f, _r, ebenen, tiefe, laenge, versatz = struct.unpack(
+                "<BBBBHHII", daten[6 + 16 * i:22 + 16 * i])
+            kante = breite or 256          # 0 steht für 256, ein Byte fasst nicht mehr
+            kanten.append(kante)
+            self.assertEqual((breite, hoehe), (hoehe, breite))
+            self.assertEqual((ebenen, tiefe), (1, 32))
+            self.assertGreaterEqual(versatz, verzeichnis_ende)
+            self.assertLessEqual(versatz + laenge, len(daten))
+
+            bild = daten[versatz:versatz + laenge]
+            if bild[:8] == b"\x89PNG\r\n\x1a\n":
+                self.assertEqual(struct.unpack(">II", bild[16:24]), (kante, kante))
+            else:
+                kopf, bw, bh, _e, bits = struct.unpack("<Iii HH", bild[:16])
+                # Die Höhe im Kopf zählt Bild und Maske zusammen - daher doppelt.
+                self.assertEqual((kopf, bw, bh, bits), (40, kante, kante * 2, 32))
+                maske = ((kante + 31) // 32) * 4 * kante
+                self.assertEqual(laenge, 40 + kante * kante * 4 + maske)
+
+        # Windows greift sich die Größe, die es braucht: klein in der
+        # Taskleiste, groß in der Kacheldarstellung.
+        self.assertIn(16, kanten)
+        self.assertIn(256, kanten)

@@ -68,6 +68,21 @@ Am Ende stehen zwei Adressen im Fenster: eine für dieses Tablet
 (`http://<adresse>:8080`). Ab jetzt startet AgriPilot bei jeder Anmeldung von
 selbst.
 
+## Wie das Programm gestartet wird
+
+AgriPilot hat kein eigenes Fenster – es ist ein Server, die Anzeige läuft im
+Browser. Zwei Wege führen hin, und der erste braucht gar nichts:
+
+1. **Von selbst.** Der Installer trägt einen Start beim Anmelden ein. Nach dem
+   Einschalten des Tablets läuft AgriPilot also schon.
+2. **Symbol „AgriPilot" antippen**, auf dem Desktop und im Startmenü. Es sieht
+   nach, ob der Server läuft, startet ihn sonst, wartet auf ihn und öffnet die
+   Anzeige. Läuft er schon, blitzt nur kurz ein Fenster auf.
+
+Von Hand geht es auch: `C:\AgriPilot\start.bat` starten und im Browser
+`http://localhost:8080` aufrufen. Das ist der Weg, wenn etwas klemmt – dort
+stehen die Meldungen.
+
 **Danach:** unter Menü → System → *Geräte suchen* findet das Programm
 Empfänger, Neigungssensor und Lenksteuerung und trägt die Anschlüsse ein. Die
 Inbetriebnahme Schritt für Schritt steht unter Menü → Einbau.

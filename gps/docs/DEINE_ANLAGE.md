@@ -102,7 +102,9 @@ Das Skript legt alles unter `C:\AgriPilot` an, richtet die Python-Umgebung ein,
 öffnet Port 8080 in der Firewall (damit das Android-Tablet mitschauen kann) und
 trägt einen automatischen Start beim Anmelden ein.
 
-Danach `C:\AgriPilot\start.bat` und im Browser `http://localhost:8080` öffnen.
+Danach liegt das Symbol **AgriPilot** auf dem Desktop – antippen genügt. Es
+startet den Server, falls er nicht ohnehin schon läuft, und öffnet die Anzeige
+im Browser.
 Ohne angeschlossene Geräte läuft der Simulator: virtueller Traktor, virtueller
 Hang, alles bedienbar. So lernst du die Oberfläche kennen, ohne im Traktor zu
 sitzen.

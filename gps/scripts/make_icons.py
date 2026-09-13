@@ -31,8 +31,8 @@ SPUR = (0x3F, 0xB9, 0x50)       # --green-bright
 FAHRZEUG = (0xE6, 0xED, 0xF3)   # --text
 
 
-def schreibe_png(pfad: Path, breite: int, hoehe: int, pixel: list[list[tuple]]) -> None:
-    """Ein PNG in Wahrfarben schreiben (8 Bit je Kanal, ohne Filter)."""
+def png_bytes(breite: int, hoehe: int, pixel: list[list[tuple]]) -> bytes:
+    """Ein PNG in Wahrfarben (8 Bit je Kanal, ohne Filter)."""
     roh = bytearray()
     for zeile in pixel:
         roh.append(0)                      # Filtertyp 0 = keiner
@@ -44,12 +44,61 @@ def schreibe_png(pfad: Path, breite: int, hoehe: int, pixel: list[list[tuple]]) 
                 + struct.pack(">I", zlib.crc32(kennung + inhalt) & 0xFFFFFFFF))
 
     kopf = struct.pack(">IIBBBBB", breite, hoehe, 8, 2, 0, 0, 0)
-    pfad.write_bytes(
-        b"\x89PNG\r\n\x1a\n"
-        + block(b"IHDR", kopf)
-        + block(b"IDAT", zlib.compress(bytes(roh), 9))
-        + block(b"IEND", b"")
-    )
+    return (b"\x89PNG\r\n\x1a\n"
+            + block(b"IHDR", kopf)
+            + block(b"IDAT", zlib.compress(bytes(roh), 9))
+            + block(b"IEND", b""))
+
+
+def schreibe_png(pfad: Path, breite: int, hoehe: int, pixel: list[list[tuple]]) -> None:
+    pfad.write_bytes(png_bytes(breite, hoehe, pixel))
+
+
+def _als_bmp(groesse: int, pixel: list[list[tuple]]) -> bytes:
+    """Ein Bild als DIB, wie es in einer .ico-Datei steht.
+
+    Die Zeilen stehen von unten nach oben, die Farben als BGRA, und die Höhe im
+    Kopf ist doppelt so groß wie das Bild - der untere Teil ist die
+    Durchsichtigkeitsmaske. Unsere Kachel ist überall deckend, also bleibt die
+    Maske leer.
+    """
+    kopf = struct.pack("<IiiHHIIiiII", 40, groesse, groesse * 2, 1, 32, 0,
+                       0, 0, 0, 0, 0)
+    farben = bytearray()
+    for zeile in reversed(pixel):
+        for r, g, b in zeile:
+            farben += bytes((b, g, r, 255))
+    # Maske: ein Bit je Bildpunkt, jede Zeile auf vier Byte aufgefüllt.
+    je_zeile = ((groesse + 31) // 32) * 4
+    return bytes(kopf) + bytes(farben) + bytes(je_zeile * groesse)
+
+
+def schreibe_ico(pfad: Path, groessen: tuple[int, ...]) -> None:
+    """Ein Windows-Symbol schreiben - für die Verknüpfung auf dem Tablet.
+
+    Windows sucht sich aus der Datei die Größe heraus, die es gerade braucht:
+    16 Punkte in der Taskleiste, 256 in der großen Ansicht. Die großen Größen
+    stehen als PNG darin (so macht es Windows selbst seit Vista), die kleinen
+    als DIB - die versteht auch ein älteres Windows ohne Umweg.
+    """
+    bilder: list[bytes] = []
+    for groesse in groessen:
+        bild = zeichne(groesse)
+        if groesse >= 256:
+            bilder.append(png_bytes(groesse, groesse, bild))
+        else:
+            bilder.append(_als_bmp(groesse, bild))
+
+    versatz = 6 + 16 * len(groessen)
+    kopf = struct.pack("<HHH", 0, 1, len(groessen))
+    eintraege = bytearray()
+    for groesse, daten in zip(groessen, bilder):
+        # 0 steht für 256 - ein Byte fasst nicht mehr.
+        kante = 0 if groesse >= 256 else groesse
+        eintraege += struct.pack("<BBBBHHII", kante, kante, 0, 0, 1, 32,
+                                 len(daten), versatz)
+        versatz += len(daten)
+    pfad.write_bytes(bytes(kopf) + bytes(eintraege) + b"".join(bilder))
 
 
 def zeichne(groesse: int, rand: float = 0.0) -> list[list[tuple]]:
@@ -107,6 +156,12 @@ def main() -> None:
         pfad = ZIEL / name
         schreibe_png(pfad, groesse, groesse, zeichne(groesse, rand))
         print(f"{pfad.name}: {pfad.stat().st_size} Bytes")
+
+    # Dieselbe Kachel als Windows-Symbol - für die Verknüpfung, die in der
+    # Kabine angetippt wird. Damit sehen beide Tablets dasselbe Bild.
+    ico = ZIEL / "icon.ico"
+    schreibe_ico(ico, (16, 32, 48, 64, 256))
+    print(f"{ico.name}: {ico.stat().st_size} Bytes")
 
 
 if __name__ == "__main__":

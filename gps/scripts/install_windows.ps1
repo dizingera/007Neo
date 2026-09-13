@@ -219,6 +219,63 @@ $option  = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries `
 Register-ScheduledTask -TaskName "AgriPilot" -Action $aktion -Trigger $ausloes `
     -Settings $option -Force -RunLevel Highest | Out-Null
 
+Schritt "Verknüpfung zum Antippen"
+# AgriPilot hat kein eigenes Fenster - es ist ein Server, und die Anzeige
+# läuft im Browser. Ohne Symbol müsste in der Kabine jemand eine Adresse
+# eintippen. Also eine Datei, die nachsieht, ob der Server schon läuft, ihn
+# sonst startet, auf ihn wartet und dann den Browser öffnet.
+$starter = Join-Path $Ziel "AgriPilot.bat"
+@"
+@echo off
+rem AgriPilot anzeigen. Startet den Server, falls er nicht schon laeuft.
+title AgriPilot
+set PORT=$Port
+set START=$start
+
+call :horchen
+if not errorlevel 1 goto :anzeigen
+
+echo AgriPilot wird gestartet ...
+start "AgriPilot" /min "%START%"
+powershell -NoProfile -Command ^
+  "for (`$i=0; `$i -lt 60; `$i++) { try { (New-Object Net.Sockets.TcpClient).Connect('127.0.0.1', %PORT%); exit 0 } catch { Start-Sleep -Milliseconds 500 } }; exit 1"
+if errorlevel 1 (
+    echo.
+    echo AgriPilot antwortet nicht auf Port %PORT%.
+    echo   "%START%" von Hand starten - dort steht, woran es liegt.
+    pause
+    exit /b 1
+)
+
+:anzeigen
+start "" "http://localhost:%PORT%"
+exit /b 0
+
+:horchen
+powershell -NoProfile -Command ^
+  "try { (New-Object Net.Sockets.TcpClient).Connect('127.0.0.1', %PORT%); exit 0 } catch { exit 1 }"
+exit /b %errorlevel%
+"@ | Set-Content -Encoding ASCII $starter
+
+$symbol = Join-Path $Ziel "frontend\icon.ico"
+$schale = New-Object -ComObject WScript.Shell
+foreach ($ort in @([Environment]::GetFolderPath("CommonDesktopDirectory"),
+                   (Join-Path $env:PROGRAMDATA "Microsoft\Windows\Start Menu\Programs"))) {
+    if (-not (Test-Path $ort)) { continue }
+    $kurz = $schale.CreateShortcut((Join-Path $ort "AgriPilot.lnk"))
+    $kurz.TargetPath       = $starter
+    $kurz.WorkingDirectory = $Ziel
+    $kurz.Description      = "AgriPilot - Anzeige in der Kabine"
+    # Bewusst kein minimiertes Fenster: läuft AgriPilot schon, blitzt es nur
+    # kurz auf, und muss der Server erst hochfahren, steht dort, was gerade
+    # passiert - und im Fehlerfall, woran es liegt. Ein minimiertes Fenster
+    # würde genau diese Meldung verstecken.
+    $kurz.WindowStyle      = 1
+    if (Test-Path $symbol) { $kurz.IconLocation = $symbol }
+    $kurz.Save()
+}
+Write-Host "   Symbol 'AgriPilot' auf dem Desktop und im Startmenü."
+
 $adressen = (Get-NetIPAddress -AddressFamily IPv4 |
              Where-Object { $_.IPAddress -notlike "127.*" }).IPAddress
 
@@ -227,7 +284,7 @@ Write-Host "Anzeige auf diesem Tablet:  http://localhost:$Port"
 foreach ($adresse in $adressen) {
     Write-Host "Auf dem Android-Tablet:     http://${adresse}:$Port"
 }
-Write-Host "`nJetzt starten:  $start"
+Write-Host "`nJetzt starten:  das Symbol AgriPilot auf dem Desktop antippen."
 Write-Host "Geräte suchen:  `"$pyexe`" `"$Ziel\scripts\scan_devices.py`""
 Write-Host ""
 Write-Host "Für die Kachel auf dem Android-Tablet - und dafür, dass dessen" -ForegroundColor Cyan
