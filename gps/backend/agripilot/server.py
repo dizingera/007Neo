@@ -335,18 +335,23 @@ NUR_WERT = ("imu.roll_sign", "imu.terrain_compensation", "imu.use_for_heading")
 def create_app(config=None) -> FastAPI:
     config = config or config_module.load()
     application = Application(config)
-    api = FastAPI(title="AgriPilot", version=VERSION)
+
+    # Hochfahren und Herunterfahren hängen am Lebenszyklus: uvicorn betritt
+    # diesen Abschnitt beim Start und verlässt ihn beim Beenden. Das ``finally``
+    # sorgt dafür, dass Empfänger, Lenkung und Schnittstellen auch dann sauber
+    # abgeschaltet werden, wenn der Betrieb dazwischen mit einem Fehler endet.
+    @contextlib.asynccontextmanager
+    async def lebenszyklus(_: FastAPI):
+        await application.start()
+        try:
+            yield
+        finally:
+            await application.stop()
+
+    api = FastAPI(title="AgriPilot", version=VERSION, lifespan=lebenszyklus)
     api.state.app = application
     engine = application.engine
     store = application.store
-
-    @api.on_event("startup")
-    async def _startup() -> None:
-        await application.start()
-
-    @api.on_event("shutdown")
-    async def _shutdown() -> None:
-        await application.stop()
 
     # Was über die Schnittstelle hereinkommt, kommt aus dem Netz - auch aus
     # einem Netz, in dem ein Traktor, ein Handy und der Hofrechner hängen. Ein

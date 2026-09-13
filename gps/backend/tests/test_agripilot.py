@@ -21,6 +21,7 @@ import sys
 import tempfile
 import time
 import unittest
+import warnings
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -2465,6 +2466,37 @@ class ReplayTest(unittest.IsolatedAsyncioTestCase):
         quelle = self.recorder.ReplaySource(fixes.append, pfad, tempo=20.0)
         await quelle.abspielen()
         self.assertEqual(len(fixes), 1)
+
+
+class StartMeldungenTest(unittest.TestCase):
+    """Der Start soll still sein.
+
+    Auf dem Tablet in der Kabine ist das Fenster mit den Startmeldungen das
+    Einzige, was jemand zu sehen bekommt, wenn etwas klemmt. Steht dort bei
+    jedem Start eine Warnung, die nichts bedeutet, sieht man die eine, die
+    etwas bedeutet, nicht mehr.
+    """
+
+    def test_das_hochfahren_warnt_nicht(self):
+        from fastapi.testclient import TestClient
+        from agripilot import config as config_module
+        from agripilot.server import create_app
+
+        with tempfile.TemporaryDirectory() as ordner:
+            config = config_module.load("/kein-solcher-pfad.yaml")
+            config.server.data_dir = ordner
+            config.gnss.source = "simulator"
+            with warnings.catch_warnings(record=True) as gesehen:
+                warnings.simplefilter("always")
+                with TestClient(create_app(config)) as client:
+                    self.assertEqual(client.get("/api/state").status_code, 200)
+
+        # Nur, was aus AgriPilot selbst kommt: was FastAPI, anyio oder das
+        # Testwerkzeug untereinander ausmachen, ist nicht unsere Sache.
+        eigene = [w for w in gesehen if "agripilot" in str(w.filename).replace("\\", "/")]
+        self.assertEqual(eigene, [], "\n".join(
+            f"{w.filename}:{w.lineno} {w.category.__name__}: {w.message}"
+            for w in eigene))
 
 
 class RohdatenApiTest(unittest.TestCase):
