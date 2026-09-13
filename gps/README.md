@@ -109,12 +109,16 @@ sudo bash scripts/install_pi.sh client 192.168.10.1 # jeder weitere Traktor
 powershell -ExecutionPolicy Bypass -File scripts\install_windows.ps1
 ```
 
-**Auf ein Tablet bringen, auf dem noch nichts ist** – ein Paket zum Mitnehmen
-bauen, entpacken, `INSTALLIEREN.bat` doppelklicken:
+**Auf ein Tablet bringen, auf dem noch nichts ist** – einen Installer bauen,
+auf dem Tablet doppelklicken, fertig:
 
 ```bash
-python3 scripts/make_install.py -o /pfad/zum/stick     # mit --pakete auch ohne Internet
+python3 scripts/make_exe.py -o /pfad/zum/stick          # braucht NSIS: apt-get install nsis
 ```
+
+Heraus kommt eine `AgriPilot-Setup-*.exe` mit allen Python-Bibliotheken darin,
+Eintrag in *Apps & Features* und Deinstallierer. Wer lieber hineinsieht:
+`scripts/make_install.py` baut dasselbe als Zip mit `INSTALLIEREN.bat`.
 
 Der ganze Weg für beide Tablets, bis zur Kachel auf dem Android-Startbildschirm,
 steht in [docs/TABLETS.md](docs/TABLETS.md).

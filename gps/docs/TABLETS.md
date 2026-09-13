@@ -10,78 +10,100 @@ nichts – es zeigt über den Browser an. Das ist keine Notlösung: für die
 Phidget-Motorsteuerung gibt es unter Android keinen Treiber, und ein Tablet,
 das nur anzeigt, lässt sich ersetzen, wenn eins im Feld zu Bruch geht.
 
-## Das Paket bauen
+## Den Installer bauen
 
 Am Hofrechner, im Ordner `gps`:
 
 ```bash
-python3 scripts/make_install.py -o /pfad/zum/stick
+python3 scripts/make_exe.py -o /pfad/zum/stick
 ```
 
-Heraus kommt `agripilot-installation-<version>-<commit>.zip`, rund 1,5 MB.
+Heraus kommt **`AgriPilot-Setup-<version>-<commit>.exe`**, rund 15 MB. Eine
+Datei, zum Doppelklicken – mit Willkommensseite, Fortschritt, Eintrag in
+*Apps & Features* und Deinstallierer. Alle Python-Bibliotheken sind darin,
+für Python 3.11 bis 3.14; das Tablet braucht dafür kein WLAN.
 
-**Wenn das Tablet in der Halle kein WLAN hat**, die Python-Bibliotheken gleich
-mitnehmen:
+Gebaut wird mit [NSIS](https://nsis.sourceforge.io/), das auch unter Linux
+läuft (`apt-get install nsis`). Ein Windows-Rechner zum Bauen ist also nicht
+nötig.
+
+**Python bringt der Installer nicht mit.** Er sucht es, und wenn keines da
+ist, sagt er das in einem Fenster und bietet an, python.org zu öffnen. Für
+ein Tablet ohne WLAN: den Python-Installer am Hofrechner laden und **neben
+die Setup-Datei** auf den Stick legen – dann wird er still mit installiert.
+
+### Der alte Weg: ein Zip
+
+Es gibt weiterhin ein Zip-Paket, für den Fall, dass jemand hineinsehen oder
+die Einrichtung von Hand fahren will:
 
 ```bash
 python3 scripts/make_install.py --pakete -o /pfad/zum/stick
 ```
 
-Dann sind es rund 15 MB, und der Einbau läuft ohne Internet. Die Pakete liegen
-für **Python 3.11 bis 3.14** bei – eine dieser Fassungen muss auf dem Tablet
-sein, welche ist gleich. Der Installer sieht nach und sagt es, statt mit einer
-unverständlichen pip-Meldung abzubrechen.
+Darin liegt `INSTALLIEREN.bat`, die dasselbe tut wie die .exe – nur eben nach
+dem Entpacken und mit einer Rückfrage nach Administratorrechten.
 
-| | ohne `--pakete` | mit `--pakete` |
+| | `AgriPilot-Setup.exe` | Zip mit `INSTALLIEREN.bat` |
 |---|---|---|
-| Größe | ~1,5 MB | ~15 MB |
-| Tablet braucht WLAN | ja, einmal beim Einbau | nein |
-| Python-Fassung | beliebig ab 3.9 | 3.11 bis 3.14 |
+| Schritte auf dem Tablet | doppelklicken | entpacken, Datei finden, doppelklicken |
+| Deinstallieren über Windows | ja | nein |
+| Python-Fassung | 3.11 bis 3.14 | 3.11 bis 3.14 |
+| Hineinsehen möglich | nein | ja |
 
-Ist auf dem Tablet eine Fassung, die nicht dabei ist, sagt der Installer, für
-welche die Pakete gelten. Dann entweder eine davon nachinstallieren, oder das
-Paket am Hofrechner passend bauen:
+Liegt auf dem Tablet eine Python-Fassung, die nicht dabei ist, sagt der
+Installer, für welche die Bibliotheken gelten. Dann entweder eine davon
+nachinstallieren, oder passend neu bauen:
 
 ```bash
-python3 scripts/make_install.py --pakete --python 3.15 -o /pfad/zum/stick
+python3 scripts/make_exe.py --python 3.15 -o /pfad/zum/stick
 ```
 
 ## Windows-Tablet einrichten
 
-1. **Python**, falls noch nicht da: von python.org holen, beim Installieren
-   den Haken bei *Add python.exe to PATH* setzen. Ohne Internet am Tablet den
-   Installer am Hofrechner laden und auf denselben Stick legen.
-
-2. **Zip entpacken** – vollständig, nicht nur hineinschauen. Windows öffnet
-   Zip-Dateien wie Ordner; daraus zu starten geht schief, weil die Dateien
-   dann gar nicht auf der Platte liegen.
-
-3. **`INSTALLIEREN.bat` doppelklicken.** Windows fragt nach
-   Administratorrechten – die braucht es für die Firewall-Freigabe und den
-   automatischen Start.
+**`AgriPilot-Setup.exe` doppelklicken.** Windows fragt nach
+Administratorrechten – die braucht es für die Firewall-Freigabe und den
+automatischen Start. Dann durch die Seiten klicken; die Vorschläge passen.
 
 Der Aufruf ist wiederholbar. Ein zweites Mal aktualisiert das Programm und
-lässt Konfiguration, Felder und aufgezeichnete Arbeiten unangetastet.
+lässt Konfiguration, Felder und aufgezeichnete Arbeiten unangetastet. Läuft
+AgriPilot gerade, wird es dafür kurz angehalten und danach wieder gestartet.
 
 Am Ende stehen zwei Adressen im Fenster: eine für dieses Tablet
 (`http://localhost:8080`) und eine für das Android-Tablet
-(`http://<adresse>:8080`). Ab jetzt startet AgriPilot bei jeder Anmeldung von
-selbst.
+(`http://<adresse>:8080`). AgriPilot läuft ab sofort und startet bei jeder
+Anmeldung von selbst – ohne Fenster, im Hintergrund. Was der Server dabei
+sagt, steht in `C:\ProgramData\AgriPilot\start.log`.
+
+**Danach:** unter Menü → System → *Geräte suchen* findet das Programm
+Empfänger, Neigungssensor und Lenksteuerung und trägt die Anschlüsse ein. Die
+Inbetriebnahme Schritt für Schritt steht unter Menü → Einbau.
+
+### Wieder entfernen
+
+Einstellungen → Apps → **AgriPilot** → Deinstallieren. Das hält das Programm
+an, trägt den automatischen Start aus, nimmt die Firewall-Freigabe zurück und
+räumt den Ordner weg.
+
+Felder, Grenzen, Konfiguration und aufgezeichnete Arbeiten bleiben unter
+`C:\ProgramData\AgriPilot` liegen – mit Absicht: das ist die Arbeit von
+Jahren, und Deinstallieren ist oft nur der erste Schritt einer
+Neuinstallation.
 
 ## Wie das Programm gestartet wird
 
 AgriPilot hat kein eigenes Fenster – es ist ein Server, die Anzeige läuft im
 Browser. Zwei Wege führen hin, und der erste braucht gar nichts:
 
-1. **Von selbst.** Der Installer trägt einen Start beim Anmelden ein. Nach dem
-   Einschalten des Tablets läuft AgriPilot also schon.
+1. **Von selbst.** Der Installer trägt einen Start beim Anmelden ein, ohne
+   Fenster. Nach dem Einschalten des Tablets läuft AgriPilot also schon.
 2. **Symbol „AgriPilot" antippen**, auf dem Desktop und im Startmenü. Es sieht
    nach, ob der Server läuft, startet ihn sonst, wartet auf ihn und öffnet die
    Anzeige. Läuft er schon, blitzt nur kurz ein Fenster auf.
 
 Von Hand geht es auch: `C:\AgriPilot\start.bat` starten und im Browser
-`http://localhost:8080` aufrufen. Das ist der Weg, wenn etwas klemmt – dort
-stehen die Meldungen.
+`http://localhost:8080` aufrufen. Das ist der Weg, wenn etwas klemmt – dann
+stehen die Meldungen im Fenster statt in `start.log`.
 
 **Danach:** unter Menü → System → *Geräte suchen* findet das Programm
 Empfänger, Neigungssensor und Lenksteuerung und trägt die Anschlüsse ein. Die
@@ -145,21 +167,27 @@ sich mit einem Druck zurückholen. Kein Terminal, keine Administratorrechte.
 Das Installationspaket aus diesem Dokument ist für den ersten Einbau da – und
 für den Fall, dass ein Tablet ersetzt wird.
 
-## Warum kein fertiges .exe
+## Warum Python trotzdem sichtbar bleibt
 
+Der Installer ist eine Datei, aber er presst nicht alles in eine. Auf dem
+Tablet landet ein gewöhnlicher Python-Ordner unter `C:\AgriPilot`:
+nachvollziehbar, einzeln austauschbar, und im Fehlerfall kann man hineinsehen.
 Ein gebündeltes Programm müsste den Python-Unterbau, die Treiber für Phidget
-und Tinkerforge und die Weboberfläche in eine Datei pressen – und jedes Mal
-neu, wenn sich eine Kleinigkeit ändert. Auf dem Tablet liegt stattdessen ein
-gewöhnlicher Python-Ordner unter `C:\AgriPilot`: nachvollziehbar, einzeln
-austauschbar, und im Fehlerfall kann man hineinsehen. Der Preis ist der
-einmalige Python-Installer aus Schritt 1.
+und Tinkerforge und die Weboberfläche zusammenschmelzen – und jedes Mal neu,
+wenn sich eine Kleinigkeit ändert. Ein Update wäre dann kein 1,5-MB-Paket
+mehr, sondern wieder alles.
+
+Der Preis ist der einmalige Python-Installer. Er kommt nicht mit, weil er von
+python.org stammt und dort auch herkommen soll – der Installer sagt es und
+öffnet die Seite, oder er führt ihn still aus, wenn er neben der Setup-Datei
+liegt.
 
 ## Wenn etwas klemmt
 
 | Meldung | Was zu tun ist |
 |---|---|
-| „Python fehlt" | Schritt 1 nachholen, dann erneut doppelklicken. |
-| Pakete laden nicht | Tablet ins WLAN, oder das Paket mit `--pakete` neu bauen. |
+| „kein Python installiert" | Von python.org holen (der Installer bietet an, die Seite zu öffnen), Haken bei *Add python.exe to PATH*, dann die Setup-Datei erneut. Ohne WLAN am Tablet: den Python-Installer daneben auf den Stick legen. |
+| Pakete laden nicht | Tablet ins WLAN, oder die .exe neu bauen – dort sind sie immer dabei. |
 | „dafür liegen keine Pakete bei" | Eine der genannten Python-Fassungen installieren, oder ohne `--pakete` mit WLAN einrichten, oder das Paket mit `--python <Fassung>` neu bauen. |
 | „kann nicht entfernt werden … von einem anderen Prozess verwendet" | AgriPilot läuft noch und hält den Ordner offen. Der Installer hält es selbst an; bleibt die Meldung, das schwarze AgriPilot-Fenster schließen oder das Tablet neu starten. |
 | Android-Tablet sieht nichts | Beide im selben WLAN? Die Firewall-Regel legt der Installer an – sie heißt „AgriPilot 8080". |

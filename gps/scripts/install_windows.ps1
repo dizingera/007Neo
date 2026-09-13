@@ -255,20 +255,42 @@ cd /d "$Daten"
 "$pyexe" -m agripilot.server
 "@ | Set-Content -Encoding ASCII $start
 
+# Dieselbe Datei noch einmal, aber mit Protokoll: was der Server sagt, soll
+# beim leisen Start nicht ins Leere gehen.
+$protokoll = Join-Path $Daten "start.log"
+$still = Join-Path $Ziel "start_still.bat"
+@"
+@echo off
+rem Wie start.bat, aber die Ausgabe geht in eine Datei statt ins Fenster.
+call "$start" > "$protokoll" 2>&1
+"@ | Set-Content -Encoding ASCII $still
+
+# Und der leise Anstoß. Der Weg über wscript ist der einzige unter Windows,
+# der eine Stapeldatei wirklich ohne aufblitzendes schwarzes Fenster startet -
+# in der Kabine soll beim Anmelden nichts aufpoppen, was niemand liest.
+$leise = Join-Path $Ziel "start_leise.vbs"
+@"
+' AgriPilot starten, ohne Fenster. Was der Server sagt, steht danach in
+' $protokoll
+CreateObject("WScript.Shell").Run """$still""", 0, False
+"@ | Set-Content -Encoding ASCII $leise
+
 # Als Aufgabe beim Anmelden - überlebt einen Neustart des Tablets, ohne dass
 # jemand daran denken muss.
-$aktion  = New-ScheduledTaskAction -Execute $start
+$aktion  = New-ScheduledTaskAction -Execute "wscript.exe" -Argument "`"$leise`""
 $ausloes = New-ScheduledTaskTrigger -AtLogOn
 $option  = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries `
              -DontStopIfGoingOnBatteries -ExecutionTimeLimit ([TimeSpan]::Zero)
 Register-ScheduledTask -TaskName "AgriPilot" -Action $aktion -Trigger $ausloes `
     -Settings $option -Force -RunLevel Highest | Out-Null
 
-# Lief es vorher, soll es auch jetzt wieder laufen - ohne dass sich jemand
-# ab- und wieder anmelden muss.
+# Gleich starten, nicht erst beim nächsten Anmelden: wer gerade eingerichtet
+# hat, will jetzt hineinsehen.
+Start-ScheduledTask -TaskName "AgriPilot" -ErrorAction SilentlyContinue
 if ($lief) {
-    Start-ScheduledTask -TaskName "AgriPilot" -ErrorAction SilentlyContinue
     Write-Host "   AgriPilot läuft wieder."
+} else {
+    Write-Host "   AgriPilot läuft."
 }
 
 Schritt "Verknüpfung zum Antippen"
@@ -282,19 +304,22 @@ $starter = Join-Path $Ziel "AgriPilot.bat"
 rem AgriPilot anzeigen. Startet den Server, falls er nicht schon laeuft.
 title AgriPilot
 set PORT=$Port
-set START=$start
+set LEISE=$leise
+set PROTOKOLL=$protokoll
 
 call :horchen
 if not errorlevel 1 goto :anzeigen
 
 echo AgriPilot wird gestartet ...
-start "AgriPilot" /min "%START%"
+wscript.exe "%LEISE%"
 powershell -NoProfile -Command ^
   "for (`$i=0; `$i -lt 60; `$i++) { try { (New-Object Net.Sockets.TcpClient).Connect('127.0.0.1', %PORT%); exit 0 } catch { Start-Sleep -Milliseconds 500 } }; exit 1"
 if errorlevel 1 (
     echo.
     echo AgriPilot antwortet nicht auf Port %PORT%.
-    echo   "%START%" von Hand starten - dort steht, woran es liegt.
+    echo Die letzten Zeilen aus dem Protokoll:
+    echo.
+    powershell -NoProfile -Command "Get-Content '%PROTOKOLL%' -Tail 15" 2>nul
     pause
     exit /b 1
 )
