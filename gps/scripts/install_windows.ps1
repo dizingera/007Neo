@@ -8,8 +8,11 @@
 # lässt Konfiguration, Felder und aufgezeichnete Arbeiten unangetastet.
 
 param(
-    [string]$Ziel  = "C:\AgriPilot",
-    [int]   $Port  = 8080
+    [string]$Ziel   = "C:\AgriPilot",
+    [int]   $Port   = 8080,
+    # Ordner mit vorab geladenen Python-Paketen (*.whl). Liegt er bei, wird
+    # ohne Internet installiert - in einer Maschinenhalle der Normalfall.
+    [string]$Pakete = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -29,7 +32,21 @@ if (-not ([Security.Principal.WindowsPrincipal] `
 Schritt "Python prüfen"
 $python = (Get-Command python -ErrorAction SilentlyContinue).Source
 if (-not $python) {
-    Write-Host "Python fehlt. Von python.org installieren (Haken bei 'Add to PATH')." -ForegroundColor Red
+    # py.exe kommt mit dem Installer von python.org mit und steht auch dann im
+    # Pfad, wenn beim Einrichten der Haken bei "Add to PATH" vergessen wurde -
+    # was oft genug passiert.
+    $starter = (Get-Command py -ErrorAction SilentlyContinue).Source
+    if ($starter) { $python = $starter }
+}
+if (-not $python) {
+    Write-Host "Python fehlt." -ForegroundColor Red
+    Write-Host ""
+    Write-Host "  Von python.org herunterladen und installieren."
+    Write-Host "  Beim Installieren den Haken bei 'Add python.exe to PATH' setzen."
+    Write-Host "  Danach diese Datei noch einmal doppelklicken."
+    Write-Host ""
+    Write-Host "  Ohne Internet am Tablet: den Installer am Hofrechner laden und"
+    Write-Host "  auf demselben Stick mitbringen."
     exit 1
 }
 & $python --version
@@ -49,10 +66,48 @@ $venv = Join-Path $Ziel "venv"
 if (-not (Test-Path $venv)) { & $python -m venv $venv }
 $pip    = Join-Path $venv "Scripts\pip.exe"
 $pyexe  = Join-Path $venv "Scripts\python.exe"
-& $pip install --quiet --upgrade pip
-& $pip install --quiet -r (Join-Path $Ziel "backend\requirements.txt")
-# Treiberbibliotheken für Lenkmotor und Neigungssensor
-& $pip install --quiet phidget22 tinkerforge
+
+# Ohne Internet: die Pakete liegen als Dateien bei. Mit Internet: der übliche
+# Weg. Beides mit denselben Paketnamen, damit später nichts auseinanderläuft.
+$treiber = @("phidget22", "tinkerforge")
+$anforderungen = Join-Path $Ziel "backend\requirements.txt"
+if ($Pakete -and (Test-Path $Pakete)) {
+    Write-Host "   ohne Internet, aus $Pakete"
+    # Die beiliegenden Pakete sind auf eine Python-Fassung gebaut (cp311 und
+    # dergleichen). Eine andere Fassung lehnt pip ab - mit einer Meldung, die
+    # nach einem kaputten Paket aussieht statt nach dem falschen Python. Also
+    # vorher nachsehen und es benennen.
+    $gebaut = (Get-ChildItem $Pakete -Filter "*cp*-cp*-win_amd64.whl" |
+               Select-Object -First 1).Name
+    if ($gebaut -match "cp(\d)(\d+)-") {
+        $erwartet = "$($Matches[1]).$($Matches[2])"
+        $hier = (& $pyexe -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
+        if ($hier -ne $erwartet) {
+            Write-Host ""
+            Write-Host "Die beiliegenden Pakete sind für Python $erwartet gebaut," -ForegroundColor Red
+            Write-Host "auf diesem Tablet läuft Python $hier." -ForegroundColor Red
+            Write-Host "  Entweder Python $erwartet installieren,"
+            Write-Host "  oder das Tablet ins WLAN und ohne die beiliegenden Pakete einrichten."
+            exit 1
+        }
+    }
+    & $pip install --quiet --no-index --find-links $Pakete --upgrade pip
+    & $pip install --quiet --no-index --find-links $Pakete -r $anforderungen
+    & $pip install --quiet --no-index --find-links $Pakete @treiber
+} else {
+    & $pip install --quiet --upgrade pip
+    & $pip install --quiet -r $anforderungen
+    # Treiberbibliotheken für Lenkmotor und Neigungssensor
+    & $pip install --quiet @treiber
+}
+if ($LASTEXITCODE -ne 0) {
+    Write-Host ""
+    Write-Host "Die Python-Pakete ließen sich nicht installieren." -ForegroundColor Red
+    Write-Host "  Mit Internet:  das Tablet ins WLAN und diese Datei erneut starten."
+    Write-Host "  Ohne Internet: am Hofrechner 'python scripts\make_install.py --pakete'"
+    Write-Host "                 laufen lassen - das Paket bringt die Dateien dann mit."
+    exit 1
+}
 
 Schritt "Konfiguration"
 if (Test-Path $Konfig) {
@@ -160,3 +215,8 @@ foreach ($adresse in $adressen) {
 }
 Write-Host "`nJetzt starten:  $start"
 Write-Host "Geräte suchen:  `"$pyexe`" `"$Ziel\scripts\scan_devices.py`""
+Write-Host ""
+Write-Host "Für die Kachel auf dem Android-Tablet - und dafür, dass dessen" -ForegroundColor Cyan
+Write-Host "Bildschirm im Feld anbleibt - einmal noch:" -ForegroundColor Cyan
+Write-Host "  powershell -ExecutionPolicy Bypass -File `"$Ziel\scripts\make_cert.ps1`""
+Write-Host "Der ganze Weg steht in $Ziel\docs\TABLETS.md"

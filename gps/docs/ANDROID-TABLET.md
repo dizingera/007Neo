@@ -10,6 +10,10 @@ gibt es unter Android keinen Treiber. Ein Tablet, das anzeigt, braucht nichts al
 einen Browser – und kann jederzeit durch ein anderes ersetzt werden, wenn eins
 im Feld zu Bruch geht.
 
+> **Windows-Tablet statt Pi?** Dann steht der ganze Weg – vom Paket bis zur
+> Kachel – in [TABLETS.md](TABLETS.md); das Zertifikat erzeugt dort
+> `scripts/make_cert.ps1`. Alles Weitere auf dieser Seite gilt genauso.
+
 ## Kurz
 
 1. Auf dem Pi einmal `sudo bash scripts/make_cert.sh`.

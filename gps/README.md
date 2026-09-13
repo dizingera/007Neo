@@ -109,6 +109,16 @@ sudo bash scripts/install_pi.sh client 192.168.10.1 # jeder weitere Traktor
 powershell -ExecutionPolicy Bypass -File scripts\install_windows.ps1
 ```
 
+**Auf ein Tablet bringen, auf dem noch nichts ist** – ein Paket zum Mitnehmen
+bauen, entpacken, `INSTALLIEREN.bat` doppelklicken:
+
+```bash
+python3 scripts/make_install.py -o /pfad/zum/stick     # mit --pakete auch ohne Internet
+```
+
+Der ganze Weg für beide Tablets, bis zur Kachel auf dem Android-Startbildschirm,
+steht in [docs/TABLETS.md](docs/TABLETS.md).
+
 Welche Geräte angeschlossen sind – und welche Zeilen dafür in die
 Konfiguration gehören – sagt `scripts/scan_devices.py`; dasselbe mit einem
 Druck im Menü unter **System → Geräte suchen → Übernehmen**.
@@ -173,8 +183,9 @@ gps/
 ├── frontend/         Kabinenanzeige: Blick über die Haube, Tag und Nacht
 │                     (kein Bauschritt nötig; Schriften liegen bei, weil der
 │                     Pi im Feld kein Internet hat)
-├── scripts/          Installation (Pi und Windows), Dienst, Gerätesuche,
-│                     Empfänger- und Lenkung einmessen
+├── scripts/          Installation (Pi und Windows), Paket zum Mitnehmen,
+│                     Zertifikate fürs Android-Tablet, Dienst, Gerätesuche,
+│                     Empfänger und Lenkung einmessen
 └── docs/             Hardware, Installation, Bedienung, deine Anlage,
                       Android-Tablet als Kabinenanzeige
 ```

@@ -1149,8 +1149,11 @@ def create_app(config=None) -> FastAPI:
         pfad = Path(config.server.tls_cert).parent / "ca.crt" if config.server.tls_cert \
             else Path("/etc/agripilot/tls/ca.crt")
         if not pfad.exists():
-            raise HTTPException(404, "Kein CA-Zertifikat vorhanden "
-                                     "(scripts/make_cert.sh auf dem Pi ausführen)")
+            raise HTTPException(
+                404, "Kein CA-Zertifikat vorhanden. Einmal erzeugen: auf einem Pi "
+                     "'sudo bash scripts/make_cert.sh', auf einem Windows-Tablet "
+                     "'powershell -ExecutionPolicy Bypass -File "
+                     "scripts\\make_cert.ps1'.")
         return Response(pfad.read_bytes(), media_type="application/x-x509-ca-cert",
                         headers={"Content-Disposition": 'attachment; filename="agripilot-ca.crt"'})
 
