@@ -3449,6 +3449,35 @@ class UpdateTest(unittest.TestCase):
         from agripilot import update
         self.assertEqual(update.kommandozeile()[0], sys.executable)
 
+    def test_das_programm_haengt_nicht_am_arbeitsverzeichnis(self):
+        """Gestartet wird aus dem Datenordner, nicht aus dem Programmordner.
+
+        Der Grund ist Windows: ein Prozess hält sein Arbeitsverzeichnis offen,
+        und einen offenen Ordner lässt Windows nicht ersetzen. Lief AgriPilot
+        aus C:\\AgriPilot\\backend heraus, brach die nächste Einrichtung - und
+        genauso ein Update über die Oberfläche - beim Austauschen ab. Also darf
+        nichts am Arbeitsverzeichnis hängen.
+        """
+        from fastapi.testclient import TestClient
+        from agripilot import config as config_module
+        from agripilot.server import create_app
+
+        vorher = os.getcwd()
+        with tempfile.TemporaryDirectory() as ordner, \
+                tempfile.TemporaryDirectory() as woanders:
+            config = config_module.load("/kein-solcher-pfad.yaml")
+            config.server.data_dir = ordner
+            config.gnss.source = "simulator"
+            try:
+                os.chdir(woanders)
+                with TestClient(create_app(config)) as client:
+                    seite = client.get("/")
+                    self.assertEqual(seite.status_code, 200)
+                    self.assertIn("<html", seite.text.lower())
+                    self.assertEqual(client.get("/api/state").status_code, 200)
+            finally:
+                os.chdir(vorher)
+
     def test_update_over_the_interface(self):
         import base64
         from pathlib import Path

@@ -51,11 +51,51 @@ if (-not $python) {
 }
 & $python --version
 
+Schritt "Laufendes AgriPilot anhalten"
+# Ein laufender Server hält seinen Programmordner offen - Windows lässt ihn
+# dann nicht löschen, und die Einrichtung bräche beim Kopieren ab. Also erst
+# anhalten, dann austauschen, am Ende wieder starten.
+$lief = $false
+if (Get-ScheduledTask -TaskName "AgriPilot" -ErrorAction SilentlyContinue) {
+    Stop-ScheduledTask -TaskName "AgriPilot" -ErrorAction SilentlyContinue
+}
+$laeufer = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+             Where-Object { $_.Name -in @("python.exe", "pythonw.exe") -and
+                            ($_.ExecutablePath -like "$Ziel\*" -or
+                             $_.CommandLine -like "*agripilot.server*") })
+foreach ($laufend in $laeufer) {
+    $lief = $true
+    Stop-Process -Id $laufend.ProcessId -Force -ErrorAction SilentlyContinue
+}
+if ($lief) {
+    Write-Host "   AgriPilot lief und wurde angehalten - es startet am Ende wieder."
+} else {
+    Write-Host "   Es lief nichts."
+}
+
+function OrdnerLoeschen($pfad) {
+    # Windows gibt eine Datei nicht im selben Augenblick frei, in dem der
+    # Prozess endet. Also mehrmals versuchen, statt beim ersten Nein aufzugeben.
+    for ($versuch = 0; $versuch -lt 20; $versuch++) {
+        if (-not (Test-Path $pfad)) { return $true }
+        try { Remove-Item -Recurse -Force $pfad -ErrorAction Stop; return $true }
+        catch { Start-Sleep -Milliseconds 500 }
+    }
+    return $false
+}
+
 Schritt "Programm nach $Ziel kopieren"
 New-Item -ItemType Directory -Force -Path $Ziel, $Daten | Out-Null
 foreach ($ordner in @("backend", "frontend", "scripts")) {
     $pfad = Join-Path $Ziel $ordner
-    if (Test-Path $pfad) { Remove-Item -Recurse -Force $pfad }
+    if (-not (OrdnerLoeschen $pfad)) {
+        Write-Host ""
+        Write-Host "$pfad lässt sich nicht ersetzen - etwas hält den Ordner offen." -ForegroundColor Red
+        Write-Host "  Meist ein noch laufendes AgriPilot: das schwarze Fenster schließen,"
+        Write-Host "  oder das Tablet einmal neu starten. Danach diese Datei erneut."
+        Write-Host "  Auch ein geöffneter Explorer in $pfad genügt dafür."
+        exit 1
+    }
     Copy-Item -Recurse (Join-Path $Quelle $ordner) $pfad
 }
 Copy-Item (Join-Path $Quelle "README.md") $Ziel -ErrorAction SilentlyContinue
@@ -205,8 +245,13 @@ Schritt "Automatischer Start"
 $start = Join-Path $Ziel "start.bat"
 @"
 @echo off
+rem Bewusst NICHT aus $Ziel heraus: ein Prozess haelt sein Arbeitsverzeichnis
+rem offen, und Windows laesst einen offenen Ordner nicht ersetzen - die
+rem naechste Einrichtung braeche sonst beim Kopieren ab. Also vom Datenordner
+rem aus, und den Programmordner ueber PYTHONPATH finden lassen.
 set AGRIPILOT_CONFIG=$Konfig
-cd /d "$Ziel\backend"
+set PYTHONPATH=$Ziel\backend
+cd /d "$Daten"
 "$pyexe" -m agripilot.server
 "@ | Set-Content -Encoding ASCII $start
 
@@ -218,6 +263,13 @@ $option  = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries `
              -DontStopIfGoingOnBatteries -ExecutionTimeLimit ([TimeSpan]::Zero)
 Register-ScheduledTask -TaskName "AgriPilot" -Action $aktion -Trigger $ausloes `
     -Settings $option -Force -RunLevel Highest | Out-Null
+
+# Lief es vorher, soll es auch jetzt wieder laufen - ohne dass sich jemand
+# ab- und wieder anmelden muss.
+if ($lief) {
+    Start-ScheduledTask -TaskName "AgriPilot" -ErrorAction SilentlyContinue
+    Write-Host "   AgriPilot läuft wieder."
+}
 
 Schritt "Verknüpfung zum Antippen"
 # AgriPilot hat kein eigenes Fenster - es ist ein Server, und die Anzeige
