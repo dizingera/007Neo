@@ -1172,6 +1172,20 @@ def create_app(config=None) -> FastAPI:
     return api
 
 
+def farben_erlaubt() -> Optional[bool]:
+    """Ob uvicorn seine Zeilen einfärben darf.
+
+    Unter Windows nicht: das Fenster, in dem AgriPilot startet, zeigt die
+    Farbbefehle sonst als "<-[32mINFO<-[0m" an - und zwischen dem Zeichensalat
+    findet niemand mehr die Zeile, auf die es ankommt. Welches Fenster es sein
+    wird, steht beim Start nicht fest (geplante Aufgabe, Verknüpfung,
+    Konsole), also gar nicht erst darauf wetten.
+
+    Sonst ``None``: auf dem Pi und am Schreibtisch entscheidet uvicorn selbst.
+    """
+    return False if os.name == "nt" else None
+
+
 def main() -> None:  # pragma: no cover - entry point
     import uvicorn
     config = config_module.load()
@@ -1191,6 +1205,7 @@ def main() -> None:  # pragma: no cover - entry point
         host=config.server.host,
         port=config.server.port,
         log_level="info",
+        use_colors=farben_erlaubt(),
         **tls,
     )
 

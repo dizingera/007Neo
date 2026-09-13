@@ -5726,6 +5726,29 @@ class SollwertFadenTest(unittest.TestCase):
         self.assertIn("Kabel ab", befehl.grund)
 
 
+class StartAusgabeTest(unittest.TestCase):
+    """Was beim Start im Fenster steht, muss lesbar sein.
+
+    uvicorn färbt seine Zeilen ein. Ob das Fenster, in dem AgriPilot startet,
+    Farben versteht, steht unter Windows nicht fest - bei der geplanten Aufgabe
+    kam "<-[32mINFO<-[0m" heraus. Also dort keine Farben.
+    """
+
+    def _farbwahl(self, systemname: str):
+        from unittest import mock
+        from agripilot import server as server_module
+        with mock.patch.object(server_module.os, "name", systemname):
+            return server_module.farben_erlaubt()
+
+    def test_unter_windows_ohne_farbbefehle(self):
+        self.assertIs(self._farbwahl("nt"), False)
+
+    def test_anderswo_entscheidet_uvicorn_selbst(self):
+        # Auf dem Pi läuft es unter systemd oder in einem richtigen Terminal -
+        # da soll uvicorn wie gewohnt selbst entscheiden.
+        self.assertIsNone(self._farbwahl("posix"))
+
+
 class WindowsSymbolTest(unittest.TestCase):
     """frontend/icon.ico - das Bild auf der Verknüpfung in der Kabine.
 
