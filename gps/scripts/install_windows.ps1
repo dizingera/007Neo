@@ -73,34 +73,48 @@ $treiber = @("phidget22", "tinkerforge")
 $anforderungen = Join-Path $Ziel "backend\requirements.txt"
 if ($Pakete -and (Test-Path $Pakete)) {
     Write-Host "   ohne Internet, aus $Pakete"
-    # Die beiliegenden Pakete sind auf eine Python-Fassung gebaut (cp311 und
-    # dergleichen). Eine andere Fassung lehnt pip ab - mit einer Meldung, die
-    # nach einem kaputten Paket aussieht statt nach dem falschen Python. Also
+    # Die meisten beiliegenden Pakete passen auf jedes Python. Drei bringen
+    # übersetzten Code mit und tragen die Fassung im Namen (cp311 und
+    # dergleichen); das Paket bringt sie für mehrere Fassungen mit. Fehlt
+    # ausgerechnet die hiesige, lehnt pip ab - mit einer Meldung, die nach
+    # einem kaputten Paket aussieht statt nach dem falschen Python. Also
     # vorher nachsehen und es benennen.
-    $gebaut = (Get-ChildItem $Pakete -Filter "*cp*-cp*-win_amd64.whl" |
-               Select-Object -First 1).Name
-    if ($gebaut -match "cp(\d)(\d+)-") {
-        $erwartet = "$($Matches[1]).$($Matches[2])"
-        $hier = (& $pyexe -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
-        if ($hier -ne $erwartet) {
-            Write-Host ""
-            Write-Host "Die beiliegenden Pakete sind für Python $erwartet gebaut," -ForegroundColor Red
-            Write-Host "auf diesem Tablet läuft Python $hier." -ForegroundColor Red
-            Write-Host "  Entweder Python $erwartet installieren,"
-            Write-Host "  oder das Tablet ins WLAN und ohne die beiliegenden Pakete einrichten."
-            exit 1
-        }
+    $hier = (& $pyexe -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
+    $marke = "cp" + $hier.Replace(".", "")
+    $raeder = @(Get-ChildItem $Pakete -Filter "*cp*-cp*-win_amd64.whl")
+    if ($raeder.Count -gt 0 -and -not ($raeder | Where-Object { $_.Name -like "*-$marke-*" })) {
+        $dabei = @($raeder | ForEach-Object {
+            if ($_.Name -match "-cp(\d)(\d+)-") { "$($Matches[1]).$($Matches[2])" }
+        } | Sort-Object -Unique)
+        Write-Host ""
+        Write-Host "Auf diesem Tablet läuft Python $hier - dafür liegen keine Pakete bei." -ForegroundColor Red
+        Write-Host "Dabei sind: Python $($dabei -join ', ')." -ForegroundColor Red
+        Write-Host "  Entweder eine dieser Fassungen installieren,"
+        Write-Host "  oder das Tablet ins WLAN und ohne die beiliegenden Pakete einrichten,"
+        Write-Host "  oder am Hofrechner neu bauen:"
+        Write-Host "    python scripts\make_install.py --pakete --python $hier"
+        exit 1
     }
-    & $pip install --quiet --no-index --find-links $Pakete --upgrade pip
+    # pip selbst wird hier nicht erneuert - das mitgelieferte reicht, und ein
+    # pip-Rad liegt nicht bei. Sonst bräche der Einbau an einer Nebensache ab.
+    $fehler = 0
     & $pip install --quiet --no-index --find-links $Pakete -r $anforderungen
+    if ($LASTEXITCODE -ne 0) { $fehler = $LASTEXITCODE }
     & $pip install --quiet --no-index --find-links $Pakete @treiber
+    if ($LASTEXITCODE -ne 0) { $fehler = $LASTEXITCODE }
 } else {
+    $fehler = 0
     & $pip install --quiet --upgrade pip
     & $pip install --quiet -r $anforderungen
+    if ($LASTEXITCODE -ne 0) { $fehler = $LASTEXITCODE }
     # Treiberbibliotheken für Lenkmotor und Neigungssensor
     & $pip install --quiet @treiber
+    if ($LASTEXITCODE -ne 0) { $fehler = $LASTEXITCODE }
 }
-if ($LASTEXITCODE -ne 0) {
+# Jeder Aufruf einzeln geprüft: sonst verdeckt ein gelungener letzter Schritt,
+# dass der davor fehlgeschlagen ist - und das Programm startet später ohne
+# eine Bibliothek, die es braucht.
+if ($fehler -ne 0) {
     Write-Host ""
     Write-Host "Die Python-Pakete ließen sich nicht installieren." -ForegroundColor Red
     Write-Host "  Mit Internet:  das Tablet ins WLAN und diese Datei erneut starten."

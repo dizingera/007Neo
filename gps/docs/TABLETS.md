@@ -27,16 +27,24 @@ mitnehmen:
 python3 scripts/make_install.py --pakete -o /pfad/zum/stick
 ```
 
-Dann sind es rund 7 MB, und der Einbau läuft ohne Internet. Ein Haken dabei:
-die mitgenommenen Pakete passen zu **einer** Python-Fassung (derzeit 3.11).
-Genau die muss auf dem Tablet installiert sein – der Installer prüft es und
-sagt es, statt mit einer unverständlichen pip-Meldung abzubrechen.
+Dann sind es rund 15 MB, und der Einbau läuft ohne Internet. Die Pakete liegen
+für **Python 3.11 bis 3.14** bei – eine dieser Fassungen muss auf dem Tablet
+sein, welche ist gleich. Der Installer sieht nach und sagt es, statt mit einer
+unverständlichen pip-Meldung abzubrechen.
 
 | | ohne `--pakete` | mit `--pakete` |
 |---|---|---|
-| Größe | ~1,5 MB | ~7 MB |
+| Größe | ~1,5 MB | ~15 MB |
 | Tablet braucht WLAN | ja, einmal beim Einbau | nein |
-| Python-Fassung | beliebig ab 3.9 | genau die eine |
+| Python-Fassung | beliebig ab 3.9 | 3.11 bis 3.14 |
+
+Ist auf dem Tablet eine Fassung, die nicht dabei ist, sagt der Installer, für
+welche die Pakete gelten. Dann entweder eine davon nachinstallieren, oder das
+Paket am Hofrechner passend bauen:
+
+```bash
+python3 scripts/make_install.py --pakete --python 3.15 -o /pfad/zum/stick
+```
 
 ## Windows-Tablet einrichten
 
@@ -137,7 +145,7 @@ einmalige Python-Installer aus Schritt 1.
 |---|---|
 | „Python fehlt" | Schritt 1 nachholen, dann erneut doppelklicken. |
 | Pakete laden nicht | Tablet ins WLAN, oder das Paket mit `--pakete` neu bauen. |
-| „Die beiliegenden Pakete sind für Python 3.11 gebaut" | Diese Fassung installieren, oder ohne `--pakete` mit WLAN einrichten. |
+| „dafür liegen keine Pakete bei" | Eine der genannten Python-Fassungen installieren, oder ohne `--pakete` mit WLAN einrichten, oder das Paket mit `--python <Fassung>` neu bauen. |
 | Android-Tablet sieht nichts | Beide im selben WLAN? Die Firewall-Regel legt der Installer an – sie heißt „AgriPilot 8080". |
 | Kein Empfänger | `C:\AgriPilot\venv\Scripts\python.exe C:\AgriPilot\scripts\scan_devices.py` zeigt, was angeschlossen ist. |
 | „Kein CA-Zertifikat vorhanden" | `make_cert.ps1` wurde noch nicht ausgeführt. |

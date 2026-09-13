@@ -50,10 +50,18 @@ sys.path.insert(0, str(HIER.parent / "backend"))
 TREIBER = ("phidget22", "tinkerforge")
 
 # Wofür die Pakete geladen werden, wenn sie beiliegen sollen. Das Tablet ist
-# ein 64-Bit-Windows; die Python-Fassung muss zu der passen, die dort
-# installiert wird.
+# ein 64-Bit-Windows.
 ZIEL_PLATTFORM = "win_amd64"
-ZIEL_PYTHON = "3.11"
+
+# Mehrere Python-Fassungen, nicht eine. Die meisten Pakete sind ohnehin
+# fassungsunabhängig; nur drei bringen übersetzten Code mit und liegen deshalb
+# je Fassung einmal bei - zusammen gut zwei Megabyte pro Fassung. Das ist der
+# Preis dafür, dass niemand auf dem Tablet eine bestimmte Python-Fassung
+# nachinstallieren muss, nur weil das Paket vor einem halben Jahr gebaut wurde.
+#
+# pip sucht sich aus dem Ordner von selbst die passende Datei; doppelte
+# Fassungen stören einander nicht.
+ZIEL_PYTHONS = ("3.11", "3.12", "3.13", "3.14")
 
 
 LIESMICH = """AgriPilot – Einrichtung auf dem Windows-Tablet
@@ -109,6 +117,13 @@ Alles Weitere: docs\\INSTALL.md, docs\\BEDIENUNG.md, docs\\DEINE_ANLAGE.md.
 """
 
 
+def _aufzaehlung(teile: list[str]) -> str:
+    """Aus 3.11/3.12/3.13 wird "3.11, 3.12 und 3.13" - fürs Lesen gedacht."""
+    if len(teile) < 2:
+        return "".join(teile)
+    return f"{', '.join(teile[:-1])} und {teile[-1]}"
+
+
 def _pip(*teile: str) -> subprocess.CompletedProcess:
     return subprocess.run([sys.executable, "-m", "pip", "download", *teile],
                           capture_output=True, text=True)
@@ -119,14 +134,18 @@ def _letzte_zeile(fertig: subprocess.CompletedProcess) -> str:
     return zeilen[-1] if zeilen else "pip download ist fehlgeschlagen"
 
 
-def pakete_laden(ziel: Path, quelle: Path) -> tuple[bool, str]:
+def pakete_laden(ziel: Path, quelle: Path,
+                 fassungen: tuple[str, ...]) -> tuple[bool, list[str], str]:
     """Die Python-Bibliotheken für Windows vorab herunterladen.
 
     Geladen wird ausdrücklich für Windows, nicht für den Rechner, auf dem
     dieses Skript läuft - sonst landeten Linux-Dateien im Paket und der Einbau
     schlüge auf dem Tablet fehl, und zwar erst dort.
 
-    Zwei Durchgänge, weil pip hier eine Grenze hat: für eine *fremde*
+    Geladen wird für mehrere Python-Fassungen, damit das Paket nicht an einer
+    einzigen hängt - welche auf dem Tablet landet, weiß beim Bauen niemand.
+
+    Zwei Durchgänge je Fassung, weil pip hier eine Grenze hat: für eine *fremde*
     Plattform gibt es nur fertige Pakete (``--only-binary``), und Bibliotheken
     ohne fertiges Paket fallen damit durch. ``tinkerforge`` ist so eine - sie
     besteht aus nichts als Python-Dateien und läuft auf Windows genauso, es
@@ -138,29 +157,48 @@ def pakete_laden(ziel: Path, quelle: Path) -> tuple[bool, str]:
     Internet.
     """
     ziel.mkdir(parents=True, exist_ok=True)
-    fuer_windows = ["--dest", str(ziel), "--only-binary", ":all:",
-                    "--platform", ZIEL_PLATTFORM, "--python-version", ZIEL_PYTHON]
-
+    anforderungen = str(quelle / "backend" / "requirements.txt")
     fehlend: list[str] = []
-    fertig = _pip(*fuer_windows, "-r", str(quelle / "backend" / "requirements.txt"))
-    if fertig.returncode != 0:
-        return False, _letzte_zeile(fertig)
+    geschafft: list[str] = []
 
-    for name in TREIBER:
-        if _pip(*fuer_windows, name).returncode == 0:
+    for fassung in fassungen:
+        fuer_windows = ["--dest", str(ziel), "--only-binary", ":all:",
+                        "--platform", ZIEL_PLATTFORM, "--python-version", fassung]
+        fertig = _pip(*fuer_windows, "-r", anforderungen)
+        if fertig.returncode != 0:
+            # Eine Fassung, für die es (noch) keine Pakete gibt, ist kein
+            # Grund aufzuhören - die anderen taugen trotzdem. Gemeldet wird
+            # sie am Ende.
+            fehlend.append(f"Python {fassung}: {_letzte_zeile(fertig)}")
             continue
-        # Kein fertiges Paket - als Quellpaket versuchen. Das ist nur dann
-        # richtig, wenn nichts übersetzt werden muss; bei diesen beiden
-        # Bibliotheken ist es reines Python.
-        quellpaket = _pip("--dest", str(ziel), "--no-deps", "--no-binary", ":all:", name)
-        if quellpaket.returncode != 0:
-            fehlend.append(name)
+        geschafft.append(fassung)
+        for name in TREIBER:
+            if _pip(*fuer_windows, name).returncode == 0:
+                continue
+            # Kein fertiges Paket - als Quellpaket versuchen. Das ist nur dann
+            # richtig, wenn nichts übersetzt werden muss; bei diesen beiden
+            # Bibliotheken ist es reines Python.
+            if _pip("--dest", str(ziel), "--no-deps", "--no-binary", ":all:",
+                    name).returncode != 0:
+                fehlend.append(f"{name} gar nicht")
+
+    # setuptools und wheel liegen mit bei, obwohl AgriPilot sie nicht braucht:
+    # tinkerforge kommt als Quellpaket, und pip baut daraus auf dem Tablet ein
+    # Rad - dafür braucht es setuptools. Ohne Internet holt pip sie nirgends
+    # her, und ab Python 3.12 bringt eine neue Umgebung sie auch nicht mehr
+    # mit. Der Einbau bräche dann mitten im letzten Schritt ab.
+    if geschafft and _pip("--dest", str(ziel), "--no-deps",
+                          "setuptools", "wheel").returncode != 0:
+        fehlend.append("setuptools/wheel (tinkerforge lässt sich ohne sie "
+                       "nicht bauen)")
 
     anzahl = len(list(ziel.glob("*")))
+    if not geschafft:
+        return False, geschafft, (fehlend[-1] if fehlend else "nichts geladen")
+    meldung = f"{anzahl} Dateien für Python {', '.join(geschafft)}"
     if fehlend:
-        return False, (f"{anzahl} Dateien geladen, aber nicht dabei: "
-                       f"{', '.join(fehlend)}")
-    return True, f"{anzahl} Dateien"
+        meldung += f" (nicht dabei: {'; '.join(sorted(set(fehlend)))})"
+    return True, geschafft, meldung
 
 
 def main() -> int:
@@ -169,7 +207,16 @@ def main() -> int:
     parser.add_argument("-o", "--ziel", help="Ordner oder Dateiname für das Paket")
     parser.add_argument("--pakete", action="store_true",
                         help="Python-Bibliotheken mitnehmen (Einbau ohne Internet)")
+    parser.add_argument("--python", default=",".join(ZIEL_PYTHONS),
+                        metavar="3.11,3.12",
+                        help="für welche Python-Fassungen die Pakete gelten "
+                             f"(Standard: {', '.join(ZIEL_PYTHONS)})")
     args = parser.parse_args()
+
+    fassungen = tuple(t.strip() for t in args.python.split(",") if t.strip())
+    if args.pakete and not fassungen:
+        print("--python: keine Fassung angegeben", file=sys.stderr)
+        return 2
 
     from agripilot import __version__, update
 
@@ -188,8 +235,9 @@ def main() -> int:
     pakete_ordner = quelle / ".pakete-fuer-windows"
     pakete_text = ""
     if args.pakete:
-        print(f"Python-Pakete für Windows laden ({ZIEL_PLATTFORM}, Python {ZIEL_PYTHON}) ...")
-        geklappt, meldung = pakete_laden(pakete_ordner, quelle)
+        print(f"Python-Pakete für Windows laden ({ZIEL_PLATTFORM}, "
+              f"Python {', '.join(fassungen)}) ...")
+        geklappt, geschafft, meldung = pakete_laden(pakete_ordner, quelle, fassungen)
         if not geklappt:
             print(f"  Fehlgeschlagen: {meldung}", file=sys.stderr)
             print("  Das Paket wird trotzdem gebaut - dann aber mit Internet "
@@ -197,10 +245,13 @@ def main() -> int:
         else:
             print(f"  {meldung}")
             pakete_text = (
-                f"Die Python-Pakete liegen im Ordner pakete\\ bei, also ohne\n"
-                f"   Internet einzurichten. WICHTIG: sie passen zu **Python "
-                f"{ZIEL_PYTHON}** -\n"
-                f"   genau diese Fassung installieren, keine neuere.")
+                f"Die Python-Pakete liegen im Ordner pakete\\ bei, also ohne "
+                f"Internet\n"
+                f"   einzurichten. Sie gelten für Python "
+                f"{_aufzaehlung(geschafft)} - eine\n"
+                f"   davon genügt. Mit einer anderen Fassung geht es auch, "
+                f"dann aber\n"
+                f"   mit WLAN am Tablet.")
 
     python_hinweis = pakete_text or (
         "Ohne Internet am Tablet: den Installer am Hofrechner laden\n"
