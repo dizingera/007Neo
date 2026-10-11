@@ -222,6 +222,11 @@ class ServerConfig:
     tls_cert: str = ""
     tls_key: str = ""
 
+    # Tägliche Sicherung von Datenbank und Konfiguration. Lokal immer (Ordner
+    # "sicherungen" im Datenordner); zusätzlich hier, z.B. auf einen USB-Stick.
+    backup_dir: str = ""
+    backup_keep: int = 14
+
     @property
     def tls_aktiv(self) -> bool:
         return bool(self.tls_cert and self.tls_key)

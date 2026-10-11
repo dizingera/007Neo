@@ -331,6 +331,14 @@ GRUPPEN: list[Gruppe] = [
                        "Bildschirm-Wachhalten nur so. Papiere erzeugt "
                        "scripts/make_cert.sh auf dem Pi."),
             Feld("server.tls_key", "Schlüssel (HTTPS)"),
+            Feld("server.backup_dir", "Zweiter Sicherungsort", sofort=True,
+                 hilfe="Z.B. ein USB-Stick (E:\AgriPilot oder /media/usb/agripilot). "
+                       "Der Ordner muss existieren; fehlt der Stick, wird nur lokal "
+                       "gesichert. Eine Kopie auf demselben Datenträger schützt nicht "
+                       "vor dessen Ausfall."),
+            Feld("server.backup_keep", "Sicherungen behalten", "ganzzahl", sofort=True,
+                 minimum=2, maximum=100,
+                 hilfe="Je Ort. Täglich eine - 14 sind zwei Wochen."),
         ],
     ),
 ]

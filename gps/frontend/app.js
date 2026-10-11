@@ -1446,7 +1446,25 @@ function fillProfile() {
   el('autoSections').checked = !!(state.live && state.live.auto_sections);
 }
 
+async function renderBackup() {
+  const antwort = await api('GET', '/api/backup');
+  if (!antwort) return;
+  const orte = (antwort.orte || antwort.data && antwort.data.orte || []);
+  el('backupInfo').textContent = orte.map((o) => {
+    if (!o.vorhanden) return `${o.ordner}: noch keine Sicherung (oder nicht erreichbar)`;
+    if (!o.letzte) return `${o.ordner}: noch keine`;
+    return `${o.ordner}: ${new Date(o.letzte.zeit * 1000).toLocaleString('de-DE', { dateStyle: 'short', timeStyle: 'short' })}`;
+  }).join(' · ') || 'keine Sicherung eingerichtet';
+}
+
+el('btnBackup').onclick = async () => {
+  const ergebnis = await api('POST', '/api/backup');
+  if (ergebnis) toast('Gesichert');
+  renderBackup();
+};
+
 function renderSystem() {
+  renderBackup();
   const system = state.live && state.live.system;
   const host = el('systemList');
   if (!system) { host.innerHTML = '<p class="note">Keine Daten.</p>'; return; }

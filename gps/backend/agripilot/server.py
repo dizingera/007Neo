@@ -30,6 +30,7 @@ from . import settings as settings_module
 from . import export, geraete as geraete_module, imu as imu_module
 from . import recorder as recorder_module, shapefile as shapefile_module, sync
 from . import update as update_module
+from . import backup as backup_module
 from .actuators import build_output
 from .coverage import CoverageMap
 from .engine import Engine
@@ -190,6 +191,44 @@ class Application:
             self.tasks.append(asyncio.create_task(self.sync_client.run()))
 
         self.tasks.append(asyncio.create_task(self._broadcast_loop()))
+        self.tasks.append(asyncio.create_task(self._backup_loop()))
+
+    # -- Sicherung --------------------------------------------------------
+
+    def backup_ordner(self) -> list[Path]:
+        ziele = [Path(self.config.server.data_dir) / "sicherungen"]
+        if self.config.server.backup_dir.strip():
+            ziele.append(Path(self.config.server.backup_dir.strip()))
+        return ziele
+
+    async def sichern_jetzt(self) -> dict:
+        self.engine.suspend_job()        # laufende Arbeit mitsichern
+        ergebnis = await asyncio.to_thread(
+            backup_module.sichern, self.config.db_path, self.config.path,
+            self.backup_ordner(), self.config.server.backup_keep)
+        self.letzte_sicherung = ergebnis
+        if not ergebnis["ok"]:
+            self.engine.note("Sicherung fehlgeschlagen: "
+                             + "; ".join(z["fehler"] for z in ergebnis["ziele"] if z["fehler"]))
+        return ergebnis
+
+    def backup_status(self) -> dict:
+        orte = []
+        for ordner in self.backup_ordner():
+            orte.append({"ordner": str(ordner), "letzte": backup_module.letzte(ordner),
+                         "vorhanden": ordner.is_dir()})
+        return {"orte": orte, "letzter_lauf": getattr(self, "letzte_sicherung", None)}
+
+    async def _backup_loop(self) -> None:
+        """Einmal am Tag, beim Start gleich mit - ein Tablet läuft nicht rund um die Uhr."""
+        await asyncio.sleep(30)
+        while True:
+            try:
+                if backup_module.faellig(self.backup_ordner()[0]):
+                    await self.sichern_jetzt()
+            except Exception as exc:  # noqa: BLE001 - die Sicherung darf nichts mitreißen
+                self.engine.note(f"Sicherung: {exc}")
+            await asyncio.sleep(3600)
 
     async def stop(self) -> None:
         with contextlib.suppress(Exception):
@@ -746,6 +785,18 @@ def create_app(config=None) -> FastAPI:
 
     # -- system -----------------------------------------------------------
 
+    @api.get("/api/backup")
+    async def backup_get() -> dict:
+        return application.backup_status()
+
+    @api.post("/api/backup")
+    async def backup_post():
+        ergebnis = await application.sichern_jetzt()
+        if not ergebnis["ok"]:
+            raise HTTPException(500, "Sicherung fehlgeschlagen: " + "; ".join(
+                z["fehler"] for z in ergebnis["ziele"] if z["fehler"]))
+        return ok(ergebnis)
+
     @api.get("/api/system")
     async def system_status() -> dict:
         return application.system_status()
@@ -800,8 +851,7 @@ def create_app(config=None) -> FastAPI:
         if not daten:
             raise HTTPException(400, "Kein Paket übergeben")
         application.steering.disarm("Aktualisierung")
-        if engine.job is not None:
-            engine.stop_job()
+        engine.suspend_job()     # die Arbeit läuft nach dem Neustart weiter
         try:
             ergebnis = await asyncio.to_thread(update_module.einspielen, daten)
         except update_module.UpdateFehler as exc:
@@ -836,8 +886,7 @@ def create_app(config=None) -> FastAPI:
         """Das Programm beenden und wiederkommen lassen. Die Antwort geht vor
         dem Beenden hinaus; die Anzeige verbindet sich von selbst neu."""
         application.steering.disarm("Neustart")
-        if engine.job is not None:
-            engine.stop_job()
+        engine.suspend_job()     # die Arbeit läuft nach dem Neustart weiter
         engine.note("Neustart")
         update_module.neustarten()
         return ok({"neustart": update_module.neustart_art()})
