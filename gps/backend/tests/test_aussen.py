@@ -96,6 +96,68 @@ class AussenTests(unittest.TestCase):
             self.assertEqual(c.get("/api/system").json()["arbeitercode"], "")
 
 
+class SchutzTests(unittest.TestCase):
+    """Ein Code, den man aus dem Internet erraten kann, schützt nichts."""
+
+    def setUp(self):
+        warnings.filterwarnings("ignore")
+        self.dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.dir.cleanup)
+
+    def _client(self, token):
+        from fastapi.testclient import TestClient
+        from agripilot.server import create_app
+        config = config_module.load("/kein-solcher-pfad.yaml")
+        config.server.data_dir = self.dir.name
+        config.network.device_id = "buero"
+        config.network.sync_token = token
+        return TestClient(create_app(config))
+
+    def test_a_short_code_works_at_home_but_not_from_outside(self):
+        with self._client("1610") as c:
+            self.assertEqual(c.post("/api/sync", json=ABGLEICH,
+                                    headers={"X-AgriPilot-Token": "1610"}).status_code, 200)
+            antwort = c.post("/api/sync", json=ABGLEICH,
+                             headers={**TUNNEL, "X-AgriPilot-Token": "1610"})
+        self.assertEqual(antwort.status_code, 403)
+        self.assertIn("zu kurz", antwort.json()["detail"])
+
+    def test_eight_characters_are_enough_from_outside(self):
+        with self._client("U2N5-F8EX") as c:
+            antwort = c.post("/api/sync", json=ABGLEICH,
+                             headers={**TUNNEL, "X-AgriPilot-Token": "u2n5f8ex"})
+        self.assertEqual(antwort.status_code, 200)
+
+    def test_guessing_is_stopped_after_a_few_wrong_codes(self):
+        with self._client("U2N5-F8EX") as c:
+            for n in range(8):
+                self.assertEqual(c.post("/api/sync", json=ABGLEICH, headers={
+                    **TUNNEL, "X-AgriPilot-Token": f"RATEN-{n}"}).status_code, 401)
+            gesperrt = c.post("/api/sync", json=ABGLEICH, headers={**TUNNEL, "X-AgriPilot-Token": "RATEN-9"})
+            self.assertEqual(gesperrt.status_code, 429)
+            # Auch der richtige Code kommt in der Sperre nicht durch.
+            self.assertEqual(c.post("/api/sync", json=ABGLEICH, headers={
+                **TUNNEL, "X-AgriPilot-Token": "U2N5-F8EX"}).status_code, 429)
+
+    def test_the_block_is_per_sender(self):
+        with self._client("U2N5-F8EX") as c:
+            for n in range(8):
+                c.post("/api/sync", json=ABGLEICH, headers={**TUNNEL, "X-AgriPilot-Token": f"x{n}"})
+            anderer = {**TUNNEL, "cf-connecting-ip": "198.51.100.9", "X-AgriPilot-Token": "U2N5-F8EX"}
+            self.assertEqual(c.post("/api/sync", json=ABGLEICH, headers=anderer).status_code, 200)
+
+    def test_the_block_expires(self):
+        from agripilot import server
+        with self._client("U2N5-F8EX") as c:
+            for n in range(8):
+                c.post("/api/sync", json=ABGLEICH, headers={**TUNNEL, "X-AgriPilot-Token": f"x{n}"})
+            gesehen = c.app.state.app.abgleich_fehler
+            for absender in gesehen:                       # die Versuche liegen jetzt 20 Minuten zurück
+                gesehen[absender] = [t - server.SPERRE_FENSTER_S - 60 for t in gesehen[absender]]
+            self.assertEqual(c.post("/api/sync", json=ABGLEICH, headers={
+                **TUNNEL, "X-AgriPilot-Token": "U2N5-F8EX"}).status_code, 200)
+
+
 class WorkerClientTests(unittest.IsolatedAsyncioTestCase):
     async def test_the_worker_sends_the_code_and_names_a_wrong_one(self):
         from unittest import mock

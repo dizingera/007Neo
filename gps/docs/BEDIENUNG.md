@@ -516,7 +516,10 @@ kann das:
 Die Sicherung dahinter: **Von außen ist nur der Abgleich erreichbar** – nicht die
 Oberfläche, nicht die Lenkung, nicht die Einstellungen (jede Anfrage über den Tunnel
 außer dem Abgleich wird abgelehnt), und der Abgleich selbst braucht den Arbeitercode.
-Ohne gesetzten Code lehnt der Master den Abgleich von außen ganz ab. Der Code ist beim
+Ohne gesetzten Code lehnt der Master den Abgleich von außen ganz ab. **Von außen muss der
+Code mindestens acht Zeichen lang sein** (ein kurzer wie `1610` lässt sich aus dem Internet
+durchprobieren; im Heimnetz geht er weiter), und nach acht falschen Versuchen innerhalb von
+15 Minuten wird der Absender für 15 Minuten gesperrt. Der Code ist beim
 Tippen nachsichtig (Groß-/Kleinschreibung, Strich und Leerzeichen sind egal). Ist er
 falsch, steht am Tablet „Arbeitercode falsch oder fehlt“. Wer den Code weitergegeben
 hat und ihn ändern will, setzt am Master und an den Tablets einen neuen.

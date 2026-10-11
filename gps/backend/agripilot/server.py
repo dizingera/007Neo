@@ -48,6 +48,11 @@ from .storage import Storage
 from . import __version__ as VERSION
 
 # Als .exe (PyInstaller) liegt die Oberfläche im entpackten Bündel, nicht neben dem Code.
+# Abgleich von außen: Mindestlänge des Codes und Sperre gegen Durchprobieren.
+MINDESTLAENGE_AUSSEN = 8
+SPERRE_VERSUCHE = 8             # falsche Versuche ...
+SPERRE_FENSTER_S = 900.0        # ... innerhalb von 15 Minuten sperren den Absender
+
 FRONTEND_DIR = (Path(getattr(sys, "_MEIPASS", "")) / "frontend"
                 if getattr(sys, "frozen", False)
                 else Path(__file__).resolve().parents[2] / "frontend")
@@ -60,6 +65,7 @@ class Application:
         self.config = config
         self.store = Storage(config.db_path)
         self.engine = Engine(config, self.store)
+        self.abgleich_fehler: dict[str, list[float]] = {}   # Absender -> Zeitpunkte falscher Codes
         # Rohdaten: eine Aufzeichnung, an beiden Quellen angehängt.
         self.aufzeichnung = recorder_module.Aufzeichnung(
             Path(config.server.data_dir) / "rohdaten")
@@ -1092,8 +1098,23 @@ def create_app(config=None) -> FastAPI:
         def glatt(code: str) -> bytes:        # getippt wird auf dem Tablet: Groß/Klein, Leerzeichen, Strich egal
             return "".join(c for c in code.upper() if c.isalnum()).encode()
 
+        # Wer ist das? Hinter einem Tunnel steht die echte Adresse in der Kopfzeile.
+        absender = (request.headers.get("cf-connecting-ip")
+                    or request.headers.get("x-forwarded-for", "").split(",")[0].strip()
+                    or (request.client.host if request.client else "?"))
+        jetzt = time.monotonic()
+        fehler = [t for t in application.abgleich_fehler.get(absender, []) if jetzt - t < SPERRE_FENSTER_S]
+        application.abgleich_fehler[absender] = fehler
+        if len(fehler) >= SPERRE_VERSUCHE:
+            raise HTTPException(429, "Zu viele falsche Versuche - in einer Viertelstunde noch einmal")
+        if von_aussen and gesetzt and len(glatt(gesetzt)) < MINDESTLAENGE_AUSSEN:
+            # Ein kurzer Code lässt sich aus dem Internet durchprobieren.
+            raise HTTPException(403, f"Der Arbeitercode ist für den Zugriff von außen zu kurz "
+                                     f"(mindestens {MINDESTLAENGE_AUSSEN} Zeichen) - am Master unter "
+                                     "Einstellungen → Netzwerk einen längeren setzen")
         if (gesetzt or von_aussen) and not (
                 gesetzt and hmac.compare_digest(glatt(mitgebracht), glatt(gesetzt))):
+            fehler.append(jetzt)
             raise HTTPException(401, "Arbeitercode fehlt oder ist falsch")
         device = payload.get("device") or {}
         if device.get("id"):
