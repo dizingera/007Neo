@@ -1511,7 +1511,52 @@ function renderJobs(jobs, fields) {
     liste.forEach((job) => host.appendChild(jobZeile(job)));
   });
   if (!jobs.length) host.innerHTML = '<p class="note">Noch keine Arbeiten aufgezeichnet.</p>';
+  myterraStand();
 }
+
+/* MyTerra: fertige Arbeiten als Datei für den Prüfeingang. Gebucht wird erst dort, nach Freigabe. */
+const MYTERRA_TAETIGKEIT = { boden: 'Bodenbearbeitung', saat: 'Saat', walzen: 'Walzen', duengung: 'Düngung',
+                             psm: 'Pflanzenschutz', ernte: 'Ernte', sonstiges: 'Sonstiges' };
+
+async function myterraStand() {
+  const liste = await api('GET', '/api/myterra/arbeiten');
+  if (!liste) return;
+  const neu = liste.filter((a) => !a.uebergeben).length;
+  el('myterraInfo').textContent = liste.length
+    ? `${neu} von ${liste.length} fertigen Arbeiten noch nicht an MyTerra übergeben. Die Datei kommt in MyTerra in den ` +
+      'Prüfeingang – gebucht wird erst, wenn du sie dort freigibst.'
+    : 'Noch keine fertigen Arbeiten mit Fläche.';
+  el('btnMyterraExport').textContent = neu ? `${neu} neue Arbeiten für MyTerra exportieren` : 'Neue Arbeiten für MyTerra exportieren';
+  const nach = Object.fromEntries(liste.map((a) => [a.id, a]));
+  document.querySelectorAll('#jobList [data-job]').forEach((zeile) => {
+    const a = nach[zeile.dataset.job];
+    const sub = zeile.querySelector('.sub, small, span:nth-of-type(2)');
+    if (!a || !sub || zeile.dataset.myterra) return;
+    zeile.dataset.myterra = '1';
+    sub.textContent += ` · MyTerra: ${MYTERRA_TAETIGKEIT[a.taetigkeit] || a.taetigkeit}` +
+      (a.uebergeben ? ' · übergeben' : '');
+  });
+}
+
+async function myterraDatei(parameter) {
+  const antwort = await fetch(`/api/myterra/export?${parameter}`);
+  if (!antwort.ok) { toast('Export fehlgeschlagen', true); return; }
+  const anzahl = Number(antwort.headers.get('X-Anzahl') || 0);
+  if (!anzahl) { toast('Nichts Neues zu übergeben'); return; }
+  const blob = await antwort.blob();
+  const name = (antwort.headers.get('Content-Disposition') || '').match(/filename="([^"]+)"/);
+  const link = document.createElement('a');
+  link.href = URL.createObjectURL(blob);
+  link.download = name ? name[1] : 'agripilot-arbeiten.json';
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(link.href), 10000);
+  toast(`${anzahl} Arbeit(en) exportiert – in MyTerra einlesen`);
+  myterraStand();
+}
+
+el('btnMyterraExport').onclick = () => myterraDatei(el('myterraAlle').checked ? 'alle=1' : '');
 
 function jobZeile(job) {
   const started = new Date(job.started_at * 1000);
@@ -1524,7 +1569,15 @@ function jobZeile(job) {
          (job.overlap_ha ? ` · ${job.overlap_ha.toFixed(2)} ha doppelt` : ''),
     actions: [],
   });
+  row.dataset.job = job.id;
   const actions = row.querySelector('.actions');
+  if (job.ended_at && job.area_ha > 0) {
+    const knopf = document.createElement('button');
+    knopf.textContent = 'MyTerra';
+    knopf.title = 'Diese Arbeit als Datei für MyTerra exportieren';
+    knopf.onclick = () => myterraDatei(`ids=${job.id}`);
+    actions.appendChild(knopf);
+  }
   ['gpx', 'geojson', 'csv'].forEach((format) => {
     const link = document.createElement('a');
     link.className = 'button';

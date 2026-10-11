@@ -36,6 +36,7 @@ from . import backup as backup_module
 from . import onlineupdate as onlineupdate_module
 from . import exe as exe_module
 from . import teilen as teilen_module
+from . import myterra as myterra_module
 from .actuators import build_output
 from .coverage import CoverageMap
 from .engine import Engine
@@ -1120,6 +1121,31 @@ def create_app(config=None) -> FastAPI:
         name = time.strftime("agripilot-daten-%Y%m%d-%H%M.zip")
         return Response(inhalt, media_type="application/zip",
                         headers={"Content-Disposition": f'attachment; filename="{name}"'})
+
+    # -- Arbeiten an MyTerra übergeben: als Datei ---------------------------
+
+    @api.get("/api/myterra/arbeiten")
+    async def myterra_arbeiten() -> list[dict]:
+        """Fertige Arbeiten mit erkannter Tätigkeit und Übergabestand."""
+        return myterra_module.arbeiten(store)
+
+    @api.get("/api/myterra/export")
+    async def myterra_export(ids: str = "", alle: int = 0):
+        """Arbeitsberichte als Datei für den Prüfeingang von MyTerra.
+
+        Ohne Angabe die noch nicht übergebenen, mit ``ids`` bestimmte (auch erneut),
+        mit ``alle=1`` alle.
+        """
+        gewaehlt = [i for i in ids.split(",") if i] or None
+        inhalt, genommen = await asyncio.to_thread(
+            myterra_module.paket_bauen, store,
+            config.network.device_name or config.network.device_id, gewaehlt, not alle)
+        if genommen:
+            engine.note(f"{len(genommen)} Arbeit(en) für MyTerra exportiert")
+        name = time.strftime("agripilot-arbeiten-%Y%m%d-%H%M.json")
+        return Response(inhalt, media_type="application/json", headers={
+            "Content-Disposition": f'attachment; filename="{name}"',
+            "X-Anzahl": str(len(genommen))})
 
     @api.post("/api/daten/import")
     async def daten_import(payload: dict = Body(...)):

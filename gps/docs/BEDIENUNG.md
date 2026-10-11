@@ -438,6 +438,39 @@ GPX/GeoJSON/CSV. Die Bezeichnung der nächsten Arbeit (Grubbern, Säen, Spritzen
 wird oben eingetragen und gemerkt; gestartet wird mit **Markieren** in der
 Kabine.
 
+## Arbeiten an MyTerra übergeben (Menü → Aufträge)
+
+Jede fertige Arbeit lässt sich als Bericht an **MyTerra** übergeben – mit Schlag, Tätigkeit,
+Datum, Dauer, bearbeiteter Fläche, Überlappung, Strecke, Maschine und Fahrspur.
+
+1. Menü → **Aufträge**. Oben steht, wie viele Arbeiten noch nicht übergeben sind.
+   **Neue Arbeiten für MyTerra exportieren** lädt eine Datei (`agripilot-arbeiten-….json`).
+   Die Taste **MyTerra** an einer einzelnen Arbeit exportiert nur diese; „auch schon
+   übergebene“ nimmt alles noch einmal.
+2. Die Datei zum Büro-Rechner bringen (per Netz-Abgleich liegen die Arbeiten des Tablets
+   ohnehin beim Master; sonst USB-Stick, Messenger, Mail).
+3. In **MyTerra** bei den Mitarbeiterrückmeldungen **Arbeiten aus AgriPilot einlesen**: Datei
+   wählen, Vorschau ansehen, **in den Prüfeingang legen**.
+
+**Gebucht wird dabei nichts.** Die Arbeiten kommen als Berichte „Zur Prüfung“ an, und erst
+deine Freigabe in MyTerra bucht sie (mit denselben Regeln wie bei jedem Mitarbeiterbericht).
+Dieselbe Arbeit zweimal einzulesen legt nichts doppelt an, sie ist an ihrer Kennung
+erkennbar.
+
+* **Schlag:** MyTerra ordnet über den Namen zu (Groß-/Kleinschreibung, Umlaute und Satzzeichen
+  egal, ein eindeutig enthaltener Name genügt). Mehrdeutiges oder Unbekanntes wird mit Grund
+  gemeldet und nicht geraten. Am einfachsten: derselbe Name in beiden Programmen, z. B. weil
+  beide ihre Umrisse aus demselben Flächenantrag haben.
+* **Tätigkeit:** aus der Bezeichnung der Arbeit (Grubbern, Pflügen → Bodenbearbeitung; Säen,
+  Drillen → Saat; Walzen; Düngen, Gülle, Kalk → Düngung; Spritzen → Pflanzenschutz; Mähen,
+  Dreschen → Ernte; sonst Sonstiges). In der Aufträge-Liste steht dahinter die erkannte
+  Tätigkeit. Mittel und Mengen (Dünger, Spritzmittel) kennt AgriPilot nicht – die ergänzt
+  man bei der Freigabe in MyTerra.
+* **Erntejahr:** Arbeiten ab August werden dem Folgejahr zugeordnet, wenn MyTerra es für den
+  Schlag führt; beim Einlesen lässt es sich ändern.
+* **Dauer:** Beginn bis Ende der Arbeit; die Zeit in Bewegung steht im Hinweis. Bei der
+  Freigabe lässt sich beides anpassen.
+
 ## Master und Arbeiter: Daten an die Tablets schicken
 
 **Der Master** ist dieser Rechner im Büro: hier erfasst du Felder, legst Maschinen an,

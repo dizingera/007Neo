@@ -155,6 +155,11 @@
       <input id="arbeitName" placeholder="Bezeichnung der nächsten Arbeit, z.B. Grubbern">
       <a class="button" id="btnJobsCsv" href="/api/jobs.csv">Alle Arbeiten als CSV</a>
     </div>
+    <div class="row">
+      <button id="btnMyterraExport" class="primary">Neue Arbeiten für MyTerra exportieren</button>
+      <label class="switch"><input type="checkbox" id="myterraAlle"> auch schon übergebene</label>
+    </div>
+    <p class="note" id="myterraInfo" role="status" aria-atomic="true">MyTerra: wird geladen …</p>
     <p class="note">Die Bezeichnung steht später in der Liste und im CSV fürs Büro. Sie
       wird gemerkt, bis eine andere eingetragen wird. Gestartet wird die Arbeit mit
       <b>Markieren</b> rechts in der Kabine.</p>
