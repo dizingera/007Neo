@@ -630,6 +630,8 @@ class HeadingFilter:
                dt: float = 0.0) -> Optional[float]:
         if true_heading is not None:
             self.value = true_heading
+            self.rueckwaerts = False         # ein echter Kurs kennt keine Umkehr
+            self._gegen = 0
             return self.value
         if course is None or speed_ms < self.min_speed_ms:
             # Zu langsam für einen Kurs aus der Bewegung. Liegt eine Drehrate
@@ -637,9 +639,10 @@ class HeadingFilter:
             # weitergeschrieben - sonst dreht sich am Vorgewende die Anzeige
             # nicht mit, obwohl der Traktor längst quer steht.
             self._letzter_kurs = None
-            if (yaw_rate_deg_s is not None and self.value is not None
-                    and 0.0 < dt < 1.0):
-                self.value = normalize_heading(self.value + yaw_rate_deg_s * dt)
+            if (yaw_rate_deg_s is not None and self.fusion_aktiv
+                    and self.value is not None and 0.0 < dt < 1.0):
+                self.value = normalize_heading(
+                    self.value + (yaw_rate_deg_s - self.bias_deg_s) * dt)
             return self.value
         if self.value is None:
             self.value = course
@@ -651,7 +654,9 @@ class HeadingFilter:
         # mehrmals hintereinander so weit von der Erwartung liegt, ist keine
         # Wende - die dreht in kleinen Schritten -, sondern eine Umkehr.
         versatz = 180.0 if self.rueckwaerts else 0.0
-        if abs(angle_difference(course, normalize_heading(self.value + versatz))) > 120.0:
+        if (speed_ms >= self.fusion_min_speed_ms and
+                abs(angle_difference(course, normalize_heading(self.value + versatz))) > 120.0):
+            # Erst ab Schritttempo: darunter ist der Bewegungskurs Zufall.
             self._gegen += 1
             if self._gegen < 3:
                 return self.value            # Ausreißer: nicht glauben, nicht verwerfen
@@ -672,8 +677,11 @@ class HeadingFilter:
                 vorhergesagt = normalize_heading(
                     self.value + (yaw_rate_deg_s - self.bias_deg_s) * dt)
                 fehler = angle_difference(course, vorhergesagt)
-                self.bias_deg_s = max(-self.max_bias_deg_s, min(
-                    self.max_bias_deg_s, self.bias_deg_s - self.bias_gain * fehler / dt))
+                if abs(yaw_rate_deg_s - self.bias_deg_s) < 3.0:
+                    # Nur auf der Geraden lernen: in der Kurve ist der Fehler
+                    # Nachlauf des Bewegungskurses, kein Gyro-Fehler.
+                    self.bias_deg_s = max(-self.max_bias_deg_s, min(
+                        self.max_bias_deg_s, self.bias_deg_s - self.bias_gain * fehler / dt))
                 self.value = normalize_heading(vorhergesagt + self.fusion_gain * fehler)
                 return self.value
 
@@ -703,6 +711,18 @@ class HeadingFilter:
             self.warnung = ("Drehrate und Fahrtrichtung laufen gegeneinander - "
                             "Vorzeichen des Neigungssensors prüfen (Einbaurichtung). "
                             "Der Kurs kommt solange allein aus der Bewegung.")
+
+    def reset(self) -> None:
+        """Neue Fahrt, neue Quelle: alles Gelernte und Vermutete verwerfen."""
+        self.value = None
+        self.rueckwaerts = False
+        self.fusion_aktiv = True
+        self.warnung = ""
+        self.bias_deg_s = 0.0
+        self._gegen = 0
+        self._letzter_kurs = None
+        self._passt = 0.0
+        self._proben = 0
 
     def status(self) -> dict:
         return {"gekoppelt": self.fusion_aktiv, "rueckwaerts": self.rueckwaerts, "gyro_fehler_deg_s": round(self.bias_deg_s, 3),

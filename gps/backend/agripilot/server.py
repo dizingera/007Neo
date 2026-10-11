@@ -147,7 +147,7 @@ class Application:
         await self.steering.start()
         # Kurs und Nachlauf gehören zur alten Fahrt; der erste Schritt der neuen
         # wird von der Plausibilitätsprüfung ohnehin verworfen.
-        self.engine.heading_filter.value = None
+        self.engine.heading_filter.reset()
         self.engine.implement_heading.reset(None)
         self._quellen_starten()
         self.engine.note(f"Quelle: {self.config.gnss.source}")
@@ -207,9 +207,10 @@ class Application:
             backup_module.sichern, self.config.db_path, self.config.path,
             self.backup_ordner(), self.config.server.backup_keep)
         self.letzte_sicherung = ergebnis
-        if not ergebnis["ok"]:
-            self.engine.note("Sicherung fehlgeschlagen: "
-                             + "; ".join(z["fehler"] for z in ergebnis["ziele"] if z["fehler"]))
+        fehler = [f"{z['ordner']}: {z['fehler']}" for z in ergebnis["ziele"] if z["fehler"]]
+        if fehler:
+            self.engine.note(("Sicherung fehlgeschlagen: " if not ergebnis["ok"]
+                              else "Sicherung nur teilweise: ") + "; ".join(fehler))
         return ergebnis
 
     def backup_status(self) -> dict:
@@ -224,7 +225,10 @@ class Application:
         await asyncio.sleep(30)
         while True:
             try:
-                if backup_module.faellig(self.backup_ordner()[0]):
+                # Jeder Ort einzeln: ein gezogener Stick darf nicht bis morgen
+                # warten, wenn er wieder steckt.
+                if any(backup_module.faellig(o) for o in self.backup_ordner()
+                       if o.is_dir() or o == self.backup_ordner()[0]):
                     await self.sichern_jetzt()
             except Exception as exc:  # noqa: BLE001 - die Sicherung darf nichts mitreißen
                 self.engine.note(f"Sicherung: {exc}")

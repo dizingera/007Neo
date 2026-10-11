@@ -54,7 +54,12 @@ def sichern(db_path: Path, config_path: Optional[Path], ziele: list[Path],
                 # Ohne parents: ein nicht eingehängter USB-Stick (/media/usb) soll
                 # nicht still als Ordner auf dem Systemlaufwerk landen.
                 ziel.mkdir(exist_ok=True)
-                (ziel / name).write_bytes(zip_pfad.read_bytes())
+                # Erst unter Nebennamen, dann umbenennen: ein gezogener Stick
+                # hinterlässt sonst ein halbes Zip, das als neueste Sicherung
+                # zählt und die guten älteren verdrängt.
+                halb = ziel / (name + ".teil")
+                halb.write_bytes(zip_pfad.read_bytes())
+                halb.replace(ziel / name)
                 aufraeumen(ziel, behalten)
                 eintrag["ok"] = True
             except OSError as exc:

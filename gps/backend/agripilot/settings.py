@@ -332,7 +332,7 @@ GRUPPEN: list[Gruppe] = [
                        "scripts/make_cert.sh auf dem Pi."),
             Feld("server.tls_key", "Schlüssel (HTTPS)"),
             Feld("server.backup_dir", "Zweiter Sicherungsort", sofort=True,
-                 hilfe="Z.B. ein USB-Stick (E:\AgriPilot oder /media/usb/agripilot). "
+                 hilfe="Z.B. ein USB-Stick (E:/AgriPilot oder /media/usb/agripilot). "
                        "Der Ordner muss existieren; fehlt der Stick, wird nur lokal "
                        "gesichert. Eine Kopie auf demselben Datenträger schützt nicht "
                        "vor dessen Ausfall."),

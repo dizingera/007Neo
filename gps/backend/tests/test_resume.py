@@ -146,6 +146,18 @@ class ResumeTests(unittest.TestCase):
         motor.resume_session()
         self.assertAlmostEqual(motor.line.nudge_m, 0.3, places=3)
 
+    def test_pack_roundtrip_and_speed_for_a_large_field(self):
+        from agripilot.coverage import CoverageMap
+        karte = CoverageMap()
+        for ix in range(400):
+            for iy in range(250):
+                karte.cells.add((ix - 200, iy - 100))      # 100 000 Zellen, ~25 ha
+        start = time.perf_counter()
+        blob = karte.pack()
+        dauer = time.perf_counter() - start
+        self.assertEqual(CoverageMap.unpack(blob).cells, karte.cells)
+        self.assertLess(dauer, 0.15)       # vorher gut eine halbe Sekunde
+
     def test_steering_is_never_armed_by_resume(self):
         self._field_with_line()
         motor = self._restart()

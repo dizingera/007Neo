@@ -87,6 +87,11 @@ class BackupTests(unittest.TestCase):
         self.assertEqual([f["name"] for f in self.store.list_fields()], ["Hinterm Hof"])
         self.assertTrue(Path(str(self.db) + ".vorher").exists())
 
+    def test_no_half_written_file_is_left_behind(self):
+        ziel = self.root / "sicherung"
+        backup.sichern(self.db, self.config, [ziel])
+        self.assertEqual([p.name for p in ziel.iterdir() if p.name.endswith(".teil")], [])
+
     def test_restore_rejects_foreign_zip(self):
         fremd = self.root / "fremd.zip"
         with zipfile.ZipFile(fremd, "w") as archiv:

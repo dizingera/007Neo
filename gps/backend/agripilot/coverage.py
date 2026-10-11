@@ -221,10 +221,17 @@ class CoverageMap:
     def pack(self) -> bytes:
         """Compact binary form for storage and for syncing to the master."""
         import struct
-        out = bytearray(struct.pack("<f", self.cell_size))
-        for ix, iy in sorted(self.cells):
-            out += struct.pack("<ii", ix, iy)
-        return bytes(out)
+        from array import array
+        import sys
+        # Als Feld aus Ganzzahlen statt Zelle für Zelle: bei 25 ha sind es 100 000
+        # Zellen, und das Sichern läuft auf dem Rechner, der auch lenkt.
+        werte = array("i")
+        for ix, iy in self.cells:
+            werte.append(ix)
+            werte.append(iy)
+        if sys.byteorder == "big":
+            werte.byteswap()
+        return struct.pack("<f", self.cell_size) + werte.tobytes()
 
     @classmethod
     def unpack(cls, blob: bytes) -> "CoverageMap":

@@ -77,7 +77,8 @@ function connect() {
 
   socket.onopen = () => { state.connected = true; };
   socket.onclose = () => {
-    if (window.Warnungen && state.live) window.Warnungen.pruefen(state.live, state.live, false);
+    // Nur beim Abriss selbst, nicht bei jedem Wiederholungsversuch.
+    if (state.connected && window.Warnungen && state.live) window.Warnungen.pruefen(state.live, state.live, false);
     state.connected = false;
     setTimeout(connect, 1500);          // im Feld ist ein Abriss normal
   };

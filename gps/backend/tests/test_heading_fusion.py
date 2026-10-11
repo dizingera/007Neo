@@ -128,5 +128,50 @@ class ReverseTests(unittest.TestCase):
         self.assertFalse(filt.rueckwaerts)
 
 
+class ReviewFixTests(unittest.TestCase):
+    def test_reset_clears_reverse_and_learned_state(self):
+        filt = HeadingFilter()
+        for _ in range(10):
+            filt.update(90.0, None, 2.0, yaw_rate_deg_s=0.0, dt=DT)
+        for _ in range(4):
+            filt.update(270.0, None, 2.0, yaw_rate_deg_s=0.0, dt=DT)
+        self.assertTrue(filt.rueckwaerts)
+        filt.reset()
+        self.assertFalse(filt.rueckwaerts)
+        self.assertIsNone(filt.value)
+        self.assertTrue(filt.fusion_aktiv)
+
+    def test_true_heading_clears_a_stale_reverse_flag(self):
+        filt = HeadingFilter()
+        filt.rueckwaerts = True
+        filt.update(None, 45.0, 2.0)
+        self.assertFalse(filt.rueckwaerts)
+
+    def test_no_reverse_flip_below_walking_pace(self):
+        filt = HeadingFilter()
+        filt.update(90.0, None, 2.0)
+        for _ in range(6):
+            filt.update(270.0, None, 0.6)
+        self.assertFalse(filt.rueckwaerts)
+
+    def test_slow_branch_ignores_a_gyro_that_failed_the_sign_check(self):
+        filt = HeadingFilter()
+        fahre(filt, 12.0, 400, gyro_vorzeichen=-1.0)
+        self.assertFalse(filt.fusion_aktiv)
+        vorher = filt.value
+        filt.update(None, None, 0.1, yaw_rate_deg_s=30.0, dt=0.5)
+        self.assertEqual(filt.value, vorher)
+
+    def test_bias_is_not_learned_in_a_turn(self):
+        filt = HeadingFilter()
+        # Kurve mit 20 Grad/s; der Bewegungskurs hinkt 2 Grad hinterher.
+        wahr = 90.0
+        filt.update(wahr, None, 3.0)
+        for _ in range(100):
+            wahr = normalize_heading(wahr + 2.0)
+            filt.update(normalize_heading(wahr - 2.0), None, 3.0, yaw_rate_deg_s=20.0, dt=DT)
+        self.assertEqual(filt.bias_deg_s, 0.0)
+
+
 if __name__ == "__main__":
     unittest.main()

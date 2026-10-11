@@ -529,7 +529,7 @@ wieder da, die Spur ist aktiv, und die Arbeit läuft mit der bisher bearbeiteten
 Fläche weiter. Die bearbeitete Fläche wird dafür alle 30 Sekunden mitgesichert;
 im schlimmsten Fall fehlen also die letzten Sekunden.
 
-Eine Arbeit, die länger als zwölf Stunden offen liegt, wird nicht fortgesetzt,
+Eine Arbeit, die länger als drei Stunden offen liegt, wird nicht fortgesetzt,
 sondern mit dem gesicherten Stand abgeschlossen. **Die Lenkung bleibt nach dem
 Einschalten immer aus** – scharf schalten musst du selbst.
 
