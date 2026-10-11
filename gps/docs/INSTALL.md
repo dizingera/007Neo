@@ -148,7 +148,20 @@ gnss:
 Das Tablet kann die Rolle des Pi vollständig übernehmen – es hat USB für
 Empfänger, Neigungssensor und Motorsteuerung, Bildschirm und Akku.
 
-**Doppelklick auf `AgriPilot-installieren.bat`** im Ordner `gps`. Mehr ist nicht
+**Am einfachsten: `AgriPilot-Setup.exe`.** Eine einzelne Datei, ohne Python und ohne
+Entpacken. Auf das Tablet kopieren, doppelklicken, die Rückfrage nach
+Administratorrechten bestätigen. Sie richtet alles ein (Programm nach
+`C:\AgriPilot`, Firewall, Start beim Anmelden mit Neustart nach Absturz,
+Symbol auf dem Desktop) und öffnet die Anzeige. Wiederholbar: ein zweiter Lauf
+mit einer neueren Datei **ist** die Aktualisierung, Einstellungen, Felder und
+Aufträge bleiben. Windows SmartScreen fragt beim ersten Start, weil die Datei
+nicht signiert ist: „Weitere Informationen“ → „Trotzdem ausführen“. Das Protokoll
+des laufenden Programms steht in `C:\ProgramData\AgriPilot\agripilot.log`.
+Gebaut wird sie mit `python scripts/build_exe.py` (siehe dort). Bei der
+exe-Version gibt es kein „Paket einspielen“ im Menü – aktualisiert wird mit der
+neuen Setup-Datei.
+
+**Ohne exe: Doppelklick auf `AgriPilot-installieren.bat`** im Ordner `gps`. Mehr ist nicht
 zu tun: die Datei fragt selbst nach Administratorrechten, installiert Python,
 falls es fehlt (einmalig, braucht Internet), richtet alles ein, legt ein Symbol
 „AgriPilot" auf den Desktop und öffnet am Ende die Anzeige. Der Aufruf ist

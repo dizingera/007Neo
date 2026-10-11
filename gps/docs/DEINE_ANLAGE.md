@@ -92,9 +92,11 @@ Ehrlich aufgelistet, bevor du anfängst:
 
 ### 1. Erst am Schreibtisch
 
-Auf dem Windows-Tablet, bevor irgendetwas angeschlossen ist: im Ordner `gps`
-**`AgriPilot-installieren.bat` doppelklicken** und die Rückfrage nach
-Administratorrechten bestätigen.
+Auf dem Windows-Tablet, bevor irgendetwas angeschlossen ist: **`AgriPilot-Setup.exe`
+doppelklicken** (eine einzelne Datei, ohne Python) und die Rückfrage nach
+Administratorrechten bestätigen. Beim ersten Start fragt SmartScreen, weil die
+Datei nicht signiert ist: „Weitere Informationen“ → „Trotzdem ausführen“. (Ohne
+exe geht es auch mit `AgriPilot-installieren.bat` im Ordner `gps`.)
 
 Die Datei installiert Python, falls es fehlt (einmalig, braucht Internet), legt
 alles unter `C:\AgriPilot` an, richtet die Python-Umgebung ein, öffnet Port 8080

@@ -51,6 +51,16 @@ class UpdateFehler(ValueError):
 # ---------------------------------------------------------------- Wurzel
 
 
+def als_programm() -> bool:
+    """Läuft das als einzelne .exe (PyInstaller)? Dann gibt es keinen Ordner mit
+    Dateien zum Austauschen - aktualisiert wird mit einer neuen Setup-Datei."""
+    return bool(getattr(sys, "frozen", False))
+
+
+_NUR_SETUP = ("Das ist die Programmversion (AgriPilot.exe). Zum Aktualisieren die neue "
+              "AgriPilot-Setup.exe ausführen - Einstellungen, Felder und Aufträge bleiben.")
+
+
 def wurzel() -> Path:
     """Der Installationsordner: der, in dem ``backend``, ``frontend`` und
     ``scripts`` nebeneinander liegen (``C:\\AgriPilot``, ``/opt/agripilot``,
@@ -205,6 +215,11 @@ def _requirements_installieren(wurzel_pfad: Path) -> str:
     return "Bibliotheken auf Stand"
 
 
+def _nur_ohne_programm() -> None:
+    if als_programm():
+        raise UpdateFehler(_NUR_SETUP)
+
+
 def einspielen(daten: bytes, wurzel_pfad: Optional[Path] = None,
                pip: bool = True) -> dict[str, Any]:
     """Ein geprüftes Paket in den Installationsordner bringen.
@@ -215,6 +230,7 @@ def einspielen(daten: bytes, wurzel_pfad: Optional[Path] = None,
     Millisekunden und lässt sich mit denselben Schritten zurücknehmen. Wenn
     etwas dazwischen scheitert, wird die Sicherung sofort wieder eingesetzt.
     """
+    _nur_ohne_programm()
     wurzel_pfad = (wurzel_pfad or wurzel()).resolve()
     paket = paket_pruefen(daten)
     arbeit = wurzel_pfad / ".update"
@@ -305,6 +321,7 @@ def sicherungen(wurzel_pfad: Optional[Path] = None) -> list[str]:
 
 
 def zurueckholen(name: str = "", wurzel_pfad: Optional[Path] = None) -> dict[str, Any]:
+    _nur_ohne_programm()
     """Die jüngste (oder eine benannte) Sicherung wieder einsetzen.
 
     Der jetzige Stand wandert dabei selbst in eine Sicherung - zurück ist auch
@@ -342,6 +359,7 @@ def repo_verfuegbar(wurzel_pfad: Optional[Path] = None) -> bool:
 
 
 def aus_repo_holen(wurzel_pfad: Optional[Path] = None) -> dict[str, Any]:
+    _nur_ohne_programm()
     """``git pull --ff-only`` - nur vorspulen, nie zusammenführen. Eine
     örtliche Änderung, die im Weg steht, bleibt stehen und wird gemeldet."""
     wurzel_pfad = wurzel_pfad or wurzel()
@@ -407,6 +425,8 @@ def kommandozeile() -> list[str]:
     Moduls; als Skript gestartet fielen die relativen Importe um. Also den
     Modulnamen aus __main__.__spec__ nehmen, wenn es einen gibt.
     """
+    if als_programm():
+        return [sys.executable, *sys.argv[1:]]
     haupt = sys.modules.get("__main__")
     spec = getattr(haupt, "__spec__", None)
     if spec is not None and spec.name:
@@ -429,6 +449,10 @@ def neustarten(verzoegerung_s: float = 1.0) -> None:
         time.sleep(verzoegerung_s)
         if neustart_art() != "systemd":
             umgebung = dict(os.environ, AGRIPILOT_WARTE_AUF_PORT="1")
+            if als_programm():
+                # Sonst nutzt der Nachfolger das entpackte Bündel des Vorgängers,
+                # und das verschwindet, sobald der sich beendet.
+                umgebung["PYINSTALLER_RESET_ENVIRONMENT"] = "1"
             befehl = kommandozeile()
             flags = 0
             if os.name == "nt":

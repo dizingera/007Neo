@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import struct
+import sys
 import contextlib
 import json
 import os
@@ -41,7 +42,10 @@ from .storage import Storage
 
 from . import __version__ as VERSION
 
-FRONTEND_DIR = Path(__file__).resolve().parents[2] / "frontend"
+# Als .exe (PyInstaller) liegt die Oberfläche im entpackten Bündel, nicht neben dem Code.
+FRONTEND_DIR = (Path(getattr(sys, "_MEIPASS", "")) / "frontend"
+                if getattr(sys, "frozen", False)
+                else Path(__file__).resolve().parents[2] / "frontend")
 
 
 class Application:

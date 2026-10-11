@@ -1,0 +1,7 @@
+
+# exe-Build
+.buildvenv/
+build-exe/
+AgriPilot-Setup.exe
+build-exe-test/
+AgriPilot-Test.exe
