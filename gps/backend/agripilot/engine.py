@@ -48,6 +48,11 @@ MINDESTSTRECKE_ARBEIT_M = 5.0
 # mitgesichert - sonst bliebe von einem halben Tag Arbeit nach dem Absturz nur
 # die Fahrspur, aber keine Fläche. Was länger als eine Schicht liegt, wird nicht
 # mehr fortgesetzt, sondern abgeschlossen.
+# Feld erkennen: erst wenn der Traktor ein paar Sekunden in einem anderen Feld
+# steht, wird es vorgeschlagen - nicht beim Überfahren der Ecke.
+FELD_VORSCHLAG_S = 3.0
+FELDER_NEU_LADEN_S = 30.0
+
 SESSION_KEY = "session"
 CHECKPOINT_S = 30.0
 RESUME_MAX_AGE_S = 12 * 3600.0
@@ -117,6 +122,12 @@ class Engine:
             self._resumable_job["id"] if self._resumable_job else None)
         self._checkpoint_at = 0.0
         self._kurs_warnung = ""
+        self.feld_vorschlag: Optional[dict] = None
+        self._vorschlag_kandidat: Optional[str] = None
+        self._vorschlag_seit = 0.0
+        self._vorschlag_geprueft = 0.0
+        self._felder_cache: list[tuple] = []
+        self._felder_cache_at = -1e9
         if verwaist:
             self.note(f"{verwaist} unterbrochene Arbeit(en) vom letzten Mal abgeschlossen")
         self.auto_sections = True
@@ -597,6 +608,53 @@ class Engine:
         return {"text": text, "feld": feld["name"], "arbeit": arbeit,
                 "flaeche_ha": self.coverage.area_ha}
 
+    # -- Feld erkennen ----------------------------------------------------
+
+    def refresh_field_cache(self) -> None:
+        """Alle Felder mit Grenze, je in ihrer eigenen Ebene - das Feld, in dem
+        man steht, ist nicht das, dessen Ebene gerade geladen ist."""
+        cache = []
+        for feld in self.store.list_fields():
+            grenze = [tuple(p) for p in (feld.get("boundary") or [])]
+            if len(grenze) >= 3:
+                cache.append((feld["id"], feld["name"],
+                              geo.LocalPlane(feld["datum_lat"], feld["datum_lon"]), grenze))
+        self._felder_cache = cache
+        self._felder_cache_at = time.time()
+
+    def _pruefe_feldvorschlag(self, now: float) -> None:
+        """Steht der Traktor in einem bekannten Feld, das nicht geladen ist?
+
+        Vorgeschlagen, nicht geladen: ein Feldwechsel setzt die bearbeitete
+        Fläche zurück, und das soll der Fahrer entscheiden, nicht ein Zaun.
+        """
+        if now - self._vorschlag_geprueft < 1.0:
+            return
+        self._vorschlag_geprueft = now
+        fix = self.fix
+        frisch = fix is not None and fix.valid and fix.received_at and now - fix.received_at < 2.0
+        if not frisch or self.job is not None:
+            self.feld_vorschlag = None
+            self._vorschlag_kandidat = None
+            return
+        if now - self._felder_cache_at > FELDER_NEU_LADEN_S:
+            self.refresh_field_cache()
+        aktuell = self.field["id"] if self.field else None
+        treffer = None
+        for feld_id, name, plane, grenze in self._felder_cache:
+            if geo.point_in_polygon(plane.to_local(fix.lat, fix.lon), grenze):
+                treffer = (feld_id, name)
+                break
+        if treffer is None or treffer[0] == aktuell:
+            self.feld_vorschlag = None
+            self._vorschlag_kandidat = None
+            return
+        if treffer[0] != self._vorschlag_kandidat:
+            self._vorschlag_kandidat = treffer[0]
+            self._vorschlag_seit = now
+        if now - self._vorschlag_seit >= FELD_VORSCHLAG_S:
+            self.feld_vorschlag = {"id": treffer[0], "name": treffer[1]}
+
     def _close_orphans(self) -> None:
         geschlossen = self.store.close_orphan_jobs(self.config.network.device_id)
         if geschlossen:
@@ -1064,6 +1122,7 @@ class Engine:
         """
         now = now or time.time()
         self._checkpoint(now)
+        self._pruefe_feldvorschlag(now)
         age = now - self.fix.received_at if (self.fix and self.fix.received_at) else 99.0
         if age > 2.0 and self.turn is not None:
             # Eine Wende ohne Positionsdaten weiterzuführen hieße, blind auf
@@ -1102,6 +1161,7 @@ class Engine:
             },
             "heading": self.heading,
             "kurs_kopplung": self.heading_filter.status(),
+            "feld_vorschlag": self.feld_vorschlag,
             "guidance": self.guidance.to_dict(),
             "headland": {
                 **self.headland.to_dict(),

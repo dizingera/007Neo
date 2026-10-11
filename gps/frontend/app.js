@@ -143,6 +143,15 @@ function chip(id, text, klasse) {
 }
 
 function updateHud(s) {
+  // Feld erkannt, aber nicht geladen: anbieten, nie von selbst wechseln.
+  const vorschlag = el('feldVorschlag');
+  if (s.feld_vorschlag) {
+    vorschlag.textContent = `Feld „${s.feld_vorschlag.name}“ laden`;
+    vorschlag.dataset.id = s.feld_vorschlag.id;
+    vorschlag.hidden = false;
+  } else {
+    vorschlag.hidden = true;
+  }
   const guidance = s.guidance || {};
   const fix = s.fix;
   const cm = guidance.active ? guidance.cross_track_cm : null;
@@ -819,6 +828,12 @@ el('btnJob').onclick = async () => {
   } else if (await api('POST', '/api/job/start', { operation: arbeitBezeichnung() })) {
     toast(`Markieren an – ${arbeitBezeichnung()}`);
   }
+};
+
+el('feldVorschlag').onclick = async () => {
+  const id = el('feldVorschlag').dataset.id;
+  el('feldVorschlag').hidden = true;
+  if (id && await api('POST', `/api/fields/${id}/load`)) toast('Feld geladen');
 };
 
 /* Ton: Browser erlauben ihn erst nach einer Berührung - die erste genügt. */

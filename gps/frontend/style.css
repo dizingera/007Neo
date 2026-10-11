@@ -359,3 +359,13 @@ label.button { display: inline-flex; align-items: center; cursor: pointer; }
 }
 .toast.error { border-left-color: var(--red); }
 
+/* Feld erkannt: ein großer Knopf, den man mit dem Handschuh trifft. Er blockiert
+   nichts - wer ihn ignoriert, fährt einfach weiter. */
+.vorschlag {
+  position: fixed; left: 50%; top: calc(22 * var(--u)); transform: translateX(-50%);
+  min-height: 56px; padding: 12px 26px; border-radius: 10px; z-index: 29;
+  background: var(--blue); color: #fff; border: 0; font-size: 18px; font-weight: 600;
+  box-shadow: 0 8px 24px #0008;
+}
+.vorschlag[hidden] { display: none; }
+
