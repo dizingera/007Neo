@@ -619,6 +619,8 @@ class HeadingFilter:
     fusion_aktiv: bool = True
     warnung: str = ""
     bias_deg_s: float = 0.0
+    rueckwaerts: bool = False          # Traktor fährt rückwärts: Bewegungskurs ist 180 Grad daneben
+    _gegen: int = 0                    # aufeinanderfolgende Kurse "gegen" die Erwartung
     _letzter_kurs: Optional[float] = None
     _passt: float = 0.0                # gleitender Mittelwert: +1 gleiche, -1 gegenläufige Drehung
     _proben: int = 0
@@ -643,6 +645,24 @@ class HeadingFilter:
             self.value = course
             self._letzter_kurs = course
             return self.value
+
+        # Rückwärts meldet der Empfänger den Kurs der Bewegung, und der liegt
+        # 180 Grad neben der Richtung, in die der Traktor zeigt. Ein Kurs, der
+        # mehrmals hintereinander so weit von der Erwartung liegt, ist keine
+        # Wende - die dreht in kleinen Schritten -, sondern eine Umkehr.
+        versatz = 180.0 if self.rueckwaerts else 0.0
+        if abs(angle_difference(course, normalize_heading(self.value + versatz))) > 120.0:
+            self._gegen += 1
+            if self._gegen < 3:
+                return self.value            # Ausreißer: nicht glauben, nicht verwerfen
+            self.rueckwaerts = not self.rueckwaerts
+            self._gegen = 0
+            self._letzter_kurs = None        # Vergleich beginnt neu, sonst zählt der Sprung als Drehung
+            self.value = normalize_heading(course + (180.0 if self.rueckwaerts else 0.0))
+            return self.value
+        self._gegen = 0
+        if self.rueckwaerts:
+            course = normalize_heading(course + 180.0)
 
         if (yaw_rate_deg_s is not None and self.fusion_aktiv
                 and speed_ms >= self.fusion_min_speed_ms and 0.0 < dt < 1.0):
@@ -685,5 +705,5 @@ class HeadingFilter:
                             "Der Kurs kommt solange allein aus der Bewegung.")
 
     def status(self) -> dict:
-        return {"gekoppelt": self.fusion_aktiv, "gyro_fehler_deg_s": round(self.bias_deg_s, 3),
+        return {"gekoppelt": self.fusion_aktiv, "rueckwaerts": self.rueckwaerts, "gyro_fehler_deg_s": round(self.bias_deg_s, 3),
                 "warnung": self.warnung}

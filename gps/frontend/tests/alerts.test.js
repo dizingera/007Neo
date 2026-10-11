@@ -47,3 +47,7 @@ test('Verbindung weg während Lenkung aktiv: Alarm', () => {
 test('erstes Bild ohne Vorgänger löst nichts aus', () => {
   assert.deepStrictEqual(ereignisse(null, lenkt), []);
 });
+test('Rückwärtsfahrt: Warnung statt Alarm', () => {
+  const e = ereignisse(lenkt, aus('Rückwärtsfahrt'));
+  assert.strictEqual(e[0].stufe, 'warn');
+});

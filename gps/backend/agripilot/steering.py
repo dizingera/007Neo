@@ -50,6 +50,7 @@ class SteeringController:
         self.config = config
         self.output = output or NullOutput()
         self.armed = False           # vom Fahrer gesetzt, geht bei jedem Stopp weg
+        self.rueckwaerts = False     # setzt die Engine aus dem Kurs; Rückwärts lenkt nichts
         self.command = SteerCommand()
         self.last_sent_at = 0.0
         self.max_rate_deg_s = 25.0
@@ -141,6 +142,12 @@ class SteeringController:
             # mitten in einer Handkorrektur wäre die übelste Überraschung.
             self.armed = False
             return "Fahrer hat eingegriffen"
+        if self.rueckwaerts:
+            # Die Regelung ist für Vorwärtsfahrt gerechnet: rückwärts kehrt sich
+            # die Wirkung des Einschlags um. Wie beim Eingriff des Fahrers bleibt
+            # sie aus, bis neu geschärft wird.
+            self.armed = False
+            return "Rückwärtsfahrt"
         if not guidance.active:
             return "keine Spur aktiv"
         if not fix.valid:

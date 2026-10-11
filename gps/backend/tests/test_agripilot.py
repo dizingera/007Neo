@@ -794,6 +794,14 @@ class SteeringTest(unittest.TestCase):
         self.assertFalse(command.engaged)
         self.assertFalse(self.controller.armed)      # bleibt aus, bis neu geschärft
 
+    def test_reversing_disarms(self):
+        self.controller.arm()
+        self.controller.rueckwaerts = True
+        command = self.controller.update(self._guidance(), self._fix())
+        self.assertFalse(command.engaged)
+        self.assertIn("Rückwärts", command.reason)
+        self.assertFalse(self.controller.armed)
+
     def test_config_switch_beats_everything(self):
         self.config.enabled = False
         self.controller.arm()

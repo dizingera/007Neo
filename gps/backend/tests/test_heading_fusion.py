@@ -79,5 +79,54 @@ class FusionTests(unittest.TestCase):
         self.assertAlmostEqual(filt.value, 90.0 + 10.0 * filt.smoothing)
 
 
+class ReverseTests(unittest.TestCase):
+    """Rückwärts liefert der Empfänger den Kurs der Bewegung - 180 Grad vom Traktor."""
+
+    def _vorwaerts(self):
+        filt = HeadingFilter()
+        for _ in range(10):
+            filt.update(90.0, None, 2.0, yaw_rate_deg_s=0.0, dt=DT)
+        return filt
+
+    def test_reverse_is_detected_and_body_heading_is_kept(self):
+        filt = self._vorwaerts()
+        for _ in range(4):
+            filt.update(270.0, None, 2.0, yaw_rate_deg_s=0.0, dt=DT)
+        self.assertTrue(filt.rueckwaerts)
+        self.assertAlmostEqual(angle_difference(filt.value, 90.0), 0.0, delta=1.0)
+
+    def test_reverse_works_without_a_gyro_too(self):
+        filt = HeadingFilter()
+        for _ in range(10):
+            filt.update(90.0, None, 2.0)
+        for _ in range(4):
+            filt.update(270.0, None, 2.0)
+        self.assertTrue(filt.rueckwaerts)
+        self.assertAlmostEqual(angle_difference(filt.value, 90.0), 0.0, delta=1.0)
+
+    def test_a_single_glitch_is_not_reverse(self):
+        filt = self._vorwaerts()
+        filt.update(270.0, None, 2.0, yaw_rate_deg_s=0.0, dt=DT)
+        filt.update(90.0, None, 2.0, yaw_rate_deg_s=0.0, dt=DT)
+        self.assertFalse(filt.rueckwaerts)
+
+    def test_forward_again_clears_it(self):
+        filt = self._vorwaerts()
+        for _ in range(4):
+            filt.update(270.0, None, 2.0, yaw_rate_deg_s=0.0, dt=DT)
+        for _ in range(4):
+            filt.update(90.0, None, 2.0, yaw_rate_deg_s=0.0, dt=DT)
+        self.assertFalse(filt.rueckwaerts)
+        self.assertAlmostEqual(angle_difference(filt.value, 90.0), 0.0, delta=1.0)
+
+    def test_a_normal_turn_is_not_reverse(self):
+        filt = self._vorwaerts()
+        kurs = 90.0
+        for _ in range(60):
+            kurs += 2.0                     # 20 Grad/s: eine zügige Wende
+            filt.update(kurs, None, 2.0, yaw_rate_deg_s=20.0, dt=DT)
+        self.assertFalse(filt.rueckwaerts)
+
+
 if __name__ == "__main__":
     unittest.main()

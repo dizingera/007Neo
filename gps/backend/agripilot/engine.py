@@ -1016,6 +1016,7 @@ class Engine:
                             if attitude and attitude.fresh else None),
             cross_track_m=self.guidance.cross_track_m,
         )
+        self.steering.rueckwaerts = self.heading_filter.rueckwaerts
         command = self.steering.update(self.guidance, fix, context)
         # On the simulator, close the loop so autosteer can be demonstrated and
         # tuned without a machine.

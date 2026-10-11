@@ -26,7 +26,8 @@
       if (grund !== 'vom Fahrer ausgeschaltet') {
         liste.push({
           id: 'lenkung-aus',
-          stufe: grund === 'Fahrer hat eingegriffen' ? 'info' : 'alarm',
+          stufe: grund === 'Fahrer hat eingegriffen' ? 'info'
+            : grund === 'Rückwärtsfahrt' ? 'warn' : 'alarm',
           text: `Lenkung aus: ${grund}`,
         });
       }
