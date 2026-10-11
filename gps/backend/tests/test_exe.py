@@ -5,7 +5,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from unittest import mock
 
 from agripilot import config as config_module
@@ -182,6 +182,8 @@ class PlanTests(unittest.TestCase):
         folgender = exe.Schritt("danach", mock.Mock())
         with mock.patch.object(exe, "plan", return_value=[schritt, folgender]), \
                 mock.patch.object(exe, "ist_admin", return_value=True), \
+                mock.patch.object(exe, "Path", PurePosixPath), \
+                mock.patch.object(exe, "_rolle_erfragen", return_value=("master", None, None)), \
                 mock.patch.object(exe.os, "name", "nt"), \
                 mock.patch("builtins.print") as ausgabe:
             code = exe.installieren(r"C:\AgriPilot", 8080, trocken=False)
