@@ -146,8 +146,14 @@ gnss:
 ## 3b. Auf einem Windows-Tablet statt einem Pi
 
 Das Tablet kann die Rolle des Pi vollständig übernehmen – es hat USB für
-Empfänger, Neigungssensor und Motorsteuerung, Bildschirm und Akku. In einer
-PowerShell **als Administrator** im Ordner `gps`:
+Empfänger, Neigungssensor und Motorsteuerung, Bildschirm und Akku.
+
+**Doppelklick auf `AgriPilot-installieren.bat`** im Ordner `gps`. Mehr ist nicht
+zu tun: die Datei fragt selbst nach Administratorrechten, installiert Python,
+falls es fehlt (einmalig, braucht Internet), richtet alles ein, legt ein Symbol
+„AgriPilot" auf den Desktop und öffnet am Ende die Anzeige. Der Aufruf ist
+wiederholbar und lässt Konfiguration und Daten unangetastet. Von Hand geht es
+auch, in einer PowerShell als Administrator:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\install_windows.ps1

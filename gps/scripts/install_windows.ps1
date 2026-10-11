@@ -1,4 +1,4 @@
-# AgriPilot auf einem Windows-Tablet einrichten.
+﻿# AgriPilot auf einem Windows-Tablet einrichten.
 #
 # In einer PowerShell **als Administrator** im Ordner gps ausführen:
 #
@@ -27,10 +27,51 @@ if (-not ([Security.Principal.WindowsPrincipal] `
 }
 
 Schritt "Python prüfen"
-$python = (Get-Command python -ErrorAction SilentlyContinue).Source
+
+# Der Microsoft-Store-Platzhalter (WindowsApps\python.exe) zählt nicht: er öffnet
+# nur den Store. Gesucht wird ein echtes Python ab Version 3.10.
+function Finde-Python {
+    foreach ($kandidat in @(Get-Command python -All -ErrorAction SilentlyContinue)) {
+        if ($kandidat.Source -like "*WindowsApps*") { continue }
+        & $kandidat.Source -c "import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)" 2>$null
+        if ($LASTEXITCODE -eq 0) { return $kandidat.Source }
+    }
+    return $null
+}
+
+function Pfad-Neu-Lesen {
+    $env:Path = [Environment]::GetEnvironmentVariable("Path", "Machine") + ";" +
+                [Environment]::GetEnvironmentVariable("Path", "User")
+}
+
+$python = Finde-Python
 if (-not $python) {
-    Write-Host "Python fehlt. Von python.org installieren (Haken bei 'Add to PATH')." -ForegroundColor Red
-    exit 1
+    Write-Host "Python fehlt - wird jetzt installiert (einmalig, braucht Internet)."
+    # Erst winget (Windows 10/11), sonst der Installer von python.org.
+    if (Get-Command winget -ErrorAction SilentlyContinue) {
+        try {
+            & winget install -e --id Python.Python.3.12 --scope machine --silent `
+                --accept-package-agreements --accept-source-agreements
+        } catch { Write-Host "   winget gescheitert: $_" }
+        Pfad-Neu-Lesen
+        $python = Finde-Python
+    }
+    if (-not $python) {
+        $installer = Join-Path $env:TEMP "python-3.12.8-amd64.exe"
+        try {
+            Invoke-WebRequest "https://www.python.org/ftp/python/3.12.8/python-3.12.8-amd64.exe" `
+                -OutFile $installer -UseBasicParsing
+            Start-Process $installer -Wait `
+                -ArgumentList "/quiet InstallAllUsers=1 PrependPath=1 Include_test=0"
+        } catch { Write-Host "   Download gescheitert: $_" }
+        Pfad-Neu-Lesen
+        $python = Finde-Python
+    }
+    if (-not $python) {
+        Write-Host "Python konnte nicht installiert werden. Bitte von python.org installieren" `
+                   "(Haken bei 'Add to PATH') und diese Datei noch einmal starten." -ForegroundColor Red
+        exit 1
+    }
 }
 & $python --version
 
@@ -157,10 +198,35 @@ Register-ScheduledTask -TaskName "AgriPilot" -Action $aktion -Trigger $ausloes `
 $adressen = (Get-NetIPAddress -AddressFamily IPv4 |
              Where-Object { $_.IPAddress -notlike "127.*" }).IPAddress
 
+Schritt "Starten"
+# Verknüpfung auf dem Desktop für alle Benutzer: ein Doppelklick öffnet die Anzeige.
+try {
+    $desktop = [Environment]::GetFolderPath("CommonDesktopDirectory")
+    Set-Content -Encoding ASCII (Join-Path $desktop "AgriPilot.url") `
+        "[InternetShortcut]`r`nURL=http://localhost:$Port`r`n"
+    Write-Host "   Verknüpfung 'AgriPilot' auf dem Desktop angelegt."
+} catch { Write-Host "   Verknüpfung nicht angelegt: $_" }
+
+Start-ScheduledTask -TaskName "AgriPilot"
+Write-Host "   Programm wird gestartet ..."
+$bereit = $false
+for ($i = 0; $i -lt 40; $i++) {
+    Start-Sleep -Seconds 1
+    try {
+        Invoke-WebRequest "http://localhost:$Port/api/system" -UseBasicParsing -TimeoutSec 2 | Out-Null
+        $bereit = $true
+        break
+    } catch { }
+}
+if ($bereit) {
+    Start-Process "http://localhost:$Port"
+} else {
+    Write-Host "   Es hat sich nach 40 Sekunden nicht gemeldet - Protokoll: $Daten\start.log" -ForegroundColor Yellow
+}
+
 Write-Host "`nFertig." -ForegroundColor Green
-Write-Host "Anzeige auf diesem Tablet:  http://localhost:$Port"
+Write-Host "Anzeige auf diesem Tablet:  http://localhost:$Port  (oder Symbol 'AgriPilot' auf dem Desktop)"
 foreach ($adresse in $adressen) {
     Write-Host "Auf dem Android-Tablet:     http://${adresse}:$Port"
 }
-Write-Host "`nJetzt starten:  $start"
-Write-Host "Geräte suchen:  `"$pyexe`" `"$Ziel\scripts\scan_devices.py`""
+Write-Host "`nNächster Schritt: Geräte suchen:  `"$pyexe`" `"$Ziel\scripts\scan_devices.py`""

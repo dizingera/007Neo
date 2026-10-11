@@ -92,17 +92,16 @@ Ehrlich aufgelistet, bevor du anfängst:
 
 ### 1. Erst am Schreibtisch
 
-Auf dem Windows-Tablet, bevor irgendetwas angeschlossen ist:
+Auf dem Windows-Tablet, bevor irgendetwas angeschlossen ist: im Ordner `gps`
+**`AgriPilot-installieren.bat` doppelklicken** und die Rückfrage nach
+Administratorrechten bestätigen.
 
-```
-powershell -ExecutionPolicy Bypass -File scripts\install_windows.ps1
-```
-
-Das Skript legt alles unter `C:\AgriPilot` an, richtet die Python-Umgebung ein,
-öffnet Port 8080 in der Firewall (damit das Android-Tablet mitschauen kann) und
-trägt einen automatischen Start beim Anmelden ein.
-
-Danach `C:\AgriPilot\start.bat` und im Browser `http://localhost:8080` öffnen.
+Die Datei installiert Python, falls es fehlt (einmalig, braucht Internet), legt
+alles unter `C:\AgriPilot` an, richtet die Python-Umgebung ein, öffnet Port 8080
+in der Firewall (damit das Android-Tablet mitschauen kann), trägt einen
+automatischen Start beim Anmelden ein – mit Neustart nach einem Absturz –, legt
+ein Symbol „AgriPilot" auf den Desktop und öffnet die Anzeige unter
+`http://localhost:8080`.
 Ohne angeschlossene Geräte läuft der Simulator: virtueller Traktor, virtueller
 Hang, alles bedienbar. So lernst du die Oberfläche kennen, ohne im Traktor zu
 sitzen.
