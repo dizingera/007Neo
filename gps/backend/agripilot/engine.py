@@ -116,6 +116,7 @@ class Engine:
             config.network.device_id,
             self._resumable_job["id"] if self._resumable_job else None)
         self._checkpoint_at = 0.0
+        self._kurs_warnung = ""
         if verwaist:
             self.note(f"{verwaist} unterbrochene Arbeit(en) vom letzten Mal abgeschlossen")
         self.auto_sections = True
@@ -805,6 +806,10 @@ class Engine:
             fix.course_deg, fix.heading_deg, fix.speed_ms, use_yaw, dt
         )
         self.heading = heading
+        warnung = self.heading_filter.warnung
+        if warnung and warnung != self._kurs_warnung:
+            self._kurs_warnung = warnung
+            self.note(warnung)
         if heading is None:
             return
 
@@ -1095,6 +1100,7 @@ class Engine:
                 "hitch_length_m": self.profile.hitch_length_m,
             },
             "heading": self.heading,
+            "kurs_kopplung": self.heading_filter.status(),
             "guidance": self.guidance.to_dict(),
             "headland": {
                 **self.headland.to_dict(),

@@ -597,12 +597,31 @@ class HeadingFilter:
     pace - exactly when the driver is lining up at the headland.  This keeps the
     last good heading while slow, prefers a dual-antenna heading when present,
     and smooths the rest.
+
+    Liegt eine Drehrate vom Neigungssensor an, wird bei Fahrt gekoppelt statt
+    nur geglättet: der Kurs läuft mit dem Gyro weiter (kein Nachlauf in der
+    Kurve) und wird vom Bewegungskurs nur sanft zurückgezogen (kein Rauschen).
+    Der Gyro-Fehler wird dabei auf der Geraden mitgelernt. Läuft die Drehrate
+    dauerhaft gegen die Bewegung, stimmt das Vorzeichen des Sensors nicht - dann
+    wird die Kopplung abgeschaltet und das gemeldet, statt mit einem falsch
+    herum eingebauten Gyro zu lenken.
     """
 
     min_speed_ms: float = 0.5
     smoothing: float = 0.35
     value: Optional[float] = None
     _history: list[float] = field(default_factory=list)
+
+    fusion_min_speed_ms: float = 1.0
+    fusion_gain: float = 0.12          # Zug zum Bewegungskurs je Position
+    bias_gain: float = 0.002           # Lerngeschwindigkeit des Gyro-Fehlers
+    max_bias_deg_s: float = 3.0
+    fusion_aktiv: bool = True
+    warnung: str = ""
+    bias_deg_s: float = 0.0
+    _letzter_kurs: Optional[float] = None
+    _passt: float = 0.0                # gleitender Mittelwert: +1 gleiche, -1 gegenläufige Drehung
+    _proben: int = 0
 
     def update(self, course: Optional[float], true_heading: Optional[float],
                speed_ms: float, yaw_rate_deg_s: Optional[float] = None,
@@ -615,14 +634,56 @@ class HeadingFilter:
             # vom Neigungssensor an, wird der letzte gute Kurs damit
             # weitergeschrieben - sonst dreht sich am Vorgewende die Anzeige
             # nicht mit, obwohl der Traktor längst quer steht.
+            self._letzter_kurs = None
             if (yaw_rate_deg_s is not None and self.value is not None
                     and 0.0 < dt < 1.0):
                 self.value = normalize_heading(self.value + yaw_rate_deg_s * dt)
             return self.value
         if self.value is None:
             self.value = course
+            self._letzter_kurs = course
             return self.value
+
+        if (yaw_rate_deg_s is not None and self.fusion_aktiv
+                and speed_ms >= self.fusion_min_speed_ms and 0.0 < dt < 1.0):
+            self._pruefe_vorzeichen(course, yaw_rate_deg_s, dt)
+            self._letzter_kurs = course
+            if self.fusion_aktiv:
+                vorhergesagt = normalize_heading(
+                    self.value + (yaw_rate_deg_s - self.bias_deg_s) * dt)
+                fehler = angle_difference(course, vorhergesagt)
+                self.bias_deg_s = max(-self.max_bias_deg_s, min(
+                    self.max_bias_deg_s, self.bias_deg_s - self.bias_gain * fehler / dt))
+                self.value = normalize_heading(vorhergesagt + self.fusion_gain * fehler)
+                return self.value
+
+        self._letzter_kurs = course
         # Smooth on the shortest path so 359 -> 001 does not swing the long way.
         delta = angle_difference(course, self.value)
         self.value = normalize_heading(self.value + delta * self.smoothing)
         return self.value
+
+    def _pruefe_vorzeichen(self, course: float, yaw_rate_deg_s: float, dt: float) -> None:
+        """Dreht der Gyro mit der Bewegung oder dagegen?
+
+        Verglichen werden nur deutliche Drehungen; das Rauschen des Bewegungskurses
+        liegt darunter und würde sonst zufällig mal so, mal so ausfallen.
+        """
+        if self._letzter_kurs is None:
+            return
+        gyro = yaw_rate_deg_s * dt
+        bewegung = angle_difference(course, self._letzter_kurs)
+        if abs(gyro) < 0.4 or abs(bewegung) < 0.4:
+            return
+        gleich = 1.0 if gyro * bewegung > 0 else -1.0
+        self._proben += 1
+        self._passt += 0.1 * (gleich - self._passt)
+        if self._proben >= 20 and self._passt < -0.3:
+            self.fusion_aktiv = False
+            self.warnung = ("Drehrate und Fahrtrichtung laufen gegeneinander - "
+                            "Vorzeichen des Neigungssensors prüfen (Einbaurichtung). "
+                            "Der Kurs kommt solange allein aus der Bewegung.")
+
+    def status(self) -> dict:
+        return {"gekoppelt": self.fusion_aktiv, "gyro_fehler_deg_s": round(self.bias_deg_s, 3),
+                "warnung": self.warnung}
