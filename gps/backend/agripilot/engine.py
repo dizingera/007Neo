@@ -35,6 +35,7 @@ from .guidance import (
 )
 from .imu import terrain_offset
 from .nmea import Fix
+from .writer import HintergrundSchreiber
 
 TRACK_MIN_DISTANCE_M = 1.0
 TRACK_FLUSH_COUNT = 25
@@ -140,6 +141,10 @@ class Engine:
             self.note(f"{verwaist} unterbrochene Arbeit(en) vom letzten Mal abgeschlossen")
         self.auto_sections = True
 
+        # Fahrspur und Zwischenstand schreibt ein eigener Faden (writer.py).
+        self._schreiber = HintergrundSchreiber(store.path)
+        store.vor_schliessen = self._schreiber.beenden
+        self._sicherung_laeuft = False      # ein Zwischenstand ist unterwegs
         self._track_buffer: list[tuple] = []
         self._last_track_point: Optional[geo.Point] = None
         self._last_update_at: Optional[float] = None
@@ -681,21 +686,56 @@ class Engine:
         Schicht ohne Fortsetzung mit dem gesicherten Stand abgeschlossen.
         """
         self._checkpoint(time.time(), force=True)
+        self.warte_auf_sicherung()
+
+    def warte_auf_sicherung(self) -> None:
+        """Bis alles, was im Hintergrund geschrieben wird, in der Datenbank steht."""
+        self._schreiber.warten()
+        self._fehler_melden()
+
+    def close(self) -> None:
+        """Beim Beenden des Programms: Schreiber zu Ende laufen lassen und schließen."""
+        self._schreiber.beenden()
+        self._fehler_melden()
+
+    def _fehler_melden(self) -> None:
+        for text in self._schreiber.fehler_holen():
+            self.note(text)
 
     def _checkpoint(self, now: float, force: bool = False) -> None:
-        """Bearbeitete Fläche und Strecke zwischendurch sichern."""
+        """Bearbeitete Fläche und Strecke zwischendurch sichern - im Hintergrund.
+
+        Die Lenkschleife übergibt nur eine Kopie der Zellen (wenige Millisekunden);
+        Verpacken und Schreiben macht der Schreiber. Läuft sein letzter Auftrag
+        noch, wird übersprungen und beim nächsten Tick erneut versucht - es hilft
+        niemandem, wenn sich Aufträge auf einer langsamen SD-Karte stapeln.
+        """
         if self.job is None or (not force and now - self._checkpoint_at < CHECKPOINT_S):
+            return
+        if not force and self._sicherung_laeuft:
             return
         self._checkpoint_at = now
         self._flush_track(force=True)
-        self.store.update_job(
-            self.job["id"],
-            distance_m=self.distance_m,
-            area_ha=self.coverage.area_ha,
-            overlap_ha=self.coverage.overlap_m2 / 10_000.0,
-            working_time_s=self.working_time_s,
-            coverage=self.coverage.pack(),
-        )
+        job_id = self.job["id"]
+        zellen, zellgroesse = set(self.coverage.cells), self.coverage.cell_size
+        werte = {
+            "distance_m": self.distance_m,
+            "area_ha": self.coverage.area_ha,
+            "overlap_ha": self.coverage.overlap_m2 / 10_000.0,
+            "working_time_s": self.working_time_s,
+        }
+
+        def schreiben(store: storage.Storage) -> None:
+            try:
+                karte = CoverageMap(cell_size=zellgroesse)
+                karte.cells = zellen
+                store.update_job(job_id, coverage=karte.pack(), **werte)
+            finally:
+                self._sicherung_laeuft = False
+
+        self._sicherung_laeuft = True
+        self._schreiber.auftrag(schreiben)
+        self._fehler_melden()
 
     # -- Vorgewende und Wende ---------------------------------------------
 
@@ -848,6 +888,7 @@ class Engine:
         if self.job is None:
             return None
         self._flush_track(force=True)
+        self.warte_auf_sicherung()          # erst alle Spurpunkte, dann das Ende der Arbeit
         self.store.update_job(
             self.job["id"],
             ended_at=time.time(),
@@ -1143,8 +1184,9 @@ class Engine:
         if not self._track_buffer or self.job is None:
             return
         if force or len(self._track_buffer) >= TRACK_FLUSH_COUNT:
-            self.store.add_track_points(self.job["id"], self._track_buffer)
+            job_id, punkte = self.job["id"], self._track_buffer
             self._track_buffer = []
+            self._schreiber.auftrag(lambda store: store.add_track_points(job_id, punkte))
 
     def tick(self, now: Optional[float] = None) -> None:
         """Regelmäßiger Herzschlag, unabhängig von eintreffenden Positionen.

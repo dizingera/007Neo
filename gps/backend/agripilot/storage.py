@@ -98,15 +98,22 @@ def new_id() -> str:
 
 
 class Storage:
-    def __init__(self, path: str | Path) -> None:
+    def __init__(self, path: str | Path, schema: bool = True) -> None:
+        """``schema=False``: nur verbinden - für den Hintergrundschreiber, der eine
+        Datenbank öffnet, die das Programm längst angelegt hat."""
         self.path = Path(path)
+        # Wer im Hintergrund in diese Datenbank schreibt, trägt sich hier ein:
+        # beim Schließen wird erst zu Ende geschrieben (engine.py).
+        self.vor_schliessen = None
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.db = sqlite3.connect(self.path, check_same_thread=False)
+        self.db = sqlite3.connect(self.path, check_same_thread=False, timeout=10.0)
         self.db.row_factory = sqlite3.Row
         # WAL keeps readers going while a job writes, and survives a hard power
         # cut - which in a tractor is the normal way to switch the system off.
         self.db.execute("PRAGMA journal_mode=WAL")
         self.db.execute("PRAGMA synchronous=NORMAL")
+        if not schema:
+            return
         self.db.executescript(SCHEMA)
         self._nachruesten()
         self.db.commit()
@@ -126,6 +133,9 @@ class Storage:
                 self.db.execute(f"ALTER TABLE lines ADD COLUMN {spalte} {definition}")
 
     def close(self) -> None:
+        if self.vor_schliessen is not None:
+            hook, self.vor_schliessen = self.vor_schliessen, None
+            hook()
         self.db.close()
 
     # -- fields -----------------------------------------------------------

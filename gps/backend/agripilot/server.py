@@ -237,6 +237,8 @@ class Application:
     async def stop(self) -> None:
         with contextlib.suppress(Exception):
             self.engine.suspend_job()
+        with contextlib.suppress(Exception):
+            self.engine.close()
         # Eine halb geschriebene Aufzeichnung ist trotzdem eine: was auf der
         # Karte steht, bleibt lesbar - der letzte Block gehört noch dazu.
         with contextlib.suppress(Exception):

@@ -77,6 +77,7 @@ class ResumeTests(unittest.TestCase):
         self.engine.start_job("Grubbern")
         jetzt = self._work()
         self.engine.tick(now=time.time() + CHECKPOINT_S + 1)       # Sicherungspunkt
+        self.engine.warte_auf_sicherung()
         flaeche = self.engine.coverage.area_ha
         self.assertGreater(flaeche, 0.0)
         job_id = self.engine.job["id"]
@@ -94,9 +95,11 @@ class ResumeTests(unittest.TestCase):
         self.engine.start_job("")
         jetzt = self._work()
         self.engine.tick(now=time.time() + CHECKPOINT_S + 1)
+        self.engine.warte_auf_sicherung()
         erste = self.store.get_job(self.engine.job["id"])["updated_at"]
         time.sleep(0.01)
         self.engine.tick(now=time.time() + CHECKPOINT_S + 2)       # zu früh für den nächsten
+        self.engine.warte_auf_sicherung()
         self.assertEqual(self.store.get_job(self.engine.job["id"])["updated_at"], erste)
 
     def test_ended_job_is_not_resumed(self):
