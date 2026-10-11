@@ -322,6 +322,11 @@
       <button id="btnCentre">Lenkung: Mitte lernen</button>
       <span class="note" id="steerInfo"></span>
     </div>
+    <div class="row">
+      <label class="switch"><input type="checkbox" id="warnton" checked>
+        Warnton und Vibration</label>
+      <button id="btnWarnProbe">Probe</button>
+    </div>
     <div class="row" id="imuRow" hidden>
       <button id="btnLevel" class="primary">Neigungssensor nullen</button>
       <label class="switch"><input type="checkbox" id="compensation" checked>
@@ -382,6 +387,7 @@
 
 <div class="toast" id="toast" hidden></div>
 
+<script src="alerts.js"></script>
 <script src="app.js"></script>
 <script>
   /* Nur fuer die Kachel auf dem Android-Tablet. Browser lassen Service Worker

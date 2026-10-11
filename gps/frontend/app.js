@@ -77,6 +77,7 @@ function connect() {
 
   socket.onopen = () => { state.connected = true; };
   socket.onclose = () => {
+    if (window.Warnungen && state.live) window.Warnungen.pruefen(state.live, state.live, false);
     state.connected = false;
     setTimeout(connect, 1500);          // im Feld ist ein Abriss normal
   };
@@ -97,6 +98,10 @@ function connect() {
 function onState(data) {
   const previous = state.live;
   state.live = data;
+  // Hörbar machen, was der Fahrer nicht selbst ausgelöst hat (alerts.js).
+  if (previous && window.Warnungen) {
+    window.Warnungen.pruefen(previous, data, state.connected).forEach((e) => toast(e.text, e.stufe === 'alarm'));
+  }
   if (data.coverage) state.cellSize = data.coverage.cell_size;
 
   if (data.tool_position) {
@@ -815,6 +820,16 @@ el('btnJob').onclick = async () => {
     toast(`Markieren an – ${arbeitBezeichnung()}`);
   }
 };
+
+/* Ton: Browser erlauben ihn erst nach einer Berührung - die erste genügt. */
+document.addEventListener('pointerdown', () => window.Warnungen && window.Warnungen.freischalten(), { once: true });
+el('warnton').checked = gemerkt('warnton') !== 'aus';
+if (window.Warnungen) window.Warnungen.einstellen({ an: el('warnton').checked });
+el('warnton').onchange = () => {
+  merken('warnton', el('warnton').checked ? 'an' : 'aus');
+  if (window.Warnungen) window.Warnungen.einstellen({ an: el('warnton').checked });
+};
+el('btnWarnProbe').onclick = () => window.Warnungen && window.Warnungen.probe('alarm');
 
 el('btnSteer').onclick = async () => {
   const steering = state.live && state.live.steering;
