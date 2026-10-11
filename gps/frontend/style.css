@@ -107,6 +107,7 @@ body.tag .vignette { background: radial-gradient(120% 90% at 50% 70%, transparen
 .chip.warn { color: var(--amber); } .chip.warn i { background: var(--amber); box-shadow: 0 0 calc(.8 * var(--u)) var(--amber); }
 .chip.bad { color: var(--rot); } .chip.bad i { background: var(--rot); }
 .chip.titel { font-family: "Rajdhani", "Bahnschrift", sans-serif; font-weight: 700; font-size: calc(1.9 * var(--u)); letter-spacing: .03em; text-transform: uppercase; padding: calc(.5 * var(--u)) calc(1.3 * var(--u)); }
+#datenRolle { white-space: pre-line; }
 .hint { margin-top: calc(.4 * var(--u)); font-size: calc(1.3 * var(--u)); font-weight: 600; color: var(--amber); max-width: calc(34 * var(--u)); white-space: pre-line; text-shadow: 0 1px 6px rgba(0,0,0,.6); }
 body.tag .hint { text-shadow: none; }
 .hint.alarm { color: var(--rot); animation: alarm 1s steps(2) infinite; }

@@ -32,8 +32,16 @@ EXE_NAME = "AgriPilot.exe"
 
 # ------------------------------------------------------------- Bausteine
 
+def neuer_code() -> str:
+    """Ein Arbeitercode zum Abtippen auf dem Tablet: acht Zeichen, ohne 0/O/1/I."""
+    import secrets
+    zeichen = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+    roh = "".join(secrets.choice(zeichen) for _ in range(8))
+    return f"{roh[:4]}-{roh[4:]}"
+
+
 def standard_konfiguration(rechnername: str, port: int = 8080, rolle: str = "master",
-                           master_url: str = "") -> str:
+                           master_url: str = "", code: str = "") -> str:
     """Erste Konfiguration. Wer sie schon hat, behält seine (siehe plan()).
 
     ``rolle``: "master" (der Rechner im Büro: erfasst Felder, Maschinen, Umrisse und
@@ -41,6 +49,7 @@ def standard_konfiguration(rechnername: str, port: int = 8080, rolle: str = "mas
     das vom Master bekommt, was der erfasst hat).
     """
     master_zeile = f"  master_url: {master_url}\n" if master_url else ""
+    code_zeile = f"  sync_token: {code}\n" if code else ""
     return f"""# AgriPilot - {"Master (Büro)" if rolle == "master" else "Arbeiter (Traktor)"}.
 # Anschlüsse und Kanäle findet das Programm selbst: Menü -> System -> Geräte suchen.
 
@@ -70,7 +79,7 @@ corrections:
 
 network:
   role: {rolle}
-{master_zeile}  device_id: {rechnername}
+{master_zeile}{code_zeile}  device_id: {rechnername}
   device_name: {rechnername}
   rtcm_relay_port: 2102
 
@@ -133,7 +142,8 @@ def setup_starten(pfad: Path) -> None:
 
 def plan(ziel: str, port: int = 8080, quelle: Optional[str] = None,
          daten: Optional[str] = None, rechnername: Optional[str] = None,
-         still: bool = False, rolle: str = "master", master_url: str = "") -> list[Schritt]:
+         still: bool = False, rolle: str = "master", master_url: str = "",
+         code: str = "") -> list[Schritt]:
     """Die Schritte der Installation, in der Reihenfolge, in der sie laufen."""
     quelle = quelle or sys.executable
     rechnername = rechnername or os.environ.get("COMPUTERNAME", "TABLET")
@@ -175,8 +185,10 @@ def plan(ziel: str, port: int = 8080, quelle: Optional[str] = None,
     def konfiguration() -> None:
         daten_ordner.mkdir(parents=True, exist_ok=True)
         if not konfig.exists():
-            konfig.write_text(standard_konfiguration(rechnername, port, rolle, master_url),
-                              encoding="utf-8")
+            # Der Master bekommt gleich einen Arbeitercode, ohne den von außen nichts geht.
+            konfig.write_text(standard_konfiguration(
+                rechnername, port, rolle, master_url,
+                code or (neuer_code() if rolle == "master" else "")), encoding="utf-8")
 
     def firewall() -> None:
         regel = f"AgriPilot {port}"
@@ -256,26 +268,28 @@ def ist_admin() -> bool:
 
 # --------------------------------------------------------------- Aufrufe
 
-def _rolle_erfragen(daten_ordner: Path) -> tuple[str, str]:
+def _rolle_erfragen(daten_ordner: Path) -> tuple[str, str, str]:
     """Master oder Arbeiter? Nur beim ersten Einrichten und nur mit Tastatur davor."""
     if (daten_ordner / "config.yaml").exists() or not sys.stdin or not sys.stdin.isatty():
-        return "master", ""
+        return "master", "", ""
     print("Ist dieses Gerät der MASTER oder ein ARBEITER?")
     print("  M = Master: der Rechner im Büro. Hier werden Felder, Maschinen und Umrisse erfasst.")
     print("  A = Arbeiter: das Tablet im Traktor. Es bekommt vom Master, was der erfasst hat.")
     wahl = input("[M/A] (Enter = M): ").strip().lower()
     if not wahl.startswith("a"):
-        return "master", ""
+        return "master", "", ""
     url = input("Adresse des Masters, z. B. http://192.168.1.20:8080\n"
                 "(steht beim Master unter Menü → System; Enter = später eintragen): ").strip()
     if url and not url.startswith("http"):
         url = "http://" + url
-    return "client", url
+    code = input("Arbeitercode vom Master (Menü → System; Enter = später eintragen): ").strip()
+    return "client", url, code
 
 
 def installieren(ziel: str, port: int, trocken: bool, still: bool = False,
-                 rolle: Optional[str] = None, master_url: str = "") -> int:
-    schritte = plan(ziel, port, still=still, rolle=rolle or "master", master_url=master_url)
+                 rolle: Optional[str] = None, master_url: str = "", code: str = "") -> int:
+    schritte = plan(ziel, port, still=still, rolle=rolle or "master", master_url=master_url,
+                    code=code)
     if trocken:
         for nummer, schritt in enumerate(schritte, 1):
             print(f"{nummer}. {schritt.text}")
@@ -291,8 +305,8 @@ def installieren(ziel: str, port: int, trocken: bool, still: bool = False,
         return 0
     if rolle is None and not still:
         daten_ordner = Path(os.environ.get("PROGRAMDATA", r"C:\ProgramData")) / "AgriPilot"
-        rolle, master_url = _rolle_erfragen(daten_ordner)
-        schritte = plan(ziel, port, still=still, rolle=rolle, master_url=master_url)
+        rolle, master_url, code = _rolle_erfragen(daten_ordner)
+        schritte = plan(ziel, port, still=still, rolle=rolle, master_url=master_url, code=code)
     print("AgriPilot wird eingerichtet.\n")
     for nummer, schritt in enumerate(schritte, 1):
         print(f"[{nummer}/{len(schritte)}] {schritt.text} ...", flush=True)
@@ -333,6 +347,7 @@ def main(argv: Optional[list[str]] = None) -> int:
                         help="als Arbeiter einrichten (Tablet im Traktor); Standard ist die Frage beim Einrichten")
     parser.add_argument("--master", default="", metavar="URL",
                         help="Adresse des Masters für den Arbeiter, z. B. http://192.168.1.20:8080")
+    parser.add_argument("--code", default="", help="Arbeitercode vom Master (für --arbeiter)")
     parser.add_argument("--still", action="store_true",
                         help="ohne Rückfragen und ohne Browser (Aktualisierung über das Netz)")
     parser.add_argument("--version", action="store_true")
@@ -354,7 +369,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     master_url = args.master
     if master_url and not master_url.startswith("http"):
         master_url = "http://" + master_url
-    code = installieren(args.ziel, args.port, args.trocken, args.still, rolle, master_url)
+    code = installieren(args.ziel, args.port, args.trocken, args.still, rolle, master_url, args.code)
     if getattr(sys, "frozen", False) and not args.trocken and not args.still:
         input("\nEnter zum Schließen ... ")
     return code

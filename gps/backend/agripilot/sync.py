@@ -131,9 +131,12 @@ class SyncClient:
         if self.engine is not None:
             payload["maschinen"] = self.engine.profile_export()
         url = self.config.network.master_url.rstrip("/") + "/api/sync"
+        kopf = ({"X-AgriPilot-Token": self.config.network.sync_token}
+                if self.config.network.sync_token else {})
         try:
-            async with httpx.AsyncClient(timeout=20.0) as client:
-                response = await client.post(url, json=payload)
+            # 60 s: über Mobilfunk mit einem Stapel bearbeiteter Flächen dauert eine Runde.
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                response = await client.post(url, json=payload, headers=kopf)
                 response.raise_for_status()
                 data = response.json()
             apply_changes(self.store, data.get("changes", {}))
@@ -149,7 +152,11 @@ class SyncClient:
             return {"ok": True, **data.get("applied", {})}
         except Exception as exc:  # noqa: BLE001
             self.last_error = str(exc)
-            self.status = f"offline ({exc.__class__.__name__})"
+            code = getattr(getattr(exc, "response", None), "status_code", None)
+            if code in (401, 403):
+                self.status = "Arbeitercode falsch oder fehlt"
+            else:
+                self.status = f"offline ({exc.__class__.__name__})"
             return {"ok": False, "error": str(exc)}
 
     async def stop(self) -> None:

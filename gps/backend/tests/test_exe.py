@@ -57,23 +57,31 @@ class RolleTests(unittest.TestCase):
                 return exe._rolle_erfragen(Path(ordner))
 
     def test_enter_means_master(self):
-        self.assertEqual(self._frage([""]), ("master", ""))
+        self.assertEqual(self._frage([""]), ("master", "", ""))
 
-    def test_a_worker_gives_the_master_address(self):
-        self.assertEqual(self._frage(["a", "192.168.1.20:8080"]),
-                         ("client", "http://192.168.1.20:8080"))
+    def test_a_worker_gives_the_master_address_and_code(self):
+        self.assertEqual(self._frage(["a", "192.168.1.20:8080", "K7M2-9PQX"]),
+                         ("client", "http://192.168.1.20:8080", "K7M2-9PQX"))
 
-    def test_a_worker_may_leave_the_address_for_later(self):
-        self.assertEqual(self._frage(["A", ""]), ("client", ""))
+    def test_a_worker_may_leave_address_and_code_for_later(self):
+        self.assertEqual(self._frage(["A", "", ""]), ("client", "", ""))
 
     def test_an_existing_configuration_is_not_asked_about(self):
-        self.assertEqual(self._frage([], vorhanden=True), ("master", ""))
+        self.assertEqual(self._frage([], vorhanden=True), ("master", "", ""))
+
+    def test_the_master_gets_a_code_the_worker_can_type(self):
+        import re
+        code = exe.neuer_code()
+        self.assertRegex(code, r"^[A-HJ-NP-Z2-9]{4}-[A-HJ-NP-Z2-9]{4}$")
+        self.assertNotEqual(code, exe.neuer_code())
+        config = self._laden(exe.standard_konfiguration("PC", 8080, "master", "", code))
+        self.assertEqual(config.network.sync_token, code)
 
     def test_without_a_keyboard_nothing_is_asked(self):
         stdin = mock.Mock()
         stdin.isatty.return_value = False
         with tempfile.TemporaryDirectory() as ordner, mock.patch.object(sys, "stdin", stdin):
-            self.assertEqual(exe._rolle_erfragen(Path(ordner)), ("master", ""))
+            self.assertEqual(exe._rolle_erfragen(Path(ordner)), ("master", "", ""))
 
 
 class StartdateiTests(unittest.TestCase):

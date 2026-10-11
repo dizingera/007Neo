@@ -101,6 +101,10 @@ class NetworkConfig:
     # need neither a mobile connection nor their own caster account.
     rtcm_relay_port: int = 2102
     use_master_rtcm: bool = True
+    # Arbeitercode: das gemeinsame Geheimnis von Master und Arbeitern. Der Master
+    # verlangt ihn beim Abgleich, wenn er gesetzt ist - und von außen (über einen
+    # Tunnel wie Cloudflare) immer. Im Heimnetz ohne Code läuft der Abgleich wie bisher.
+    sync_token: str = ""
 
 
 @dataclass

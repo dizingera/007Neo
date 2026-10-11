@@ -12,6 +12,7 @@ map ten times a second would saturate the link within a few hectares.
 from __future__ import annotations
 
 import asyncio
+import hmac
 import struct
 import sys
 import contextlib
@@ -366,6 +367,7 @@ class Application:
         return {
             "version": VERSION,
             "adressen": self.eigene_adressen(),
+            "arbeitercode": self.config.network.sync_token if self.config.is_master else "",
             "update_online": (getattr(self, "online_stand", None) or {}).get("neu")
                              if (getattr(self, "online_stand", None) or {}).get("verfuegbar") else None,
             "role": self.config.network.role,
@@ -428,6 +430,20 @@ def create_app(config=None) -> FastAPI:
     api.state.app = application
     engine = application.engine
     store = application.store
+
+    @api.middleware("http")
+    async def von_aussen_nur_der_abgleich(request: Request, call_next):
+        """Was über einen Tunnel hereinkommt, darf nur zum Abgleich.
+
+        Cloudflare (und jeder ähnliche Tunnel) hängt seine Kopfzeilen an jede Anfrage.
+        Wer so ankommt, kommt aus dem Internet - der bekommt den Abgleich (mit Code),
+        aber nicht die Bedienung: Lenkung scharf schalten, Einstellungen, Datenpakete.
+        Im eigenen Netz fällt die Sperre nicht auf.
+        """
+        von_aussen = any(k in request.headers for k in ("cf-connecting-ip", "cf-ray", "x-forwarded-for"))
+        if von_aussen and request.url.path != "/api/sync":
+            return JSONResponse({"detail": "Von außen ist nur der Abgleich erreichbar"}, status_code=403)
+        return await call_next(request)
 
     @api.on_event("startup")
     async def _startup() -> None:
@@ -1062,10 +1078,22 @@ def create_app(config=None) -> FastAPI:
     # -- master sync endpoint ---------------------------------------------
 
     @api.post("/api/sync")
-    async def sync_endpoint(payload: dict = Body(...)) -> dict:
+    async def sync_endpoint(request: Request, payload: dict = Body(...)) -> dict:
         """Called by client tractors. Push their changes, hand back ours."""
         if not config.is_master:
             raise HTTPException(400, "Dieses Gerät ist kein Master")
+        # Mit Code im Heimnetz wie von außen: ohne passenden Code kein Abgleich. Ohne
+        # gesetzten Code bleibt das Heimnetz offen wie bisher, von außen geht dann nichts.
+        gesetzt = config.network.sync_token
+        von_aussen = any(k in request.headers for k in ("cf-connecting-ip", "cf-ray", "x-forwarded-for"))
+        mitgebracht = request.headers.get("x-agripilot-token", "")
+
+        def glatt(code: str) -> bytes:        # getippt wird auf dem Tablet: Groß/Klein, Leerzeichen, Strich egal
+            return "".join(c for c in code.upper() if c.isalnum()).encode()
+
+        if (gesetzt or von_aussen) and not (
+                gesetzt and hmac.compare_digest(glatt(mitgebracht), glatt(gesetzt))):
+            raise HTTPException(401, "Arbeitercode fehlt oder ist falsch")
         device = payload.get("device") or {}
         if device.get("id"):
             store.touch_device(device["id"], device.get("name", device["id"]),

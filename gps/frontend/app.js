@@ -1110,7 +1110,8 @@ function renderDatenRolle() {
   if (!system) return;
   const adressen = (system.adressen || []).join('  ·  ');
   el('datenRolle').textContent = system.role === 'master'
-    ? 'Dieses Gerät ist der Master.' + (adressen ? ` Die Arbeiter tragen als Adresse des Masters ein: ${adressen}` : '')
+    ? 'Dieses Gerät ist der Master.' + (adressen ? ` Die Arbeiter tragen als Adresse des Masters ein: ${adressen}` : '') +
+      (system.arbeitercode ? `\nArbeitercode: ${system.arbeitercode}` : '\nNoch kein Arbeitercode – nötig für den Abgleich von unterwegs (Einstellungen → Netzwerk).')
     : `Dieses Gerät ist ein Arbeiter${system.sync && system.sync.status ? ' · Abgleich: ' + system.sync.status : ''}.`;
 }
 

@@ -304,7 +304,12 @@ GRUPPEN: list[Gruppe] = [
             )),
             Feld("network.device_name", "Name dieses Geräts",
                  hilfe="Erscheint in der Geräteliste und an abgehakten Einbauschritten."),
-            Feld("network.master_url", "Adresse des Masters", hilfe="Nur beim Client."),
+            Feld("network.master_url", "Adresse des Masters",
+                 hilfe="Nur beim Client. Im Heimnetz http://192.168.x.x:8080, von unterwegs "
+                       "die https-Adresse des Tunnels (siehe BEDIENUNG.md)."),
+            Feld("network.sync_token", "Arbeitercode", sofort=True,
+                 hilfe="Master und Arbeiter tragen denselben Code ein. Von außen (Tunnel) "
+                       "kommt ohne ihn niemand an den Abgleich."),
             Feld("network.sync_interval_s", "Abgleich alle", "ganzzahl", einheit="s",
                  minimum=5, maximum=3600),
             Feld("network.rtcm_relay_port", "Port der Korrektur-Weitergabe", "ganzzahl",

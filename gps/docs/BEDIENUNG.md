@@ -464,6 +464,32 @@ Ohne Fragen: `AgriPilot-Setup.exe --arbeiter --master http://192.168.1.20:8080`.
    per USB-Stick, Messenger oder Mail zum Tablet bringen und dort **Datenpaket
    einspielen**.
 
+### Tablets unterwegs (Mobilfunk): Abgleich über das Internet
+
+Im Heimnetz genügt die Adresse `http://192.168.x.x:8080`. Draußen auf dem Acker, mit
+SIM-Karte, erreicht das Tablet den Büro-Rechner nur über einen **Tunnel**. Dafür ist
+kein Router-Eingriff nötig – der Cloudflare-Dienst, der auf dem Büro-Rechner läuft,
+kann das:
+
+1. **Cloudflare Zero Trust** (one.dash.cloudflare.com) → Networks → Tunnels → den
+   Tunnel dieses Rechners → **Public Hostname → Add**: Subdomain z. B. `agripilot`,
+   deine Domain, Dienst **HTTP**, URL **`localhost:8080`**.
+2. **Arbeitercode** am Master: Menü → System zeigt ihn (Einstellungen → Netzwerk →
+   Arbeitercode, falls noch keiner gesetzt ist: z. B. `K7M2-9PQX`). Ein neuer Master
+   bekommt bei der Installation automatisch einen.
+3. **Auf dem Tablet:** Master-Adresse `https://agripilot.deinedomain.de` und denselben
+   Arbeitercode (bei der Installation oder Einstellungen → Netzwerk).
+
+Die Sicherung dahinter: **Von außen ist nur der Abgleich erreichbar** – nicht die
+Oberfläche, nicht die Lenkung, nicht die Einstellungen (jede Anfrage über den Tunnel
+außer dem Abgleich wird abgelehnt), und der Abgleich selbst braucht den Arbeitercode.
+Ohne gesetzten Code lehnt der Master den Abgleich von außen ganz ab. Der Code ist beim
+Tippen nachsichtig (Groß-/Kleinschreibung, Strich und Leerzeichen sind egal). Ist er
+falsch, steht am Tablet „Arbeitercode falsch oder fehlt“. Wer den Code weitergegeben
+hat und ihn ändern will, setzt am Master und an den Tablets einen neuen.
+Der Büro-Rechner muss dafür laufen (nicht im Ruhezustand): Energiesparplan „Ruhezustand:
+nie“.
+
 Beide Wege führen zusammen statt zu überschreiben: je Feld, Spur und Maschine gilt der
 neuere Stand, bearbeitete Flächen mehrerer Geräte werden vereinigt. Ein Paket kann
 deshalb mehrmals oder in beliebiger Reihenfolge eingespielt werden, und was der Fahrer
