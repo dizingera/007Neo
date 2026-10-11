@@ -438,6 +438,33 @@ GPX/GeoJSON/CSV. Die Bezeichnung der nächsten Arbeit (Grubbern, Säen, Spritzen
 wird oben eingetragen und gemerkt; gestartet wird mit **Markieren** in der
 Kabine.
 
+## Online aktualisieren (Menü → System → Aktualisierung)
+
+In der Programmversion (`AgriPilot.exe`) sucht das Programm beim Start und dann alle
+zwölf Stunden von allein nach einer neuen Version. Gibt es eine, steht unter den
+Hinweisen **„Neue Version x.y.z verfügbar“**. **Online nach neuer Version suchen**
+fragt sofort nach und zeigt, was neu ist; **Jetzt aktualisieren** lädt, prüft und
+spielt sie ein.
+
+* **Nichts geschieht von selbst.** Gesucht wird automatisch, eingespielt nur auf
+  deinen Druck.
+* **Nur im Stand und ohne Lenkung.** Fährt der Traktor (über 0,5 m/s) oder ist die
+  Lenkung scharf, lehnt das Programm ab und sagt, was zu tun ist.
+* **Geprüft:** die geladene Datei muss zur veröffentlichten Prüfsumme (SHA-256)
+  passen und ein Windows-Programm sein; sonst wird sie verworfen und nichts
+  verändert.
+* **Danach:** eine laufende Arbeit wird gesichert und danach fortgesetzt, die
+  Lenkung bleibt aus. Das Programm startet in etwa einer Minute neu, die Seite
+  verbindet sich von selbst wieder.
+* **Läuft die neue Version nicht an,** setzt die Installation den vorigen Stand
+  automatisch wieder ein (`AgriPilot.exe.alt`).
+* Das Protokoll steht in `C:\ProgramData\AgriPilot\update.log`. Ohne Netz meldet die
+  Suche das, das Programm arbeitet normal weiter. Abschalten: `update_online: false`
+  in der Konfiguration (Abschnitt `server`).
+
+Die Versionen liegen als **Releases im Repo** (Etikett `agripilot-vX.Y.Z`, Datei
+`AgriPilot-Setup.exe`); veröffentlicht wird mit `python scripts/release.py`.
+
 ## Änderungen einspielen (Menü → System → Aktualisierung)
 
 Ein neuer Stand kommt in drei Schritten auf das Tablet, ohne Terminal und ohne

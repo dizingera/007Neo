@@ -158,8 +158,16 @@ Aufträge bleiben. Windows SmartScreen fragt beim ersten Start, weil die Datei
 nicht signiert ist: „Weitere Informationen“ → „Trotzdem ausführen“. Das Protokoll
 des laufenden Programms steht in `C:\ProgramData\AgriPilot\agripilot.log`.
 Gebaut wird sie mit `python scripts/build_exe.py` (siehe dort). Bei der
-exe-Version gibt es kein „Paket einspielen“ im Menü – aktualisiert wird mit der
-neuen Setup-Datei.
+exe-Version gibt es kein „Paket einspielen“ im Menü – aktualisiert wird **online**
+(Menü → System → Aktualisierung, siehe BEDIENUNG.md) oder mit der neuen
+Setup-Datei.
+
+**Eine neue Version bereitstellen:** Version in `backend/agripilot/__init__.py`
+erhöhen, committen und pushen, dann `python scripts/release.py` (baut, zeigt die
+Prüfsumme und die Anleitung zum Hochladen von Hand) oder
+`python scripts/release.py --veroeffentlichen --notizen "Was neu ist"` mit einem
+Token in `GITHUB_TOKEN`. Das Release ist öffentlich; die Tablets finden es beim
+nächsten Suchen.
 
 **Ohne exe: Doppelklick auf `AgriPilot-installieren.bat`** im Ordner `gps`. Mehr ist nicht
 zu tun: die Datei fragt selbst nach Administratorrechten, installiert Python,

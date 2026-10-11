@@ -227,6 +227,12 @@ class ServerConfig:
     backup_dir: str = ""
     backup_keep: int = 14
 
+    # Aktualisierung über das Netz (nur in der .exe-Version). Gesucht wird von
+    # allein, eingespielt nur auf Druck des Fahrers.
+    update_online: bool = True
+    update_repo: str = "dizingera/007Neo"
+    update_api: str = "https://api.github.com"
+
     @property
     def tls_aktiv(self) -> bool:
         return bool(self.tls_cert and self.tls_key)

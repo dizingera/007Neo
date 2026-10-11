@@ -264,6 +264,9 @@ function updateHud(s) {
                            : 'Wende geplant, liegt aber nicht im Feld – Richtung oder Wendekreis ändern');
   }
   if (headland && headland.hinweis) hint.push(headland.hinweis);
+  if (s.system && s.system.update_online) {
+    hint.push(`Neue Version ${s.system.update_online} verfügbar – Menü → System → Aktualisierung`);
+  }
   if (s.guidance.active && s.guidance.message) hint.push(s.guidance.message);
   // Markieren an, aber jede Sektion automatisch aus: die Maschine steht
   // außerhalb der Grenze (oder auf schon bearbeiteter Fläche). Ohne den Satz
@@ -1100,6 +1103,41 @@ async function renderUpdate() {
     el('updateStand').textContent = 'Stand nicht abrufbar';
   }
 }
+
+/* Online aktualisieren: suchen ist harmlos, einspielen verlangt Stand und ausgeschaltete Lenkung. */
+let onlineNeu = null;
+
+async function onlineSuchen(still) {
+  const info = el('updateOnlineInfo');
+  if (!still) info.textContent = 'Suche …';
+  const antwort = await api('GET', '/api/update/online');
+  if (!antwort) { info.textContent = ''; return; }
+  onlineNeu = antwort.verfuegbar ? antwort.neu : null;
+  el('btnUpdateOnline').hidden = !(antwort.verfuegbar && antwort.als_programm);
+  if (antwort.fehler) info.textContent = antwort.fehler;
+  else if (antwort.verfuegbar) {
+    info.textContent = `Neu: Version ${antwort.neu} (jetzt ${antwort.aktuell}, ${(antwort.groesse / 1e6).toFixed(0)} MB).` +
+      (antwort.notizen ? `\n${antwort.notizen}` : '') +
+      (antwort.als_programm ? '' : '\nEingespielt wird in dieser Installation per Paket oder aus GitHub.');
+  } else info.textContent = `Auf dem neuesten Stand (Version ${antwort.aktuell}).`;
+}
+
+el('btnUpdateSuchen').onclick = () => onlineSuchen(false);
+
+el('btnUpdateOnline').onclick = async () => {
+  if (!onlineNeu) return;
+  if (!confirm(`Auf Version ${onlineNeu} aktualisieren?\n\nDie Lenkung muss aus sein und der Traktor stehen. ` +
+               `Eine laufende Arbeit wird gesichert und danach fortgesetzt. Das Programm startet ` +
+               `dabei neu (eine Minute); geht es schief, wird der vorige Stand wieder eingesetzt.`)) return;
+  const info = el('updateOnlineInfo');
+  info.textContent = `Version ${onlineNeu} wird geladen und geprüft …`;
+  const antwort = await api('POST', '/api/update/online');
+  if (!antwort) { info.textContent = ''; return; }
+  if (antwort.data.schon_aktuell) { info.textContent = 'Schon auf dem neuesten Stand.'; return; }
+  info.textContent = `Version ${antwort.data.version} wird eingespielt. Das Programm startet neu - ` +
+    'diese Seite verbindet sich von selbst wieder (etwa eine Minute).';
+  toast('Aktualisierung läuft – Programm startet neu');
+};
 
 async function dateiAlsBase64(datei) {
   const puffer = await datei.arrayBuffer();

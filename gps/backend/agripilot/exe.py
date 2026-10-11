@@ -107,8 +107,26 @@ class Schritt:
     aktion: Callable[[], None]
 
 
+UPDATE_AUFGABE = "AgriPilot-Update"
+
+
+def setup_starten(pfad: Path) -> None:
+    """Die geladene Setup-Datei als eigene, einmalige Windows-Aufgabe starten.
+
+    Als Kindprozess des laufenden Programms würde sie mit ihm enden: die Aufgabe
+    "AgriPilot" liegt in einem Job-Objekt, und das Anhalten der Aufgabe (erster
+    Schritt der Installation) beendet alles darin. Eine eigene Aufgabe steht
+    daneben und überlebt das.
+    """
+    befehl = f'"{pfad}" --installieren --still'
+    _lauf(["schtasks", "/Create", "/TN", UPDATE_AUFGABE, "/TR", befehl, "/SC", "ONCE",
+           "/ST", "23:59", "/RL", "HIGHEST", "/F"])
+    _lauf(["schtasks", "/Run", "/TN", UPDATE_AUFGABE])
+
+
 def plan(ziel: str, port: int = 8080, quelle: Optional[str] = None,
-         daten: Optional[str] = None, rechnername: Optional[str] = None) -> list[Schritt]:
+         daten: Optional[str] = None, rechnername: Optional[str] = None,
+         still: bool = False) -> list[Schritt]:
     """Die Schritte der Installation, in der Reihenfolge, in der sie laufen."""
     quelle = quelle or sys.executable
     rechnername = rechnername or os.environ.get("COMPUTERNAME", "TABLET")
@@ -126,10 +144,26 @@ def plan(ziel: str, port: int = 8080, quelle: Optional[str] = None,
                f"Where-Object {{ $_.Id -ne {eigene} }} | Stop-Process -Force"], ok_codes=None)
         time.sleep(2.0)       # Port und Datei werden erst jetzt frei
 
+    alt = zielpfad / (EXE_NAME + ".alt")
+
     def kopieren() -> None:
         zielpfad.mkdir(parents=True, exist_ok=True)
         if Path(quelle).resolve() != exe.resolve():
+            if exe.exists():
+                shutil.copy2(exe, alt)       # der bisherige Stand, falls der neue nicht anläuft
             shutil.copy2(quelle, exe)
+
+    def zurueckrollen() -> bool:
+        if not alt.exists():
+            return False
+        _lauf(["schtasks", "/End", "/TN", AUFGABE], ok_codes=None)
+        _lauf(["powershell", "-NoProfile", "-Command",
+               f"Get-Process AgriPilot -ErrorAction SilentlyContinue | "
+               f"Where-Object {{ $_.Id -ne {os.getpid()} }} | Stop-Process -Force"], ok_codes=None)
+        time.sleep(2.0)
+        shutil.copy2(alt, exe)
+        _lauf(["schtasks", "/Run", "/TN", AUFGABE], ok_codes=None)
+        return True
 
     def konfiguration() -> None:
         daten_ordner.mkdir(parents=True, exist_ok=True)
@@ -168,9 +202,19 @@ def plan(ziel: str, port: int = 8080, quelle: Optional[str] = None,
             except Exception:  # noqa: BLE001 - noch nicht oben
                 continue
         else:
-            raise RuntimeError(f"Das Programm meldet sich nach 60 Sekunden nicht. "
+            zurueck = ""
+            try:
+                if zurueckrollen():
+                    zurueck = " Der vorige Stand wurde wieder eingesetzt."
+            except Exception as exc:  # noqa: BLE001
+                zurueck = f" Zurückrollen scheiterte: {exc}"
+            raise RuntimeError(f"Das neue Programm meldet sich nach 60 Sekunden nicht.{zurueck} "
                                f"Protokoll: {daten_ordner / 'agripilot.log'}")
-        os.startfile(f"http://localhost:{port}")  # type: ignore[attr-defined]
+        if not still:
+            os.startfile(f"http://localhost:{port}")  # type: ignore[attr-defined]
+
+    def aufraeumen() -> None:
+        _lauf(["schtasks", "/Delete", "/TN", UPDATE_AUFGABE, "/F"], ok_codes=None)
 
     return [
         Schritt("Laufende Version anhalten", stoppen),
@@ -181,6 +225,7 @@ def plan(ziel: str, port: int = 8080, quelle: Optional[str] = None,
         Schritt("Automatischen Start beim Anmelden eintragen (mit Neustart nach Absturz)", aufgabe),
         Schritt("Symbol 'AgriPilot' auf den Desktop legen", symbol),
         Schritt("Programm starten und Anzeige öffnen", starten),
+        Schritt("Aufräumen", aufraeumen),
     ]
 
 
@@ -203,8 +248,8 @@ def ist_admin() -> bool:
 
 # --------------------------------------------------------------- Aufrufe
 
-def installieren(ziel: str, port: int, trocken: bool) -> int:
-    schritte = plan(ziel, port)
+def installieren(ziel: str, port: int, trocken: bool, still: bool = False) -> int:
+    schritte = plan(ziel, port, still=still)
     if trocken:
         for nummer, schritt in enumerate(schritte, 1):
             print(f"{nummer}. {schritt.text}")
@@ -254,6 +299,8 @@ def main(argv: Optional[list[str]] = None) -> int:
     parser.add_argument("--ziel", default=STANDARD_ZIEL)
     parser.add_argument("--port", type=int, default=8080)
     parser.add_argument("--trocken", action="store_true", help="nur anzeigen, was die Installation täte")
+    parser.add_argument("--still", action="store_true",
+                        help="ohne Rückfragen und ohne Browser (Aktualisierung über das Netz)")
     parser.add_argument("--version", action="store_true")
     args = parser.parse_args(argv)
     if args.version:
@@ -262,7 +309,14 @@ def main(argv: Optional[list[str]] = None) -> int:
         return 0
     if args.dienst:
         return dienst()
-    code = installieren(args.ziel, args.port, args.trocken)
-    if getattr(sys, "frozen", False) and not args.trocken:
+    if args.still:
+        # Gestartet vom laufenden Programm, ohne Fenster: Ausgabe in eine Datei.
+        from . import config as config_module
+        daten = Path(config_module.load().server.data_dir)
+        daten.mkdir(parents=True, exist_ok=True)
+        sys.stdout = sys.stderr = open(daten / "update.log", "a", encoding="utf-8", buffering=1)
+        print(f"\n=== Aktualisierung {time.strftime('%Y-%m-%d %H:%M:%S')} ===")
+    code = installieren(args.ziel, args.port, args.trocken, args.still)
+    if getattr(sys, "frozen", False) and not args.trocken and not args.still:
         input("\nEnter zum Schließen ... ")
     return code

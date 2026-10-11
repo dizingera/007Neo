@@ -32,6 +32,8 @@ from . import export, geraete as geraete_module, imu as imu_module
 from . import recorder as recorder_module, shapefile as shapefile_module, sync
 from . import update as update_module
 from . import backup as backup_module
+from . import onlineupdate as onlineupdate_module
+from . import exe as exe_module
 from .actuators import build_output
 from .coverage import CoverageMap
 from .engine import Engine
@@ -196,6 +198,31 @@ class Application:
 
         self.tasks.append(asyncio.create_task(self._broadcast_loop()))
         self.tasks.append(asyncio.create_task(self._backup_loop()))
+        if self.config.server.update_online and update_module.als_programm():
+            self.tasks.append(asyncio.create_task(self._online_loop()))
+
+    # -- Aktualisierung über das Netz -------------------------------------
+
+    def online_pruefen(self) -> dict:
+        """Neue Version suchen (blockiert kurz: im Faden aufrufen)."""
+        cfg = self.config.server
+        ergebnis, info = onlineupdate_module.suche(VERSION, cfg.update_repo, cfg.update_api)
+        self.online_stand, self.online_info = ergebnis, info
+        ergebnis["geprueft"] = time.time()
+        return ergebnis
+
+    async def _online_loop(self) -> None:
+        """Beim Start (nach einer Minute, das Netz braucht oft etwas) und danach alle zwölf Stunden."""
+        await asyncio.sleep(60)
+        while True:
+            try:
+                ergebnis = await asyncio.to_thread(self.online_pruefen)
+                if ergebnis["verfuegbar"]:
+                    self.engine.note(f"Neue Version {ergebnis['neu']} verfügbar - "
+                                     "Menü → System → Aktualisierung")
+            except Exception as exc:  # noqa: BLE001 - Suchen darf nie etwas mitreißen
+                self.engine.note(f"Update-Suche: {exc}")
+            await asyncio.sleep(12 * 3600)
 
     # -- Sicherung --------------------------------------------------------
 
@@ -324,6 +351,8 @@ class Application:
     def system_status(self) -> dict[str, Any]:
         return {
             "version": VERSION,
+            "update_online": (getattr(self, "online_stand", None) or {}).get("neu")
+                             if (getattr(self, "online_stand", None) or {}).get("verfuegbar") else None,
             "role": self.config.network.role,
             "gnss": {
                 "source": self.config.gnss.source,
@@ -844,6 +873,48 @@ def create_app(config=None) -> FastAPI:
     @api.get("/api/update")
     async def update_stand() -> dict:
         return update_module.stand(VERSION)
+
+    @api.get("/api/update/online")
+    async def update_online_pruefen() -> dict:
+        """Jetzt nachsehen, ob es eine neuere Version gibt."""
+        ergebnis = await asyncio.to_thread(application.online_pruefen)
+        ergebnis["als_programm"] = update_module.als_programm()
+        return ergebnis
+
+    @api.post("/api/update/online")
+    async def update_online_einspielen():
+        """Neue Version laden, prüfen und einspielen - nur im Stand und ohne Lenkung.
+
+        Die Setup-Datei läuft danach als eigene Aufgabe: sie hält das Programm
+        an, ersetzt es, startet es und rollt zurück, wenn es nicht anläuft.
+        """
+        if not update_module.als_programm():
+            raise HTTPException(400, "Das geht nur in der Programmversion (AgriPilot.exe). "
+                                     "Hier: Paket einspielen oder aus GitHub holen.")
+        if application.steering.armed:
+            raise HTTPException(409, "Erst die Lenkung ausschalten")
+        fix = engine.fix
+        if fix is not None and fix.valid and fix.speed_ms > 0.5:
+            raise HTTPException(409, "Erst anhalten - während der Fahrt wird nicht aktualisiert")
+        ergebnis = await asyncio.to_thread(application.online_pruefen)
+        if ergebnis["fehler"]:
+            raise HTTPException(400, ergebnis["fehler"])
+        info = getattr(application, "online_info", None)
+        if not ergebnis["verfuegbar"] or info is None:
+            return ok({"schon_aktuell": True, "version": VERSION})
+        try:
+            pfad = await asyncio.to_thread(
+                onlineupdate_module.herunterladen, info, Path(config.server.data_dir) / "update")
+        except onlineupdate_module.OnlineFehler as exc:
+            raise HTTPException(400, str(exc)) from exc
+        application.steering.disarm("Aktualisierung")
+        engine.suspend_job()          # die Arbeit läuft danach weiter
+        engine.note(f"Aktualisierung auf {ergebnis['neu']} wird eingespielt - das Programm startet neu")
+        try:
+            await asyncio.to_thread(exe_module.setup_starten, pfad)
+        except RuntimeError as exc:
+            raise HTTPException(500, f"Die Aktualisierung ließ sich nicht starten: {exc}") from exc
+        return ok({"version": ergebnis["neu"], "datei": str(pfad)})
 
     @api.post("/api/update/paket")
     async def update_paket(payload: dict = Body(...)):

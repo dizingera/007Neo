@@ -48,7 +48,8 @@ class PlanTests(unittest.TestCase):
     def test_the_plan_names_every_step_in_order(self):
         texte = [s.text for s in exe.plan(r"C:\AgriPilot")]
         self.assertTrue(texte[0].startswith("Laufende Version anhalten"))
-        self.assertTrue(texte[-1].startswith("Programm starten"))
+        self.assertTrue(texte[-2].startswith("Programm starten"))
+        self.assertEqual(texte[-1], "Aufräumen")
         self.assertTrue(any("Firewall" in t for t in texte))
         self.assertTrue(any("Neustart nach Absturz" in t for t in texte))
 
@@ -82,6 +83,33 @@ class PlanTests(unittest.TestCase):
                     s.aktion()
             self.assertEqual((ziel / "AgriPilot.exe").read_bytes(), b"MZ-programm")
             self.assertIn("--dienst", (ziel / "start_leise.vbs").read_text(encoding="ascii"))
+
+    def test_a_new_version_that_does_not_start_is_rolled_back(self):
+        with tempfile.TemporaryDirectory() as ordner:
+            quelle = Path(ordner) / "neu.exe"
+            quelle.write_bytes(b"MZ-neu")
+            ziel = Path(ordner) / "AgriPilot"
+            ziel.mkdir()
+            (ziel / "AgriPilot.exe").write_bytes(b"MZ-alt")
+            schritte = {s.text.split(" ")[0]: s for s in
+                        exe.plan(str(ziel), quelle=str(quelle), daten=str(Path(ordner) / "d"),
+                                 still=True)}
+            kopieren = [s for s in exe.plan(str(ziel), quelle=str(quelle),
+                                            daten=str(Path(ordner) / "d"), still=True)
+                        if s.text.startswith("Programm nach")][0]
+            starten = [s for s in exe.plan(str(ziel), quelle=str(quelle),
+                                           daten=str(Path(ordner) / "d"), still=True)
+                       if s.text.startswith("Programm starten")][0]
+            kopieren.aktion()
+            self.assertEqual((ziel / "AgriPilot.exe").read_bytes(), b"MZ-neu")
+            self.assertEqual((ziel / "AgriPilot.exe.alt").read_bytes(), b"MZ-alt")
+            with mock.patch.object(exe, "_lauf", return_value=0), \
+                    mock.patch.object(exe.time, "sleep"), \
+                    mock.patch.object(exe.urllib.request, "urlopen", side_effect=OSError("nichts")):
+                with self.assertRaises(RuntimeError) as fehler:
+                    starten.aktion()
+            self.assertIn("vorige Stand wurde wieder eingesetzt", str(fehler.exception))
+            self.assertEqual((ziel / "AgriPilot.exe").read_bytes(), b"MZ-alt")
 
     def test_dry_run_touches_nothing(self):
         with mock.patch.object(exe, "_lauf") as lauf, mock.patch("builtins.print"):
