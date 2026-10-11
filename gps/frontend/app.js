@@ -1104,6 +1104,48 @@ async function renderUpdate() {
   }
 }
 
+/* Datenpaket: Master -> Arbeiter als Datei. */
+function renderDatenRolle() {
+  const system = state.live && state.live.system;
+  if (!system) return;
+  const adressen = (system.adressen || []).join('  ·  ');
+  el('datenRolle').textContent = system.role === 'master'
+    ? 'Dieses Gerät ist der Master.' + (adressen ? ` Die Arbeiter tragen als Adresse des Masters ein: ${adressen}` : '')
+    : `Dieses Gerät ist ein Arbeiter${system.sync && system.sync.status ? ' · Abgleich: ' + system.sync.status : ''}.`;
+}
+
+el('btnDatenExport').onclick = async () => {
+  const mit = el('datenMitArbeiten').checked ? 1 : 0;
+  const antwort = await fetch(`/api/daten/export?mit_arbeiten=${mit}`);
+  if (!antwort.ok) { toast('Datenpaket konnte nicht erstellt werden', true); return; }
+  const blob = await antwort.blob();
+  const name = (antwort.headers.get('Content-Disposition') || '').match(/filename="([^"]+)"/);
+  const link = document.createElement('a');
+  link.href = URL.createObjectURL(blob);
+  link.download = name ? name[1] : 'agripilot-daten.zip';
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(link.href), 10000);
+  el('datenInfo').textContent = `${link.download} erstellt (${(blob.size / 1024).toFixed(0)} KB) – im Download-Ordner.`;
+};
+
+el('datenImport').onchange = async (event) => {
+  const datei = event.target.files[0];
+  event.target.value = '';
+  if (!datei) return;
+  const info = el('datenInfo');
+  info.textContent = `${datei.name} wird eingespielt …`;
+  const antwort = await api('POST', '/api/daten/import', { zip: await dateiAlsBase64(datei) });
+  if (!antwort) { info.textContent = ''; return; }
+  const e = antwort.data;
+  const m = e.maschinen.neu + e.maschinen.aktualisiert;
+  info.textContent = `Eingespielt${e.von ? ' von ' + e.von : ''}: ${e.felder} Felder, ${e.spuren} Spuren, ` +
+    `${m} Maschinen${e.arbeiten ? ', ' + e.arbeiten + ' Arbeiten' : ''}.`;
+  toast('Datenpaket eingespielt');
+  refreshLists();
+};
+
 /* Online aktualisieren: suchen ist harmlos, einspielen verlangt Stand und ausgeschaltete Lenkung. */
 let onlineNeu = null;
 
@@ -1522,6 +1564,7 @@ el('btnBackup').onclick = async () => {
 
 function renderSystem() {
   renderBackup();
+  renderDatenRolle();
   const system = state.live && state.live.system;
   const host = el('systemList');
   if (!system) { host.innerHTML = '<p class="note">Keine Daten.</p>'; return; }

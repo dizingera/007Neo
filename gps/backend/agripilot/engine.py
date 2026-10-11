@@ -171,7 +171,9 @@ class Engine:
         profile = self.store.get_setting("vehicle_profiles") or []
         aktiv = self.store.get_setting("vehicle_profile_active") or ""
         if not profile:
-            eintrag = {"id": storage.new_id(), **asdict(self.profile)}
+            # Feste Kennung: jedes Gerät legt beim ersten Start so eine Maschine an, und mit
+            # zufälligen Kennungen hätte der Master nach dem Abgleich eine je Tablet.
+            eintrag = {"id": "standard", **asdict(self.profile)}
             profile = [eintrag]
             aktiv = eintrag["id"]
             self.store.set_setting("vehicle_profiles", profile)
@@ -187,7 +189,7 @@ class Engine:
         werte = asdict(self.profile)
         werte.update({k: v for k, v in (values or {}).items() if k in fields})
         werte["name"] = name
-        neu = {"id": storage.new_id(), **asdict(VehicleProfile(**werte))}
+        neu = {"id": storage.new_id(), **asdict(VehicleProfile(**werte)), "stand": time.time()}
         profile = [p for p in self.list_profiles()]
         for p in profile:
             p.pop("aktiv", None)
@@ -203,7 +205,7 @@ class Engine:
             raise KeyError("Maschine nicht gefunden")
         self.store.set_setting("vehicle_profile_active", profile_id)
         werte = {k: v for k, v in eintrag.items() if k in VehicleProfile.__dataclass_fields__}
-        self.update_profile(werte)
+        self.update_profile(werte, stempeln=False)    # Auswählen ändert die Maschine nicht
         self.note(f"Maschine: {self.profile.name}")
         return self.profile
 
@@ -218,10 +220,14 @@ class Engine:
         for p in rest:
             p.pop("aktiv", None)
         self.store.set_setting("vehicle_profiles", rest)
+        # Merken, dass sie gelöscht wurde - sonst bringt der nächste Abgleich sie zurück.
+        grab = self.store.get_setting("vehicle_profiles_deleted") or {}
+        grab[profile_id] = time.time()
+        self.store.set_setting("vehicle_profiles_deleted", grab)
         if war_aktiv:
             self.select_profile(rest[0]["id"])
 
-    def update_profile(self, values: dict) -> VehicleProfile:
+    def update_profile(self, values: dict, stempeln: bool = True) -> VehicleProfile:
         fields = VehicleProfile.__dataclass_fields__
         current = asdict(self.profile)
         current.update({k: v for k, v in values.items() if k in fields})
@@ -231,8 +237,10 @@ class Engine:
         profile = self.store.get_setting("vehicle_profiles") or []
         aktiv = self.store.get_setting("vehicle_profile_active") or ""
         if profile and any(p["id"] == aktiv for p in profile):
+            stand = {"stand": time.time()} if stempeln else {}
             self.store.set_setting("vehicle_profiles", [
-                {**current, "id": aktiv} if p["id"] == aktiv else p for p in profile])
+                {**p, **current, "id": aktiv, **stand} if p["id"] == aktiv else p
+                for p in profile])
         self.sections = build_sections(self.profile.width_m, self.profile.sections)
         if self.line is not None:
             # Changing the working width changes the pass spacing, and with it
@@ -243,6 +251,71 @@ class Engine:
         # schleppen hieße, mit der Geometrie des vorigen zu markieren.
         self.implement_heading.reset(self.heading)
         return self.profile
+
+    # -- Maschinen zwischen Geräten teilen ---------------------------------
+
+    def profile_export(self) -> dict:
+        """Die Maschinenliste für den Abgleich mit anderen Geräten (Master/Arbeiter, Datenpaket)."""
+        maschinen = []
+        for p in self.list_profiles():
+            p = dict(p)
+            p.pop("aktiv", None)
+            maschinen.append(p)
+        return {"maschinen": maschinen,
+                "geloescht": dict(self.store.get_setting("vehicle_profiles_deleted") or {})}
+
+    def profile_merge(self, eingang: dict) -> dict:
+        """Maschinen eines anderen Geräts übernehmen: je Maschine gilt die neuere.
+
+        Neue kommen dazu, geänderte ersetzen die ältere Fassung, gelöschte
+        verschwinden - aber nie die letzte, und die gerade gewählte Maschine
+        bleibt gewählt (ihre Werte werden neu geladen, falls sie sich geändert haben).
+        """
+        felder = VehicleProfile.__dataclass_fields__
+        lokal = {}
+        for p in self.list_profiles():
+            p = dict(p)
+            p.pop("aktiv", None)
+            lokal[p["id"]] = p
+        aktiv = self.store.get_setting("vehicle_profile_active") or ""
+        grab = dict(self.store.get_setting("vehicle_profiles_deleted") or {})
+        for kennung, zeit in (eingang.get("geloescht") or {}).items():
+            grab[kennung] = max(float(zeit or 0.0), float(grab.get(kennung, 0.0)))
+        zaehler = {"neu": 0, "aktualisiert": 0, "entfernt": 0}
+        for p in eingang.get("maschinen") or []:
+            if not isinstance(p, dict) or not p.get("id"):
+                continue
+            stand = float(p.get("stand") or 0.0)
+            if float(grab.get(p["id"], 0.0)) >= stand and p["id"] in grab:
+                continue                                   # die Löschung ist neuer
+            sauber = {"id": str(p["id"]), "stand": stand,
+                      **{k: v for k, v in p.items() if k in felder}}
+            alt = lokal.get(p["id"])
+            if alt is None:
+                lokal[p["id"]] = sauber
+                zaehler["neu"] += 1
+            elif stand > float(alt.get("stand") or 0.0):
+                lokal[p["id"]] = sauber
+                zaehler["aktualisiert"] += 1
+        for kennung, zeit in grab.items():
+            alt = lokal.get(kennung)
+            if alt is not None and float(alt.get("stand") or 0.0) <= float(zeit) and len(lokal) > 1:
+                del lokal[kennung]
+                zaehler["entfernt"] += 1
+        if sum(zaehler.values()) == 0 and grab == (self.store.get_setting("vehicle_profiles_deleted") or {}):
+            return zaehler
+        liste = list(lokal.values())
+        self.store.set_setting("vehicle_profiles", liste)
+        self.store.set_setting("vehicle_profiles_deleted", grab)
+        if aktiv not in lokal:
+            aktiv = liste[0]["id"]
+        self.store.set_setting("vehicle_profile_active", aktiv)
+        # Die gewählte Maschine neu laden: ihre Werte können sich geändert haben.
+        eintrag = lokal[aktiv]
+        werte = {k: v for k, v in eintrag.items() if k in felder}
+        if werte != {k: v for k, v in asdict(self.profile).items() if k in felder}:
+            self.update_profile(werte, stempeln=False)
+        return zaehler
 
     def update_headland(self, values: dict) -> headland_module.HeadlandSettings:
         """Vorgewende und Wendemuster ändern.

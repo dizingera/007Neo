@@ -24,6 +24,58 @@ class StandardKonfigurationTests(unittest.TestCase):
         self.assertFalse(config.steering.enabled)             # die Lenkung bleibt ab Werk aus
 
 
+class RolleTests(unittest.TestCase):
+    def _laden(self, text):
+        with tempfile.TemporaryDirectory() as ordner:
+            pfad = Path(ordner) / "config.yaml"
+            pfad.write_text(text, encoding="utf-8")
+            return config_module.load(pfad)
+
+    def test_a_worker_configuration_names_the_master(self):
+        config = self._laden(exe.standard_konfiguration(
+            "TABLET-2", 8080, "client", "http://192.168.1.20:8080"))
+        self.assertEqual(config.network.role, "client")
+        self.assertEqual(config.network.master_url, "http://192.168.1.20:8080")
+        self.assertFalse(config.is_master)
+
+    def test_a_worker_without_an_address_keeps_the_default_to_be_set_later(self):
+        config = self._laden(exe.standard_konfiguration("TABLET-2", 8080, "client"))
+        self.assertEqual(config.network.role, "client")
+
+    def test_the_master_is_the_default(self):
+        self.assertTrue(self._laden(exe.standard_konfiguration("PC")).is_master)
+
+    def _frage(self, antworten, vorhanden=False):
+        with tempfile.TemporaryDirectory() as ordner:
+            if vorhanden:
+                (Path(ordner) / "config.yaml").write_text("x: 1\n", encoding="utf-8")
+            stdin = mock.Mock()
+            stdin.isatty.return_value = True
+            with mock.patch.object(sys, "stdin", stdin), \
+                    mock.patch("builtins.input", side_effect=antworten), \
+                    mock.patch("builtins.print"):
+                return exe._rolle_erfragen(Path(ordner))
+
+    def test_enter_means_master(self):
+        self.assertEqual(self._frage([""]), ("master", ""))
+
+    def test_a_worker_gives_the_master_address(self):
+        self.assertEqual(self._frage(["a", "192.168.1.20:8080"]),
+                         ("client", "http://192.168.1.20:8080"))
+
+    def test_a_worker_may_leave_the_address_for_later(self):
+        self.assertEqual(self._frage(["A", ""]), ("client", ""))
+
+    def test_an_existing_configuration_is_not_asked_about(self):
+        self.assertEqual(self._frage([], vorhanden=True), ("master", ""))
+
+    def test_without_a_keyboard_nothing_is_asked(self):
+        stdin = mock.Mock()
+        stdin.isatty.return_value = False
+        with tempfile.TemporaryDirectory() as ordner, mock.patch.object(sys, "stdin", stdin):
+            self.assertEqual(exe._rolle_erfragen(Path(ordner)), ("master", ""))
+
+
 class StartdateiTests(unittest.TestCase):
     def test_vbs_runs_hidden_waits_and_passes_the_exit_code_on(self):
         text = exe.start_vbs(r"C:\AgriPilot\AgriPilot.exe")

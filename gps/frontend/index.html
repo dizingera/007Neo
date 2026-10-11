@@ -341,6 +341,21 @@
       sind bei 3 m Antennenhöhe schon 5 cm Dauerversatz in jeder Spur.</p>
     <div class="list" id="systemList"></div>
 
+    <h3 class="abschnitt">Daten zwischen Master und Arbeitern</h3>
+    <p class="note" id="datenRolle"></p>
+    <div class="row">
+      <button id="btnDatenExport" class="primary">Datenpaket erstellen (.zip)</button>
+      <label class="switch"><input type="checkbox" id="datenMitArbeiten">
+        mit bearbeiteten Flächen</label>
+      <label class="button" for="datenImport">Datenpaket einspielen (.zip)</label>
+      <input type="file" id="datenImport" accept=".zip" hidden>
+    </div>
+    <p class="note">Das Paket enthält Felder (Umrisse), Spuren und Maschinen. Auf dem Master
+      erstellen, per USB-Stick, Messenger oder Mail zum Tablet bringen und dort einspielen –
+      es überschreibt nichts, was auf dem Tablet neuer ist. Sind beide im selben WLAN, geht es
+      ohne Datei: der Abgleich läuft von selbst (Einstellungen → Rolle).</p>
+    <p class="note" id="datenInfo" role="status" aria-atomic="true"></p>
+
     <h3 class="abschnitt">Aktualisierung</h3>
     <div class="row">
       <span class="note" id="updateStand" role="status" aria-atomic="true">–</span>

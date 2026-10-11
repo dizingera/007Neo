@@ -32,9 +32,16 @@ EXE_NAME = "AgriPilot.exe"
 
 # ------------------------------------------------------------- Bausteine
 
-def standard_konfiguration(rechnername: str, port: int = 8080) -> str:
-    """Erste Konfiguration. Wer sie schon hat, behält seine (siehe plan())."""
-    return f"""# AgriPilot - Windows-Tablet in der Kabine.
+def standard_konfiguration(rechnername: str, port: int = 8080, rolle: str = "master",
+                           master_url: str = "") -> str:
+    """Erste Konfiguration. Wer sie schon hat, behält seine (siehe plan()).
+
+    ``rolle``: "master" (der Rechner im Büro: erfasst Felder, Maschinen, Umrisse und
+    schickt sie an die Arbeiter) oder "client" (ein Arbeiter: das Tablet im Traktor,
+    das vom Master bekommt, was der erfasst hat).
+    """
+    master_zeile = f"  master_url: {master_url}\n" if master_url else ""
+    return f"""# AgriPilot - {"Master (Büro)" if rolle == "master" else "Arbeiter (Traktor)"}.
 # Anschlüsse und Kanäle findet das Programm selbst: Menü -> System -> Geräte suchen.
 
 gnss:
@@ -62,8 +69,8 @@ corrections:
   send_gga: true
 
 network:
-  role: master
-  device_id: {rechnername}
+  role: {rolle}
+{master_zeile}  device_id: {rechnername}
   device_name: {rechnername}
   rtcm_relay_port: 2102
 
@@ -126,7 +133,7 @@ def setup_starten(pfad: Path) -> None:
 
 def plan(ziel: str, port: int = 8080, quelle: Optional[str] = None,
          daten: Optional[str] = None, rechnername: Optional[str] = None,
-         still: bool = False) -> list[Schritt]:
+         still: bool = False, rolle: str = "master", master_url: str = "") -> list[Schritt]:
     """Die Schritte der Installation, in der Reihenfolge, in der sie laufen."""
     quelle = quelle or sys.executable
     rechnername = rechnername or os.environ.get("COMPUTERNAME", "TABLET")
@@ -168,7 +175,8 @@ def plan(ziel: str, port: int = 8080, quelle: Optional[str] = None,
     def konfiguration() -> None:
         daten_ordner.mkdir(parents=True, exist_ok=True)
         if not konfig.exists():
-            konfig.write_text(standard_konfiguration(rechnername, port), encoding="utf-8")
+            konfig.write_text(standard_konfiguration(rechnername, port, rolle, master_url),
+                              encoding="utf-8")
 
     def firewall() -> None:
         regel = f"AgriPilot {port}"
@@ -248,8 +256,26 @@ def ist_admin() -> bool:
 
 # --------------------------------------------------------------- Aufrufe
 
-def installieren(ziel: str, port: int, trocken: bool, still: bool = False) -> int:
-    schritte = plan(ziel, port, still=still)
+def _rolle_erfragen(daten_ordner: Path) -> tuple[str, str]:
+    """Master oder Arbeiter? Nur beim ersten Einrichten und nur mit Tastatur davor."""
+    if (daten_ordner / "config.yaml").exists() or not sys.stdin or not sys.stdin.isatty():
+        return "master", ""
+    print("Ist dieses Gerät der MASTER oder ein ARBEITER?")
+    print("  M = Master: der Rechner im Büro. Hier werden Felder, Maschinen und Umrisse erfasst.")
+    print("  A = Arbeiter: das Tablet im Traktor. Es bekommt vom Master, was der erfasst hat.")
+    wahl = input("[M/A] (Enter = M): ").strip().lower()
+    if not wahl.startswith("a"):
+        return "master", ""
+    url = input("Adresse des Masters, z. B. http://192.168.1.20:8080\n"
+                "(steht beim Master unter Menü → System; Enter = später eintragen): ").strip()
+    if url and not url.startswith("http"):
+        url = "http://" + url
+    return "client", url
+
+
+def installieren(ziel: str, port: int, trocken: bool, still: bool = False,
+                 rolle: Optional[str] = None, master_url: str = "") -> int:
+    schritte = plan(ziel, port, still=still, rolle=rolle or "master", master_url=master_url)
     if trocken:
         for nummer, schritt in enumerate(schritte, 1):
             print(f"{nummer}. {schritt.text}")
@@ -263,6 +289,10 @@ def installieren(ziel: str, port: int, trocken: bool, still: bool = False) -> in
         ctypes.windll.shell32.ShellExecuteW(  # type: ignore[attr-defined]
             None, "runas", sys.executable, " ".join(f'"{a}"' for a in sys.argv[1:]), None, 1)
         return 0
+    if rolle is None and not still:
+        daten_ordner = Path(os.environ.get("PROGRAMDATA", r"C:\ProgramData")) / "AgriPilot"
+        rolle, master_url = _rolle_erfragen(daten_ordner)
+        schritte = plan(ziel, port, still=still, rolle=rolle, master_url=master_url)
     print("AgriPilot wird eingerichtet.\n")
     for nummer, schritt in enumerate(schritte, 1):
         print(f"[{nummer}/{len(schritte)}] {schritt.text} ...", flush=True)
@@ -299,6 +329,10 @@ def main(argv: Optional[list[str]] = None) -> int:
     parser.add_argument("--ziel", default=STANDARD_ZIEL)
     parser.add_argument("--port", type=int, default=8080)
     parser.add_argument("--trocken", action="store_true", help="nur anzeigen, was die Installation täte")
+    parser.add_argument("--arbeiter", action="store_true",
+                        help="als Arbeiter einrichten (Tablet im Traktor); Standard ist die Frage beim Einrichten")
+    parser.add_argument("--master", default="", metavar="URL",
+                        help="Adresse des Masters für den Arbeiter, z. B. http://192.168.1.20:8080")
     parser.add_argument("--still", action="store_true",
                         help="ohne Rückfragen und ohne Browser (Aktualisierung über das Netz)")
     parser.add_argument("--version", action="store_true")
@@ -316,7 +350,11 @@ def main(argv: Optional[list[str]] = None) -> int:
         daten.mkdir(parents=True, exist_ok=True)
         sys.stdout = sys.stderr = open(daten / "update.log", "a", encoding="utf-8", buffering=1)
         print(f"\n=== Aktualisierung {time.strftime('%Y-%m-%d %H:%M:%S')} ===")
-    code = installieren(args.ziel, args.port, args.trocken, args.still)
+    rolle = "client" if (args.arbeiter or args.master) else None
+    master_url = args.master
+    if master_url and not master_url.startswith("http"):
+        master_url = "http://" + master_url
+    code = installieren(args.ziel, args.port, args.trocken, args.still, rolle, master_url)
     if getattr(sys, "frozen", False) and not args.trocken and not args.still:
         input("\nEnter zum Schließen ... ")
     return code

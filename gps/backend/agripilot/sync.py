@@ -87,9 +87,10 @@ def _merge_job_coverage(store: Storage, record: dict) -> dict:
 class SyncClient:
     """Runs on a client Pi: pushes local changes, pulls the master's."""
 
-    def __init__(self, config, store: Storage) -> None:
+    def __init__(self, config, store: Storage, engine=None) -> None:
         self.config = config
         self.store = store
+        self.engine = engine         # für die Maschinenliste; ohne sie gleichen nur die Tabellen ab
         self.running = False
         self.status = "aus"
         self.last_success: Optional[float] = None
@@ -127,6 +128,8 @@ class SyncClient:
             "since": since,
             "changes": collect_changes(self.store, since),
         }
+        if self.engine is not None:
+            payload["maschinen"] = self.engine.profile_export()
         url = self.config.network.master_url.rstrip("/") + "/api/sync"
         try:
             async with httpx.AsyncClient(timeout=20.0) as client:
@@ -134,6 +137,8 @@ class SyncClient:
                 response.raise_for_status()
                 data = response.json()
             apply_changes(self.store, data.get("changes", {}))
+            if self.engine is not None and data.get("maschinen"):
+                self.engine.profile_merge(data["maschinen"])
             # Advance only on success, so a failed round is simply retried with
             # the same window rather than losing rows.
             self.cursor = data.get("server_time", time.time())

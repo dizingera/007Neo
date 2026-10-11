@@ -34,6 +34,7 @@ from . import update as update_module
 from . import backup as backup_module
 from . import onlineupdate as onlineupdate_module
 from . import exe as exe_module
+from . import teilen as teilen_module
 from .actuators import build_output
 from .coverage import CoverageMap
 from .engine import Engine
@@ -193,7 +194,7 @@ class Application:
                     lambda daten: self.source.write_rtcm(daten)
                 )
                 self.tasks.append(asyncio.create_task(self.rtcm_client.run()))
-            self.sync_client = sync.SyncClient(cfg, self.store)
+            self.sync_client = sync.SyncClient(cfg, self.store, self.engine)
             self.tasks.append(asyncio.create_task(self.sync_client.run()))
 
         self.tasks.append(asyncio.create_task(self._broadcast_loop()))
@@ -202,6 +203,19 @@ class Application:
             self.tasks.append(asyncio.create_task(self._online_loop()))
 
     # -- Aktualisierung über das Netz -------------------------------------
+
+    def eigene_adressen(self) -> list[str]:
+        """Unter welchen Adressen die Arbeiter diesen Rechner im Netz erreichen."""
+        import socket
+        gefunden: list[str] = []
+        try:
+            for eintrag in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET):
+                ip = eintrag[4][0]
+                if not ip.startswith(("127.", "169.254.")) and ip not in gefunden:
+                    gefunden.append(ip)
+        except OSError:
+            pass
+        return [f"http://{ip}:{self.config.server.port}" for ip in gefunden]
 
     def online_pruefen(self) -> dict:
         """Neue Version suchen (blockiert kurz: im Faden aufrufen)."""
@@ -351,6 +365,7 @@ class Application:
     def system_status(self) -> dict[str, Any]:
         return {
             "version": VERSION,
+            "adressen": self.eigene_adressen(),
             "update_online": (getattr(self, "online_stand", None) or {}).get("neu")
                              if (getattr(self, "online_stand", None) or {}).get("verfuegbar") else None,
             "role": self.config.network.role,
@@ -1056,12 +1071,44 @@ def create_app(config=None) -> FastAPI:
             store.touch_device(device["id"], device.get("name", device["id"]),
                                device.get("role", "client"))
         applied = sync.apply_changes(store, payload.get("changes", {}))
+        if payload.get("maschinen"):
+            engine.profile_merge(payload["maschinen"])
         since = float(payload.get("since", 0.0))
         return {
             "server_time": time.time(),
             "applied": applied,
             "changes": sync.collect_changes(store, since),
+            "maschinen": engine.profile_export(),
         }
+
+    # -- Datenpaket: Master -> Arbeiter als Datei --------------------------
+
+    @api.get("/api/daten/export")
+    async def daten_export(mit_arbeiten: int = 0):
+        """Felder, Spuren und Maschinen als Zip - zum Mitnehmen oder Verschicken."""
+        inhalt = await asyncio.to_thread(
+            teilen_module.paket_bauen, store, engine,
+            config.network.device_name or config.network.device_id, bool(mit_arbeiten))
+        name = time.strftime("agripilot-daten-%Y%m%d-%H%M.zip")
+        return Response(inhalt, media_type="application/zip",
+                        headers={"Content-Disposition": f'attachment; filename="{name}"'})
+
+    @api.post("/api/daten/import")
+    async def daten_import(payload: dict = Body(...)):
+        """Ein Datenpaket zusammenführen: je Datensatz gilt der neuere."""
+        import base64
+        try:
+            daten = base64.b64decode(payload.get("zip") or "")
+        except (ValueError, TypeError) as exc:
+            raise HTTPException(400, f"Paket nicht lesbar: {exc}") from exc
+        try:
+            ergebnis = await asyncio.to_thread(teilen_module.paket_einspielen, store, engine, daten)
+        except teilen_module.PaketFehler as exc:
+            raise HTTPException(400, str(exc)) from exc
+        engine.note(f"Datenpaket von {ergebnis['von'] or 'unbekannt'} eingespielt: "
+                    f"{ergebnis['felder']} Felder, {ergebnis['spuren']} Spuren, "
+                    f"{ergebnis['maschinen']['neu'] + ergebnis['maschinen']['aktualisiert']} Maschinen")
+        return ok(ergebnis)
 
     @api.get("/ca.crt")
     async def ca_zertifikat():

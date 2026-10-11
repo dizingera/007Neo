@@ -438,6 +438,39 @@ GPX/GeoJSON/CSV. Die Bezeichnung der nächsten Arbeit (Grubbern, Säen, Spritzen
 wird oben eingetragen und gemerkt; gestartet wird mit **Markieren** in der
 Kabine.
 
+## Master und Arbeiter: Daten an die Tablets schicken
+
+**Der Master** ist dieser Rechner im Büro: hier erfasst du Felder, legst Maschinen an,
+spielst Umrisse aus dem Flächenantrag ein. **Die Arbeiter** sind die Tablets in den
+Traktoren: sie bekommen, was der Master erfasst hat, und melden ihre Arbeiten
+zurück.
+
+**Einrichten.** Beim ersten Start von `AgriPilot-Setup.exe` fragt die Installation
+„Master oder Arbeiter?“. Auf dem Büro-Rechner Enter (Master), auf den Tablets **A**
+und die Adresse des Masters. Die Adresse steht beim Master unter Menü → System
+(Abschnitt „Daten zwischen Master und Arbeitern“), z. B. `http://192.168.1.20:8080`.
+Nachträglich ändern: Menü → System → Einstellungen → Rolle und Adresse des Masters.
+Ohne Fragen: `AgriPilot-Setup.exe --arbeiter --master http://192.168.1.20:8080`.
+
+**Zwei Wege zu den Tablets:**
+
+1. **Über das Netz, von allein.** Sind Master und Tablet im selben WLAN (oder per VPN
+   verbunden), gleichen sie alle 30 Sekunden ab: Felder, Umrisse, Spuren, Maschinen und
+   fertige Arbeiten. Der Master gibt auch die RTK-Korrekturen weiter. Draußen auf dem
+   Acker ohne Verbindung zum Büro arbeitet das Tablet einfach weiter und gleicht
+   später ab.
+2. **Als Datei.** Menü → System → **Datenpaket erstellen (.zip)** auf dem Master
+   (Haken „mit bearbeiteten Flächen“, wenn auch die Arbeiten mit sollen), die Datei
+   per USB-Stick, Messenger oder Mail zum Tablet bringen und dort **Datenpaket
+   einspielen**.
+
+Beide Wege führen zusammen statt zu überschreiben: je Feld, Spur und Maschine gilt der
+neuere Stand, bearbeitete Flächen mehrerer Geräte werden vereinigt. Ein Paket kann
+deshalb mehrmals oder in beliebiger Reihenfolge eingespielt werden, und was der Fahrer
+auf dem Tablet neu gemessen hat (z. B. die Antennenhöhe seiner Maschine), geht beim
+nächsten Abgleich zum Master und wird nicht vom älteren Stand überschrieben. Wird eine
+Maschine auf einem Gerät gelöscht, verschwindet sie überall.
+
 ## Online aktualisieren (Menü → System → Aktualisierung)
 
 In der Programmversion (`AgriPilot.exe`) sucht das Programm beim Start und dann alle
