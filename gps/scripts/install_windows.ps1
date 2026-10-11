@@ -145,8 +145,12 @@ cd /d "$Ziel\backend"
 # jemand daran denken muss.
 $aktion  = New-ScheduledTaskAction -Execute $start
 $ausloes = New-ScheduledTaskTrigger -AtLogOn
+# Stürzt das Programm ab (Ausstieg mit Fehlercode), startet Windows die Aufgabe
+# nach einer Minute von selbst neu. Ein gewollter Neustart über die Oberfläche
+# endet mit Code 0 und löst das nicht aus.
 $option  = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries `
-             -DontStopIfGoingOnBatteries -ExecutionTimeLimit ([TimeSpan]::Zero)
+             -DontStopIfGoingOnBatteries -ExecutionTimeLimit ([TimeSpan]::Zero) `
+             -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1)
 Register-ScheduledTask -TaskName "AgriPilot" -Action $aktion -Trigger $ausloes `
     -Settings $option -Force -RunLevel Highest | Out-Null
 

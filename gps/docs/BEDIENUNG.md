@@ -521,6 +521,61 @@ Simulator zurück; dann stünde eine erfundene Fahrt auf dem Bildschirm, währen
 man glaubt, die eigene zu sehen. Stattdessen sagt die Statuszeile, dass die
 Datei fehlt.
 
+## Zündung aus, Absturz, Neustart: es geht dort weiter, wo du warst
+
+Feld, Spur (samt Versatz) und eine laufende Arbeit werden festgehalten. Nach
+dem Einschalten – auch nach Stromausfall oder Aktualisierung – steht das Feld
+wieder da, die Spur ist aktiv, und die Arbeit läuft mit der bisher bearbeiteten
+Fläche weiter. Die bearbeitete Fläche wird dafür alle 30 Sekunden mitgesichert;
+im schlimmsten Fall fehlen also die letzten Sekunden.
+
+Eine Arbeit, die länger als zwölf Stunden offen liegt, wird nicht fortgesetzt,
+sondern mit dem gesicherten Stand abgeschlossen. **Die Lenkung bleibt nach dem
+Einschalten immer aus** – scharf schalten musst du selbst.
+
+## Warnton und Vibration (Menü → System)
+
+Hörbar wird nur, was du nicht selbst ausgelöst hast:
+
+| Ereignis | Ton |
+|---|---|
+| Lenkung geht von selbst aus (Spur verlassen, RTK weg, GPS-Daten alt …) | Alarm, fünf Töne – der Grund steht auf dem Bildschirm |
+| RTK verloren, während gelenkt wird | Alarm |
+| RTK verloren, während markiert wird | zwei Töne |
+| Vorgewende naht | zwei Töne |
+| Rückwärtsfahrt erkannt (Lenkung geht aus) | zwei Töne |
+| Du greifst ins Lenkrad | ein kurzer Ton |
+| Lenkung mit dem Daumen ausgeschaltet | kein Ton |
+
+Schalter und **Probe** stehen unter Menü → System. Der Browser erlaubt Ton erst
+nach der ersten Berührung des Bildschirms; auf dem Android-Tablet kommt zusätzlich
+die Vibration. Dasselbe Ereignis meldet sich frühestens nach acht Sekunden wieder.
+
+## Sicherung (Menü → System)
+
+Einmal am Tag, beim Start gleich mit, wird ein Zip aus Datenbank und
+Konfiguration abgelegt: im Datenordner unter `sicherungen/`, auf Wunsch zusätzlich
+an einem zweiten Ort (Einstellung **Zweiter Sicherungsort**, z. B. ein USB-Stick).
+Die letzten 14 bleiben. **Jetzt sichern** macht es sofort – vor einem Umbau oder
+einer Aktualisierung eine gute Gewohnheit.
+
+Zurückspielen bei gestopptem Programm: Zip öffnen, `agripilot.db` und
+`config.yaml` an ihre Stelle kopieren. Eine Kopie auf demselben Datenträger
+schützt nicht vor dessen Ausfall – deshalb der zweite Ort.
+
+## Kurs aus Gyro und Fahrtrichtung
+
+Mit Neigungssensor wird der Kurs nicht nur aus der Bewegung gerechnet, sondern
+mit der Drehrate gekoppelt: kein Nachlauf in der Kurve, weniger Rauschen, und
+der Gyro-Fehler wird auf der Geraden mitgelernt. Dreht der Gyro dauerhaft
+**gegen** die Fahrtrichtung, ist er falsch herum eingebaut: die Kopplung schaltet
+sich ab, und unter den Meldungen steht, was zu prüfen ist.
+
+Rückwärts meldet der Empfänger den Kurs der Bewegung, 180 Grad neben der
+Richtung, in die der Traktor zeigt. Das erkennt das Programm (nach etwa drei
+Positionen), hält die Anzeige richtig herum und **schaltet die Lenkung aus** –
+sie ist nur für Vorwärtsfahrt gerechnet.
+
 ## Einbau-Checkliste (Menü → Einbau)
 
 Für die Inbetriebnahme, nicht für den Alltag. Die acht Schritte in der

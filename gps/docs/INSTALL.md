@@ -259,7 +259,14 @@ journalctl -u agripilot -f        # Protokoll mitlesen
 systemctl restart agripilot       # neu starten
 ```
 
-**Sicherung.** Alles steckt in einer Datei:
+**Absturz.** Auf dem Windows-Tablet startet die Aufgabe „AgriPilot" das
+Programm nach einem Absturz nach einer Minute von selbst neu. Für ein Tablet, das
+vor dieser Version eingerichtet wurde, einmal als Administrator
+`scripts\wache_einrichten.ps1` ausführen – es ändert nur die Aufgabeneinstellung.
+Auf dem Pi tut das systemd (`Restart=always`).
+
+**Sicherung.** Automatisch, täglich (siehe BEDIENUNG.md, „Sicherung"). Von Hand
+steckt alles in einer Datei:
 
 ```bash
 sudo cp /var/lib/agripilot/agripilot.db /media/usb/agripilot-$(date +%F).db
