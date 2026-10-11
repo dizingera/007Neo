@@ -44,6 +44,14 @@ TRACK_FLUSH_COUNT = 25
 # gleich wieder aus, ohne zu fahren. Fünf Meter ist eine Traktorlänge.
 MINDESTSTRECKE_ARBEIT_M = 5.0
 
+# Fortsetzen nach Stromausfall. Alle halbe Minute wird die bearbeitete Fläche
+# mitgesichert - sonst bliebe von einem halben Tag Arbeit nach dem Absturz nur
+# die Fahrspur, aber keine Fläche. Was länger als eine Schicht liegt, wird nicht
+# mehr fortgesetzt, sondern abgeschlossen.
+SESSION_KEY = "session"
+CHECKPOINT_S = 30.0
+RESUME_MAX_AGE_S = 12 * 3600.0
+
 
 class Engine:
     def __init__(self, config: Config, store: storage.Storage) -> None:
@@ -100,7 +108,14 @@ class Engine:
         self.messages: list[str] = []
         # Was beim letzten Mal offen blieb (Zündung aus statt „Arbeit beenden"),
         # wird jetzt abgeschlossen - sonst steht es ewig als „läuft" in der Liste.
-        verwaist = store.close_orphan_jobs(config.network.device_id)
+        # Die jüngste frische Arbeit bleibt offen: resume_session() setzt sie fort
+        # oder schließt sie, wenn das Feld nicht mehr da ist.
+        self._resumable_job = store.find_resumable_job(
+            config.network.device_id, RESUME_MAX_AGE_S)
+        verwaist = store.close_orphan_jobs(
+            config.network.device_id,
+            self._resumable_job["id"] if self._resumable_job else None)
+        self._checkpoint_at = 0.0
         if verwaist:
             self.note(f"{verwaist} unterbrochene Arbeit(en) vom letzten Mal abgeschlossen")
         self.auto_sections = True
@@ -241,6 +256,7 @@ class Engine:
         elif lines:
             self.load_line(lines[0]["id"])
         self.note(f"Feld geladen: {field['name']}")
+        self._remember_session()
         return field
 
     def import_fields(self, umrisse: list) -> list[dict]:
@@ -322,11 +338,13 @@ class Engine:
         self.line.saison = int(record.get("saison") or 0)
         zusatz = f" · Fahrgassen alle {self.line.fahrgasse_m:g} m" if self.line.fahrgasse_m else ""
         self.note(f"Spur aktiv: {record['name']}{zusatz}")
+        self._remember_session()
         return record
 
     def clear_line(self) -> None:
         self.line = None
         self.guidance = GuidanceState()
+        self._remember_session()
 
     def use_contour(self) -> dict:
         """Die Feldgrenze selbst als Spurmuster nehmen.
@@ -350,6 +368,7 @@ class Engine:
             "contour", grenze, self.profile.spacing_m, "Kontur", "contour",
         )
         self.note("Kontur aktiv: Ring 0 ist die Feldgrenze")
+        self._remember_session()
         return self.line.to_dict()
 
     def set_a(self) -> dict:
@@ -511,6 +530,101 @@ class Engine:
         })
         return self.line.nudge_m
 
+    # -- Fortsetzen nach Neustart -----------------------------------------
+
+    def _remember_session(self) -> None:
+        """Feld, Spur und laufende Arbeit festhalten.
+
+        Steht in der Datenbank und nicht in einer Datei neben ihr, damit beides
+        zusammen gesichert, zurückgespielt und gelöscht wird.
+        """
+        line = self.line
+        self.store.set_setting(SESSION_KEY, {
+            "field_id": self.field["id"] if self.field else None,
+            "line_id": line.id if line is not None and not line.derived else None,
+            "contour": bool(line is not None and line.derived),
+            "job_id": self.job["id"] if self.job else None,
+        })
+
+    def resume_session(self) -> Optional[dict]:
+        """Dort weitermachen, wo vor dem Ausschalten Schluss war.
+
+        Gibt es nichts fortzusetzen, ist das Ergebnis ``None``. Die Lenkung
+        bleibt dabei in jedem Fall unscharf: wer den Schlüssel dreht, hat nicht
+        entschieden, dass der Motor wieder zugreifen darf.
+        """
+        sitzung = self.store.get_setting(SESSION_KEY) or {}
+        job, self._resumable_job = self._resumable_job, None
+        feld = self.store.get_field(sitzung["field_id"]) if sitzung.get("field_id") else None
+        if feld is None or feld.get("deleted"):
+            if job is not None:
+                self._close_orphans()
+            return None
+
+        self.load_field(feld["id"])
+        if sitzung.get("contour"):
+            try:
+                self.use_contour()
+            except RuntimeError:
+                pass
+        elif sitzung.get("line_id"):
+            record = self.store.get_line(sitzung["line_id"])
+            if record is not None and not record.get("deleted"):
+                self.load_line(record["id"])
+
+        arbeit = False
+        if job is not None and job["field_id"] == feld["id"]:
+            self.job = job
+            blob = self.store.get_job_coverage(job["id"])
+            if blob:
+                self.coverage = CoverageMap.unpack(blob)
+                self.coverage.applied_area_m2 += (job.get("overlap_ha") or 0.0) * 10_000.0
+            self.distance_m = job.get("distance_m") or 0.0
+            self.working_time_s = job.get("working_time_s") or 0.0
+            self._checkpoint_at = time.time()
+            arbeit = True
+        elif job is not None:
+            self._close_orphans()
+        self._remember_session()
+
+        text = f"Weiter auf „{feld['name']}“"
+        if self.line is not None:
+            text += f", Spur {self.line.name}"
+        if arbeit:
+            text += f" - Arbeit läuft weiter bei {self.coverage.area_ha:.2f} ha"
+        self.note(text)
+        return {"text": text, "feld": feld["name"], "arbeit": arbeit,
+                "flaeche_ha": self.coverage.area_ha}
+
+    def _close_orphans(self) -> None:
+        geschlossen = self.store.close_orphan_jobs(self.config.network.device_id)
+        if geschlossen:
+            self.note(f"{geschlossen} unterbrochene Arbeit(en) vom letzten Mal abgeschlossen")
+
+    def suspend_job(self) -> None:
+        """Beim Beenden des Programms: Stand sichern, Arbeit offen lassen.
+
+        Ob Zündung aus, Aktualisierung oder Neustart - die Arbeit ist damit
+        nicht zu Ende. Beim nächsten Start wird sie fortgesetzt, nach einer
+        Schicht ohne Fortsetzung mit dem gesicherten Stand abgeschlossen.
+        """
+        self._checkpoint(time.time(), force=True)
+
+    def _checkpoint(self, now: float, force: bool = False) -> None:
+        """Bearbeitete Fläche und Strecke zwischendurch sichern."""
+        if self.job is None or (not force and now - self._checkpoint_at < CHECKPOINT_S):
+            return
+        self._checkpoint_at = now
+        self._flush_track(force=True)
+        self.store.update_job(
+            self.job["id"],
+            distance_m=self.distance_m,
+            area_ha=self.coverage.area_ha,
+            overlap_ha=self.coverage.overlap_m2 / 10_000.0,
+            working_time_s=self.working_time_s,
+            coverage=self.coverage.pack(),
+        )
+
     # -- Vorgewende und Wende ---------------------------------------------
 
     def headland_ring(self) -> list[list[float]]:
@@ -636,6 +750,8 @@ class Engine:
         self.distance_m = 0.0
         self.working_time_s = 0.0
         self.note(f"Arbeit gestartet{': ' + operation if operation else ''}")
+        self._checkpoint_at = time.time()
+        self._remember_session()
         return self.job
 
     def stop_job(self) -> Optional[dict]:
@@ -653,6 +769,7 @@ class Engine:
         )
         job = self.store.get_job(self.job["id"])
         self.job = None
+        self._remember_session()
         if self.distance_m < MINDESTSTRECKE_ARBEIT_M:
             # Markieren an, Markieren aus, nichts gefahren: das war ein Versehen
             # oder ein Versuch, keine Arbeit. In der Liste und im CSV fürs Büro
@@ -940,6 +1057,7 @@ class Engine:
         stünde weiter auf "lenkt". Deshalb wird hier von außen nachgesehen.
         """
         now = now or time.time()
+        self._checkpoint(now)
         age = now - self.fix.received_at if (self.fix and self.fix.received_at) else 99.0
         if age > 2.0 and self.turn is not None:
             # Eine Wende ohne Positionsdaten weiterzuführen hieße, blind auf

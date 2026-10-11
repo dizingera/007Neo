@@ -161,6 +161,12 @@ class Application:
             cfg.network.role, VERSION,
         )
         await self.steering.start()
+        # Vor den Quellen: bis die erste Position kommt, steht das Feld schon da.
+        # Die Lenkung bleibt dabei unscharf - das entscheidet nur der Fahrer.
+        try:
+            self.engine.resume_session()
+        except Exception as exc:  # noqa: BLE001 - ein kaputter Stand darf den Start nicht verhindern
+            self.engine.note(f"Letzter Stand nicht lesbar: {exc}")
         self._quellen_starten()
 
         if cfg.is_master:
@@ -187,7 +193,7 @@ class Application:
 
     async def stop(self) -> None:
         with contextlib.suppress(Exception):
-            self.engine.stop_job()
+            self.engine.suspend_job()
         # Eine halb geschriebene Aufzeichnung ist trotzdem eine: was auf der
         # Karte steht, bleibt lesbar - der letzte Block gehört noch dazu.
         with contextlib.suppress(Exception):

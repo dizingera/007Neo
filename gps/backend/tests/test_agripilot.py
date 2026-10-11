@@ -3432,6 +3432,7 @@ class VerwaisteArbeitTest(unittest.TestCase):
                 config = config_module.load("/kein-solcher-pfad.yaml")
                 config.network.device_id = "pi-test"
                 motor = Engine(config, store)
+                motor.resume_session()          # Feld „feld“ gibt es nicht: abschließen
                 self.assertIsNotNone(store.get_job(eigene["id"])["ended_at"])
                 self.assertIsNone(store.get_job(fremde["id"])["ended_at"])
                 self.assertIn("abgeschlossen", motor.messages[-1])

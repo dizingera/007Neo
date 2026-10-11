@@ -290,7 +290,20 @@ class Storage:
             ).fetchall()
         return [_job_row(r) for r in rows]
 
-    def close_orphan_jobs(self, device_id: str) -> int:
+    def find_resumable_job(self, device_id: str, max_age_s: float) -> Optional[dict]:
+        """Die jüngste offene Arbeit dieses Geräts, falls sie frisch genug ist.
+
+        „Frisch" heißt: zuletzt gesichert vor höchstens ``max_age_s``. Was länger
+        liegt, ist keine unterbrochene Arbeit mehr, sondern eine vergessene.
+        """
+        row = self.db.execute(
+            """SELECT * FROM jobs WHERE ended_at IS NULL AND deleted=0
+               AND device_id=? AND updated_at>=? ORDER BY updated_at DESC LIMIT 1""",
+            (device_id, time.time() - max_age_s),
+        ).fetchone()
+        return _job_row(row) if row else None
+
+    def close_orphan_jobs(self, device_id: str, keep_id: Optional[str] = None) -> int:
         """Arbeiten dieses Geräts ohne Ende abschließen - Stromausfall, Neustart.
 
         Der Traktor wird mit dem Zündschlüssel ausgeschaltet, nicht mit „Arbeit
@@ -301,8 +314,8 @@ class Storage:
         """
         cursor = self.db.execute(
             """UPDATE jobs SET ended_at=updated_at, updated_at=?
-               WHERE ended_at IS NULL AND deleted=0 AND device_id=?""",
-            (time.time(), device_id),
+               WHERE ended_at IS NULL AND deleted=0 AND device_id=? AND id IS NOT ?""",
+            (time.time(), device_id, keep_id),
         )
         self.db.commit()
         return cursor.rowcount
