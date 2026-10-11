@@ -53,6 +53,12 @@ MINDESTSTRECKE_ARBEIT_M = 5.0
 FELD_VORSCHLAG_S = 3.0
 FELDER_NEU_LADEN_S = 30.0
 
+# Wie lange der Empfänger schweigen darf, bevor die Lenkung abgeschaltet wird -
+# dieselbe Sekunde, ab der der Lenkregler veraltete Daten selbst ablehnt. Der
+# Dauerlauf zeigte: mit zwei Sekunden stand die Anzeige noch doppelt so lange
+# auf "lenkt", obwohl keine neue Position mehr kam.
+GPS_STILLSTAND_S = 1.0
+
 SESSION_KEY = "session"
 CHECKPOINT_S = 30.0
 RESUME_MAX_AGE_S = 3 * 3600.0
@@ -96,6 +102,8 @@ class Engine:
         self.turn: Optional[headland_module.TurnFollower] = None
         self.turn_preview: list[geo.Point] = []
         self.turn_preview_ok = False
+        self.turn_preview_fahrbar = True
+        self.turn_preview_radius = (float("inf"), 0.0)
         self._turn_planned_at: Optional[geo.Point] = None
         self._ring_key: Optional[tuple] = None
         self._ring_cache: list[list[float]] = []
@@ -542,6 +550,11 @@ class Engine:
         })
         return self.line.nudge_m
 
+    def arm_steering(self) -> str:
+        """Lenkung scharf schalten - der Fahrer erklärt damit auch, dass er vorwärts fährt."""
+        self.heading_filter.bestaetige_vorwaerts()
+        return self.steering.arm()
+
     # -- Fortsetzen nach Neustart -----------------------------------------
 
     def _remember_session(self) -> None:
@@ -742,12 +755,24 @@ class Engine:
             self.profile.spacing_m, einstellung.tiefe_m(self.profile.width_m),
         )
         im_feld = headland_module.route_im_feld(pfad, grenze)
+        # Kann die Maschine den engsten Bogen überhaupt fahren? Radstand und
+        # größter Einschlag geben den kleinsten Kreis; ein enger geplanter Bogen
+        # wird nicht "ungefähr" gefahren, sondern verlassen.
+        engster = headland_module.engster_radius(pfad)
+        kleinster = self.profile.wheelbase_m / math.tan(
+            math.radians(max(5.0, min(60.0, self.profile.max_steer_deg))))
+        fahrbar = engster >= kleinster * 0.98
         self.turn_preview = pfad
         self.turn_preview_ok = im_feld
+        self.turn_preview_fahrbar = fahrbar
+        self.turn_preview_radius = (engster, kleinster)
         self._turn_planned_at = start
         return {
             "punkte": [list(p) for p in pfad],
             "im_feld": im_feld,
+            "fahrbar": fahrbar,
+            "engster_radius_m": None if math.isinf(engster) else round(engster, 2),
+            "kleinster_radius_m": round(kleinster, 2),
             "muster": einstellung.muster,
             "richtung": einstellung.richtung,
             "laenge_m": sum(geo.distance(pfad[i], pfad[i + 1])
@@ -759,6 +784,12 @@ class Engine:
         """Die geplante Route übernehmen und ihr folgen."""
         if not self.turn_preview:
             raise RuntimeError("Erst eine Wende planen")
+        if not self.turn_preview_fahrbar:
+            engster, kleinster = self.turn_preview_radius
+            raise RuntimeError(
+                f"Die Maschine kann diese Wende nicht fahren: engster Bogen "
+                f"{engster:.1f} m, die Lenkung schafft höchstens {kleinster:.1f} m. "
+                "Wendekreis größer einstellen oder mehr Spuren überspringen.")
         if self.headland.nur_im_feld and not self.turn_preview_ok:
             raise RuntimeError(
                 "Die Route liegt nicht vollständig im Feld. Wenderichtung, "
@@ -1074,7 +1105,10 @@ class Engine:
                             if attitude and attitude.fresh else None),
             cross_track_m=self.guidance.cross_track_m,
         )
-        self.steering.rueckwaerts = self.heading_filter.rueckwaerts
+        # Hat der Fahrer eben "vorwärts" bestätigt, wartet das Filter auf den
+        # nächsten Kurs - bis dahin nicht gleich wieder abschalten.
+        self.steering.rueckwaerts = (self.heading_filter.rueckwaerts
+                                     and not self.heading_filter.bestaetigung_offen)
         command = self.steering.update(self.guidance, fix, context)
         # On the simulator, close the loop so autosteer can be demonstrated and
         # tuned without a machine.
@@ -1124,13 +1158,13 @@ class Engine:
         self._checkpoint(now)
         self._pruefe_feldvorschlag(now)
         age = now - self.fix.received_at if (self.fix and self.fix.received_at) else 99.0
-        if age > 2.0 and self.turn is not None:
+        if age > GPS_STILLSTAND_S and self.turn is not None:
             # Eine Wende ohne Positionsdaten weiterzuführen hieße, blind auf
             # einem Bogen zu lenken. Sie endet hier, nicht erst beim nächsten Fix.
             self.stop_turn("keine GPS-Daten")
         if self.steering is None or not self.steering.armed:
             return
-        if age > 2.0:
+        if age > GPS_STILLSTAND_S:
             self.steering.disarm("keine GPS-Daten mehr")
             self.note("Lenkung abgeschaltet: keine GPS-Daten")
 
@@ -1174,6 +1208,7 @@ class Engine:
                            else [list(p) for p in self.turn_preview]),
                 "geplant": bool(self.turn_preview) and self.turn is None,
                 "im_feld": self.turn_preview_ok,
+                "fahrbar": self.turn_preview_fahrbar,
             },
             "line": self.line.to_dict() if self.line else None,
             "field": {

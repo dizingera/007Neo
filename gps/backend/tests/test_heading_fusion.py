@@ -173,5 +173,51 @@ class ReviewFixTests(unittest.TestCase):
         self.assertEqual(filt.bias_deg_s, 0.0)
 
 
+class ConfirmForwardTests(unittest.TestCase):
+    def test_arming_clears_a_false_reverse_after_turning_around(self):
+        filt = HeadingFilter()
+        for _ in range(10):
+            filt.update(90.0, None, 2.0)
+        for _ in range(5):                      # umgedreht und losgefahren: Kurs 270
+            filt.update(270.0, None, 2.0)
+        self.assertTrue(filt.rueckwaerts)
+        filt.bestaetige_vorwaerts()
+        filt.update(270.0, None, 2.0)
+        self.assertFalse(filt.rueckwaerts)
+        self.assertAlmostEqual(angle_difference(filt.value, 270.0), 0.0, delta=1.0)
+        for _ in range(5):
+            filt.update(270.0, None, 2.0)
+        self.assertFalse(filt.rueckwaerts)
+
+    def test_a_stale_reverse_course_does_not_count_as_the_confirmation(self):
+        """Der Fahrer drückt, der Traktor rollt schon vorwärts, aber die letzte
+        Position stammt noch aus der Rückwärtsfahrt: gilt erst der nächste Kurs."""
+        filt = HeadingFilter()
+        for _ in range(10):
+            filt.update(0.0, None, 2.8)
+        for _ in range(6):
+            filt.update(180.0, None, 1.2)
+        self.assertTrue(filt.rueckwaerts)
+        filt.bestaetige_vorwaerts()                 # letzter Kurs war 180
+        self.assertTrue(filt.bestaetigung_offen)
+        filt.update(0.0, None, 2.8)                 # erste Position vorwärts
+        self.assertFalse(filt.rueckwaerts)
+        self.assertAlmostEqual(angle_difference(filt.value, 0.0), 0.0, delta=1.0)
+        for _ in range(6):
+            filt.update(0.0, None, 2.8)
+        self.assertFalse(filt.rueckwaerts)
+        self.assertAlmostEqual(angle_difference(filt.value, 0.0), 0.0, delta=1.0)
+
+    def test_confirming_while_not_reversing_changes_nothing(self):
+        filt = HeadingFilter()
+        for _ in range(10):
+            filt.update(90.0, None, 2.0)
+        vorher = filt.value
+        filt.bestaetige_vorwaerts()
+        self.assertFalse(filt.bestaetigung_offen)
+        filt.update(90.0, None, 2.0)
+        self.assertAlmostEqual(filt.value, vorher, places=3)
+
+
 if __name__ == "__main__":
     unittest.main()

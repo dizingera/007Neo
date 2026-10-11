@@ -369,46 +369,120 @@ def _arc(start: Point, heading: float, radius: float, sweep_deg: float,
     return punkte
 
 
+# Wie schnell sich die Krümmung einer Route ändern darf (1/m je Meter). Die
+# Lenkung braucht Zeit, um von einem Einschlag zum anderen zu kommen: bei
+# 25 Grad/s, 2,6 m Radstand und Wendetempo um 1,6 m/s sind das rund 0,1.
+KRUEMMUNG_RATE = 0.10
+_SCHRITT_M = 0.25
+
+
+def _integriere(start: Point, heading: float, phasen: Sequence[tuple[float, float]],
+                rate: float = KRUEMMUNG_RATE) -> list[Point]:
+    """Route aus Krümmungsphasen: Krümmung rampt, statt zu springen.
+
+    ``phasen`` sind (Zielkrümmung, Kursänderung in Grad); Krümmung positiv =
+    nach rechts. Eine Phase endet, wenn ihre Kursänderung erreicht ist - die
+    Rampe zählt mit. Am Ende läuft die Krümmung auf null zurück.
+    """
+    x, y = start
+    psi = math.radians(heading)
+    kappa = 0.0
+    punkte: list[Point] = [(x, y)]
+
+    def schritt() -> None:
+        nonlocal x, y, psi
+        psi += kappa * _SCHRITT_M
+        x += math.sin(psi) * _SCHRITT_M
+        y += math.cos(psi) * _SCHRITT_M
+        punkte.append((x, y))
+
+    for ziel, grad in phasen:
+        soll = math.radians(abs(grad))
+        gedreht = 0.0
+        while gedreht < soll:
+            kappa += max(-rate * _SCHRITT_M, min(rate * _SCHRITT_M, ziel - kappa))
+            # Mit Vorzeichen: beim Umschwenken von rechts nach links dreht der
+            # erste Teil der Rampe noch in die alte Richtung.
+            gedreht += kappa * (1.0 if ziel > 0 else -1.0) * _SCHRITT_M
+            schritt()
+    while abs(kappa) > 1e-6:
+        kappa -= max(-rate * _SCHRITT_M, min(rate * _SCHRITT_M, kappa))
+        schritt()
+    return punkte
+
+
 def plan_omega(start: Point, heading: float, versatz_m: float,
                radius_m: float, tiefe_m: float, turn_left: bool,
-               samples: int = 60) -> list[Point]:
-    """Ω-Wende: erst nach vorn ausholen, dann zurück auf die Nachbarspur.
+               samples: int = 24) -> list[Point]:
+    """Ω-Wende: erst von der Zielseite weg, dann im großen Bogen zurück.
 
-    Als kubische Bézierkurve, weil die Form dabei aus vier Punkten entsteht und
-    nicht aus aneinandergesetzten Bögen: Start, zwei Stützpunkte weit voraus,
-    und ein Zielpunkt auf der Nachbarspur. Weil der zweite Stützpunkt **vor**
-    dem Ziel liegt, läuft die Kurve am Ende rückwärts in ihn hinein - genau der
-    weite Bogen, der die Fahrtrichtung umkehrt, ohne dass ein Rückwärtsgang
-    nötig wäre.
+    Zwei Bögen mit dem Wendekreis als engstem Radius: erst ein Stück von der
+    Zielseite weg (Winkel α), dann ``180 + α`` Grad zur Zielseite herum. Die
+    Maschine endet gegenläufig auf der Nachbarspur, ohne Rückwärtsgang. α wird
+    so gesucht, dass der seitliche Versatz stimmt (ohne Übergänge:
+    ``Versatz = 2 · Radius · cos α``).
 
-    Die Stützweite wächst mit der Vorgewendetiefe und mit dem Wendekreis: die
-    Ω-Wende darf ausholen, das ist ihr Zweck. Wo dafür kein Platz ist, gehört
-    die U-Wende hin.
+    Zwei Entwurfsfehler, die der Dauerlauf (scripts/dauerlauf.py) aufgedeckt hat:
+    eine Bézierkurve hatte im Scheitel Bögen unter einem Meter Radius, die keine
+    Maschine fahren kann; und aneinandergesetzte Kreisbögen springen in der
+    Krümmung von rechts nach links - die Lenkung braucht dafür Strecke, und die
+    Maschine hat die Route verlassen, bevor sie da war. Deshalb rampt die
+    Krümmung hier (Klothoide).
+
+    Ist der Versatz mindestens zwei Wendekreise, braucht es kein Ausholen: dann
+    ist die U-Wende die richtige Form. ``tiefe_m`` bleibt in der Signatur, ob die
+    Wende ins Vorgewende passt, prüft ``route_im_feld``.
     """
-    fx, fy = _forward(heading)
-    # Seitlicher Versatz zeigt in die Wenderichtung.
-    sx, sy = _side(heading, turn_left)
+    radius = max(1.5, radius_m)
     versatz = abs(versatz_m)
-    ausholen = max(tiefe_m * 0.70, radius_m * 1.45)
-    ziel_vor = max(tiefe_m * 0.35, radius_m * 0.55)
+    if versatz >= 2.0 * radius:
+        return plan_u_turn(start, heading, versatz, radius, turn_left, samples)
+    richtung = 1.0 if turn_left else -1.0      # Vorzeichen der Wegfahrt: links -> erst rechts
+    kappa = 1.0 / radius
 
-    p0 = tuple(start)
-    p3 = (start[0] + sx * versatz + fx * ziel_vor,
-          start[1] + sy * versatz + fy * ziel_vor)
-    c1 = (p0[0] + fx * ausholen + sx * versatz * 0.18,
-          p0[1] + fy * ausholen + sy * versatz * 0.18)
-    c2 = (p3[0] + fx * ausholen - sx * versatz * 0.18,
-          p3[1] + fy * ausholen - sy * versatz * 0.18)
+    def route(alpha: float) -> list[Point]:
+        # Das Ausrampen am Ende dreht noch ein Stück weiter: von der zweiten Phase abziehen.
+        ausrampen = math.degrees(kappa * kappa / (2.0 * KRUEMMUNG_RATE))
+        return _integriere(start, heading, [
+            (richtung * kappa, alpha),
+            (-richtung * kappa, max(1.0, 180.0 + alpha - ausrampen)),
+        ])
 
-    punkte: list[Point] = []
-    for i in range(samples + 1):
-        t = i / samples
-        u = 1.0 - t
-        punkte.append((
-            p0[0] * u ** 3 + c1[0] * 3 * u * u * t + c2[0] * 3 * u * t * t + p3[0] * t ** 3,
-            p0[1] * u ** 3 + c1[1] * 3 * u * u * t + c2[1] * 3 * u * t * t + p3[1] * t ** 3,
-        ))
-    return punkte
+    def versatz_zur_ziel_seite(pfad: list[Point]) -> float:
+        sx, sy = _side(heading, turn_left)
+        return (pfad[-1][0] - start[0]) * sx + (pfad[-1][1] - start[1]) * sy
+
+    unten, oben = 0.0, 89.0
+    if versatz_zur_ziel_seite(route(unten)) <= versatz:
+        return route(unten)                     # schon ohne Ausholen nicht weiter als gewünscht
+    for _ in range(40):
+        mitte = 0.5 * (unten + oben)
+        if versatz_zur_ziel_seite(route(mitte)) > versatz:
+            unten = mitte
+        else:
+            oben = mitte
+    return route(0.5 * (unten + oben))
+
+
+def engster_radius(pfad: Sequence[Point], abstand_m: float = 0.6) -> float:
+    """Kleinster Krümmungsradius entlang der Route (Umkreis dreier Punkte).
+
+    Punkte dichter als ``abstand_m`` werden übersprungen, sonst macht das
+    Rauschen der Stützpunkte aus einer Geraden einen Kreis. Eine gerade Route
+    hat keinen engsten Bogen: ``inf``.
+    """
+    punkte = [pfad[0]] if pfad else []
+    for p in pfad[1:]:
+        if distance(p, punkte[-1]) >= abstand_m:
+            punkte.append(p)
+    kleinster = float("inf")
+    for a, b, c in zip(punkte, punkte[1:], punkte[2:]):
+        kreuz = abs((b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]))
+        if kreuz < 1e-9:
+            continue
+        kleinster = min(kleinster, distance(a, b) * distance(b, c) * distance(c, a)
+                        / (2.0 * kreuz))
+    return kleinster
 
 
 def plan_u_turn(start: Point, heading: float, versatz_m: float,
@@ -516,16 +590,26 @@ class TurnFollower:
 
     def _zielpunkt(self, ab_index: int, position: Point,
                    vorausblick: float) -> Point:
-        """Punkt auf der Route, ``vorausblick`` Meter voraus."""
+        """Punkt auf der Route, ``vorausblick`` Meter voraus - ab dem Lotfußpunkt.
+
+        Gemessen wird ab dem Punkt der Route, der der Maschine am nächsten liegt,
+        nicht ab dem Anfang des Teilstücks. Bei dicht gesetzten Stützpunkten (ein
+        Bogen) ist das dasselbe; auf einer langen Geraden zwischen zwei Bögen lag
+        der Zielpunkt sonst *hinter* der Maschine, und sie lenkte voll herum.
+        """
+        a, b = self.pfad[ab_index], self.pfad[min(ab_index + 1, len(self.pfad) - 1)]
+        fuss, _, _ = project_on_segment(position, a, b)
         rest = vorausblick
+        von = fuss
         for i in range(ab_index, len(self.pfad) - 1):
-            stueck = distance(self.pfad[i], self.pfad[i + 1])
+            nach = self.pfad[i + 1]
+            stueck = distance(von, nach)
             if stueck >= rest:
                 anteil = rest / stueck if stueck > 0 else 0.0
-                a, b = self.pfad[i], self.pfad[i + 1]
-                return (a[0] + (b[0] - a[0]) * anteil,
-                        a[1] + (b[1] - a[1]) * anteil)
+                return (von[0] + (nach[0] - von[0]) * anteil,
+                        von[1] + (nach[1] - von[1]) * anteil)
             rest -= stueck
+            von = nach
         return self.pfad[-1]
 
     def solve(self, position: Point, heading: float, speed_ms: float,
@@ -556,8 +640,15 @@ class TurnFollower:
         soll_kurs = heading_deg(position, ziel)
         kursfehler = angle_difference(soll_kurs, heading)
 
-        einschlag = max(-profile.max_steer_deg,
-                        min(profile.max_steer_deg, kursfehler * WENDE_LENKFAKTOR))
+        # Pure Pursuit: der Einschlag, der die Hinterachse auf dem Kreis durch
+        # den Zielpunkt hält. Ein linearer Ansatz (Einschlag ~ Kursfehler)
+        # braucht in einem Bogen dauerhaft einen Kursfehler, um überhaupt den
+        # Bogeneinschlag zu erzeugen - das Fahrzeug läuft dann nach außen, und
+        # mit der trägen Lenkung eines echten Traktors verlässt es die Route.
+        abstand = max(1.0, distance(position, ziel))
+        einschlag = math.degrees(math.atan2(
+            2.0 * profile.wheelbase_m * math.sin(math.radians(kursfehler)), abstand))
+        einschlag = max(-profile.max_steer_deg, min(profile.max_steer_deg, einschlag))
 
         return GuidanceState(
             active=True,

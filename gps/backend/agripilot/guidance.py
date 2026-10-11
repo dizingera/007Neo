@@ -621,6 +621,8 @@ class HeadingFilter:
     bias_deg_s: float = 0.0
     rueckwaerts: bool = False          # Traktor fährt rückwärts: Bewegungskurs ist 180 Grad daneben
     _gegen: int = 0                    # aufeinanderfolgende Kurse "gegen" die Erwartung
+    _kurs_roh: Optional[float] = None  # letzter Bewegungskurs bei Fahrt
+    _bestaetigt: bool = False          # Fahrer hat "vorwärts" gesagt; gilt ab dem nächsten Kurs
     _letzter_kurs: Optional[float] = None
     _passt: float = 0.0                # gleitender Mittelwert: +1 gleiche, -1 gegenläufige Drehung
     _proben: int = 0
@@ -649,6 +651,16 @@ class HeadingFilter:
             self._letzter_kurs = course
             return self.value
 
+        self._kurs_roh = course
+        if self._bestaetigt:
+            # Die Aussage des Fahrers gilt für den ersten Kurs *nach* ihr. Der
+            # letzte davor kann noch aus der Rückwärtsfahrt stammen.
+            self._bestaetigt = False
+            self.rueckwaerts = False
+            self._gegen = 0
+            self._letzter_kurs = None
+            self.value = course
+            return self.value
         # Rückwärts meldet der Empfänger den Kurs der Bewegung, und der liegt
         # 180 Grad neben der Richtung, in die der Traktor zeigt. Ein Kurs, der
         # mehrmals hintereinander so weit von der Erwartung liegt, ist keine
@@ -712,10 +724,28 @@ class HeadingFilter:
                             "Vorzeichen des Neigungssensors prüfen (Einbaurichtung). "
                             "Der Kurs kommt solange allein aus der Bewegung.")
 
+    def bestaetige_vorwaerts(self) -> None:
+        """Der Fahrer sagt: ich fahre vorwärts.
+
+        Ohne Drehratensensor lässt sich "von Hand gewendet und losgefahren" nicht
+        von "rückwärts gefahren" unterscheiden: der Kurs liegt beide Male 180 Grad
+        neben dem letzten bekannten. Die Anlage entscheidet dann vorsichtig auf
+        Rückwärts und lenkt nicht; das Scharfschalten ist die Aussage des
+        Fahrers, dass es anders ist.
+        """
+        if self.rueckwaerts:
+            self._bestaetigt = True
+
+    @property
+    def bestaetigung_offen(self) -> bool:
+        return self._bestaetigt
+
     def reset(self) -> None:
         """Neue Fahrt, neue Quelle: alles Gelernte und Vermutete verwerfen."""
         self.value = None
+        self._kurs_roh = None
         self.rueckwaerts = False
+        self._bestaetigt = False
         self.fusion_aktiv = True
         self.warnung = ""
         self.bias_deg_s = 0.0

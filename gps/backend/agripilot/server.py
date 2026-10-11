@@ -761,7 +761,7 @@ def create_app(config=None) -> FastAPI:
 
     @api.post("/api/steering/arm")
     async def arm_steering():
-        return ok({"message": application.steering.arm(),
+        return ok({"message": engine.arm_steering(),
                    "armed": application.steering.armed})
 
     @api.post("/api/steering/centre")

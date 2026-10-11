@@ -244,6 +244,10 @@ Die erste Fahrt auf einer freien Fläche, langsam, mit der Hand am Lenkrad.
 Zieht das System zu träge auf die Spur, `Lenkschärfe` (im Menü **Maschine**) in
 Schritten von 0,1 erhöhen; pendelt es um die Spur, verringern.
 
+## Vor jeder Auslieferung: Dauerlauf
+
+`python scripts/dauerlauf.py --stunden 3 --seed 1` fährt drei Stunden Feldarbeit im Zeitraffer (wenige Minuten) mit Störungen: RTK weg, Empfänger stumm, Positionssprung, Rückwärtsfahrt, Eingriff des Fahrers, Neustart mitten in der Arbeit. Geprüft wird laufend gegen feste Regeln (lenkt nur mit RTK-fix und frischen Daten, nach einem Ausfall binnen einer Sekunde nicht mehr, nach Neustart unscharf, rückwärts nicht, Fläche geht nicht verloren). Exit-Code 0 = alles eingehalten. Mit `--ausfuehrlich` stehen die Störungen einzeln im Protokoll, `--seed` wählt eine andere Folge. Ein Kurzlauf gehört zur Testsuite (`tests/test_dauerlauf.py`).
+
 ## Betrieb und Wartung
 
 **Neuer Stand:** nicht das Installationsskript noch einmal laufen lassen,

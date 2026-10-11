@@ -259,7 +259,8 @@ function updateHud(s) {
   if (s.recording && s.recording.pending_a) hint.push('A gesetzt – bis zum Ende fahren, dann B');
   if (turn.aktiv) hint.push('Wende läuft – Hand am Lenkrad');
   else if (turn.geplant) {
-    hint.push(turn.im_feld ? 'Wende geplant – Wende noch einmal drücken'
+    hint.push(turn.fahrbar === false ? 'Wende zu eng für die Maschine – Wendekreis größer stellen'
+            : turn.im_feld ? 'Wende geplant – Wende noch einmal drücken'
                            : 'Wende geplant, liegt aber nicht im Feld – Richtung oder Wendekreis ändern');
   }
   if (headland && headland.hinweis) hint.push(headland.hinweis);
@@ -770,6 +771,8 @@ el('btnTurn').onclick = async () => {
   if (!plan) return;
   if (!plan.data.grenze_vorhanden) {
     toast('Ohne Feldgrenze wird die Route nicht geprüft', true);
+  } else if (!plan.data.fahrbar) {
+    toast(`Wende zu eng: engster Bogen ${plan.data.engster_radius_m} m, die Lenkung schafft ${plan.data.kleinster_radius_m} m – Wendekreis größer stellen`, true);
   } else if (!plan.data.im_feld) {
     toast('Route liegt nicht vollständig im Feld', true);
   } else {

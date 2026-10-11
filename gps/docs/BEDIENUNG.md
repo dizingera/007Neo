@@ -270,8 +270,10 @@ vorher angesehen.
 
 | | |
 |---|---|
-| **Ω-Wende** (weiter Bogen) | Holt nach vorn aus und kommt in einem Bogen zurück. Braucht mehr Vorgewendetiefe, fährt dafür weichere Radien. |
+| **Ω-Wende** (weiter Bogen) | Fährt erst ein Stück von der Zielspur weg und kommt dann in einem großen Bogen zurück. Ideal, wenn der Versatz kleiner ist als zwei Wendekreise (Nachbarspur). Braucht Vorgewendetiefe von etwa 2,5 Wendekreisen. Ab zwei Wendekreisen Versatz ist sie eine U-Wende. Der Übergang zwischen den Bögen ist eine Klothoide: die Lenkung bekommt Strecke zum Umschlagen. |
 | **U-Wende** (kompakt) | Zwei Viertelkreise mit einer Geraden dazwischen. Kommt mit deutlich weniger Tiefe aus; dafür wächst die Zwischengerade mit dem Spurversatz. |
+
+**Fahrbar oder nicht:** Radstand und größter Einschlag geben den kleinsten Kreis, den die Maschine fahren kann (2,6 m und 35 Grad: 3,7 m). Liegt der engste Bogen der geplanten Route darunter, steht dort **„Wende zu eng für die Maschine“**, und die Wende lässt sich nicht starten – auch nicht mit abgeschalteter Feldprüfung. Abhilfe: Wendekreis größer stellen (Menü → Vorgewende; für diese Maschine rund 4,2 m) oder mehr Spuren überspringen.
 
 **Was die Wende nicht tut:** rückwärts fahren. Gesteuert wird das Lenkrad, nicht
 Fahrstufe und nicht Gas – ein Muster mit Rückwärtsgang wäre eine Route, die die

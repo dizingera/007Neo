@@ -1213,7 +1213,11 @@ class EngineTest(unittest.TestCase):
         self.engine.tick()                      # frische Daten: bleibt scharf
         self.assertTrue(steering.armed)
 
-        self.engine.fix.received_at = time.time() - 5.0
+        self.engine.fix.received_at = time.time() - 0.8     # kurzer Aussetzer: bleibt scharf
+        self.engine.tick()
+        self.assertTrue(steering.armed)
+
+        self.engine.fix.received_at = time.time() - 1.3
         self.engine.tick()
         self.assertFalse(steering.armed)
         self.assertIn("keine GPS-Daten", steering.command.reason)
@@ -1746,8 +1750,8 @@ class TurnPatternTest(unittest.TestCase):
 
     def test_omega_reaches_further_forward_than_the_u_turn(self):
         """Genau deshalb gibt es beide: die Ω-Wende holt aus, die U-Wende nicht."""
-        omega = self.headland.plan_omega((0.0, 0.0), 0.0, 12.0, 4.0, 14.0, True)
-        u = self.headland.plan_u_turn((0.0, 0.0), 0.0, 12.0, 4.0, True)
+        omega = self.headland.plan_omega((0.0, 0.0), 0.0, 6.0, 4.0, 14.0, True)
+        u = self.headland.plan_u_turn((0.0, 0.0), 0.0, 6.0, 4.0, True)
         self.assertGreater(max(p[1] for p in omega), max(p[1] for p in u))
 
     def test_a_route_inside_the_field_passes(self):
