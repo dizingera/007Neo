@@ -127,6 +127,10 @@ class NtripClient(CorrectionSource):
         await writer.drain()
 
         header = await reader.readuntil(b"\r\n")
+        if b"SOURCETABLE" in header.upper():
+            # Ein Caster antwortet mit seiner Liste, wenn der Mountpoint fehlt oder
+            # nicht stimmt: "200 OK" ist dann trügerisch, es kommen keine Korrekturen.
+            raise ConnectionError(await self._mountpoint_fehler(reader))
         if b"200" not in header and b"ICY" not in header:
             raise ConnectionError(header.decode(errors="ignore").strip())
         # Skip the rest of the header block.
@@ -147,6 +151,36 @@ class NtripClient(CorrectionSource):
             gga_task.cancel()
             await _schliessen(writer)
             self._writer = None
+
+    async def _mountpoint_fehler(self, reader: asyncio.StreamReader) -> str:
+        """Die Quellenliste des Casters lesen und daraus eine Meldung machen."""
+        gesucht = self.config.mountpoint
+        namen: list[str] = []
+        try:
+            async with asyncio.timeout(5.0):
+                while (await reader.readline()).strip():
+                    pass                       # Kopfzeilen bis zur Leerzeile
+                while True:
+                    zeile = (await reader.readline()).decode(errors="ignore").strip()
+                    if not zeile or zeile.upper().startswith("ENDSOURCETABLE"):
+                        break
+                    teile = zeile.split(";")
+                    if teile[0].upper() == "STR" and len(teile) > 1:
+                        namen.append(teile[1])
+        except (TimeoutError, asyncio.IncompleteReadError, ConnectionError):
+            pass
+        if not gesucht:
+            text = "kein Mountpoint eingetragen"
+        elif gesucht in namen or not namen:
+            text = (f"Mountpoint '{gesucht}' liefert nichts - Zugang für dieses Konto "
+                    "nicht freigeschaltet?")
+        else:
+            text = f"Mountpoint '{gesucht}' gibt es beim Caster nicht"
+        if namen:
+            text += ". Verfügbar: " + ", ".join(namen[:12])
+            if len(namen) > 12:
+                text += f" (+{len(namen) - 12} weitere)"
+        return text
 
     async def _send_gga_loop(self, writer: asyncio.StreamWriter) -> None:
         """Tell the caster where we are.

@@ -608,6 +608,34 @@ class CorrectionsTest(unittest.IsolatedAsyncioTestCase):
         self.assertGreater(quelle.bytes_received, 0)
         self.assertIn(str(port), quelle.status)
 
+    async def test_caster_source_table_names_the_available_mountpoints(self):
+        """Ohne passenden Mountpoint schickt ein Caster nur seine Liste."""
+        from agripilot.ntrip import NtripClient
+
+        async def caster(reader, writer):
+            await reader.readuntil(b"\r\n\r\n")
+            writer.write(b"SOURCETABLE 200 OK\r\nContent-Type: text/plain\r\n\r\n"
+                         b"CAS;host;2101;Test\r\n"
+                         b"STR;VRS_3_2G;Ort;RTCM 3.2\r\n"
+                         b"STR;NEAR_3_2G;Ort;RTCM 3.2\r\n"
+                         b"ENDSOURCETABLE\r\n")
+            await writer.drain()
+            writer.close()
+
+        server = await asyncio.start_server(caster, "127.0.0.1", 0)
+        port = server.sockets[0].getsockname()[1]
+        config = self._config(source="ntrip", host="127.0.0.1", port=port,
+                              mountpoint="FALSCH", username="u", password="p")
+        client = NtripClient(config.corrections, lambda _chunk: None)
+        with self.assertRaises(ConnectionError) as fehler:
+            await client._session()
+        server.close()
+        text = str(fehler.exception)
+        self.assertIn("FALSCH", text)
+        self.assertIn("gibt es beim Caster nicht", text)
+        self.assertIn("VRS_3_2G", text)
+        self.assertIn("NEAR_3_2G", text)
+
     async def test_error_status_still_names_the_source(self):
         """Bricht die Verbindung ab, muss dranstehen, welche Quelle schweigt."""
         from agripilot.ntrip import TcpRtcmSource
