@@ -38,6 +38,22 @@ class GnssSource:
         # angehängt und nicht in jeder einzelnen Quelle, weil alle Quellen
         # durch `handle_line` gehen - eine Stelle, die niemand vergessen kann.
         self.recorder = None
+        # Ob Korrekturen zum Empfänger zurückgehen können, und was davon ankam.
+        # Ohne das sieht man Bytes vom Caster und rätselt, warum kein Fix kommt.
+        self.nimmt_korrekturen = False
+        self.rtcm_geschrieben = 0
+        self.rtcm_fehler = ""
+
+    def _rtcm_schreiben(self, ziel, data: bytes) -> None:
+        if ziel is None:
+            self.rtcm_fehler = "Empfänger gerade nicht verbunden"
+            return
+        try:
+            ziel.write(data)
+            self.rtcm_geschrieben += len(data)
+            self.rtcm_fehler = ""
+        except Exception as exc:  # noqa: BLE001 - eine verlorene Korrektur ist nicht fatal
+            self.rtcm_fehler = str(exc) or type(exc).__name__
 
     async def run(self) -> None:  # pragma: no cover - overridden
         raise NotImplementedError
@@ -80,6 +96,7 @@ class SerialSource(GnssSource):
         self.port = port
         self.baudrate = baudrate
         self._serial = None
+        self.nimmt_korrekturen = True
 
     async def run(self) -> None:
         self.running = True
@@ -117,11 +134,7 @@ class SerialSource(GnssSource):
             await self.handle_line(raw.decode("ascii", errors="ignore"))
 
     def write_rtcm(self, data: bytes) -> None:
-        if self._serial is not None:
-            try:
-                self._serial.write(data)
-            except Exception:  # noqa: BLE001 - a failed correction is not fatal
-                pass
+        self._rtcm_schreiben(self._serial, data)
 
 
 class TcpSource(GnssSource):
@@ -132,6 +145,7 @@ class TcpSource(GnssSource):
         self.host = host
         self.port = port
         self._writer: Optional[asyncio.StreamWriter] = None
+        self.nimmt_korrekturen = True
 
     async def run(self) -> None:
         self.running = True
@@ -154,11 +168,7 @@ class TcpSource(GnssSource):
                 backoff = min(15.0, backoff * 2)
 
     def write_rtcm(self, data: bytes) -> None:
-        if self._writer is not None:
-            try:
-                self._writer.write(data)
-            except Exception:  # noqa: BLE001
-                pass
+        self._rtcm_schreiben(self._writer, data)
 
 
 class UdpSource(GnssSource):

@@ -323,6 +323,13 @@ label.button { display: inline-flex; align-items: center; cursor: pointer; }
 .setting-field .restart { color: var(--amber); font-size: 12px; margin-top: 6px; }
 .setting-field.changed { background: color-mix(in srgb, var(--blue) 12%, var(--panel)); }
 .setting-field.changed > label { color: var(--blue); }
+.ntrip-tool { padding: 12px 14px; border-top: 1px solid var(--line); display: grid; gap: 10px; }
+.ntrip-buttons { display: flex; flex-wrap: wrap; gap: 10px; }
+.ntrip-buttons button { flex: 1 1 180px; min-height: 48px; }
+.ntrip-list { width: 100%; min-height: 48px; }
+.ntrip-result { font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
+.ntrip-result.good { color: var(--leucht); }
+.ntrip-result.bad { color: var(--red); }
 
 /* --- Inbetriebnahme --- */
 .progress {

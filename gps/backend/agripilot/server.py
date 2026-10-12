@@ -12,6 +12,7 @@ map ten times a second would saturate the link within a few hectares.
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import hmac
 import struct
 import sys
@@ -41,7 +42,9 @@ from .actuators import build_output
 from .coverage import CoverageMap
 from .engine import Engine
 from .gnss import SimulatorSource, build_source
-from .ntrip import CorrectionSource, RtcmRelay, RtcmRelayClient, build_corrections
+from .ntrip import (CorrectionSource, RtcmRelay, RtcmRelayClient, build_corrections,
+                    mountpoints_holen, verbindung_testen)
+from .ntrip_protokoll import CasterFehler, rtcm_urteil
 from .steering import SteeringController
 from .storage import Storage
 
@@ -72,6 +75,7 @@ class Application:
         self.source = None
         self.imu = None
         self._quellen_tasks: list[asyncio.Task] = []
+        self._korrektur_tasks: list[asyncio.Task] = []
         self._quellen_aufbauen()
         self.steering = SteeringController(
             config.steering, build_output(config, self.imu)
@@ -117,6 +121,46 @@ class Application:
             offsets = self.store.get_setting("imu_offsets") or {}
             self.imu.roll_offset = float(offsets.get("roll_offset", 0.0))
             self.imu.pitch_offset = float(offsets.get("pitch_offset", 0.0))
+
+    def _korrekturen_starten(self) -> None:
+        """Woher die RTK-Korrekturen kommen.
+
+        Ist eine eigene Quelle eingetragen, holt jedes Gerät sie selbst - auch ein
+        Arbeiter-Tablet mit Mobilfunk. Die Weitergabe vom Master ist nur der Rückfall
+        ohne eigene Quelle: sie läuft über einen eigenen Port im Hofnetz und kommt
+        über den Tunnel (nur HTTPS) gar nicht durch.
+        """
+        cfg = self.config
+        self.corrections = build_corrections(cfg, self._on_rtcm, self._current_position)
+        self._korrektur_tasks = []
+        if self.corrections is not None:
+            self._korrektur_tasks.append(asyncio.create_task(self.corrections.run()))
+        elif not cfg.is_master and cfg.network.use_master_rtcm:
+            host = _host_of(cfg.network.master_url)
+            self.rtcm_client = RtcmRelayClient(
+                host, cfg.network.rtcm_relay_port,
+                # nicht die gebundene Methode: die Quelle kann wechseln
+                lambda daten: self.source.write_rtcm(daten)
+            )
+            self._korrektur_tasks.append(asyncio.create_task(self.rtcm_client.run()))
+
+    async def korrekturen_wechseln(self) -> str:
+        """Korrekturquelle im Betrieb neu aufbauen - nach geänderten Einstellungen."""
+        for quelle in (self.corrections, self.rtcm_client):
+            if quelle is not None:
+                try:
+                    await quelle.stop()
+                except Exception as exc:  # noqa: BLE001 - weiter, aber nicht stumm
+                    self.engine.note(f"Korrekturquelle ließ sich nicht sauber beenden: {exc}")
+        for task in self._korrektur_tasks:
+            task.cancel()
+        if self._korrektur_tasks:
+            await asyncio.gather(*self._korrektur_tasks, return_exceptions=True)
+        self.corrections = None
+        self.rtcm_client = None
+        self._korrekturen_starten()
+        quelle = self.corrections or self.rtcm_client
+        return quelle.adresse if quelle is not None and quelle.adresse else "aus"
 
     def _quellen_starten(self) -> None:
         self._quellen_tasks = [asyncio.create_task(self.source.run())]
@@ -189,19 +233,8 @@ class Application:
             # The master owns the caster connection and re-serves it.
             self.relay = RtcmRelay(cfg.network.rtcm_relay_port)
             await self.relay.start()
-            self.corrections = build_corrections(
-                cfg, self._on_rtcm, self._current_position)
-            if self.corrections is not None:
-                self.tasks.append(asyncio.create_task(self.corrections.run()))
-        else:
-            if cfg.network.use_master_rtcm:
-                host = _host_of(cfg.network.master_url)
-                self.rtcm_client = RtcmRelayClient(
-                    host, cfg.network.rtcm_relay_port,
-                    # nicht die gebundene Methode: die Quelle kann wechseln
-                    lambda daten: self.source.write_rtcm(daten)
-                )
-                self.tasks.append(asyncio.create_task(self.rtcm_client.run()))
+        self._korrekturen_starten()
+        if not cfg.is_master:
             self.sync_client = sync.SyncClient(cfg, self.store, self.engine)
             self.tasks.append(asyncio.create_task(self.sync_client.run()))
 
@@ -305,9 +338,56 @@ class Application:
                 await component.stop()
         if self.relay is not None:
             await self.relay.stop()
-        for task in self.tasks + self._quellen_tasks:
+        for task in self.tasks + self._quellen_tasks + self._korrektur_tasks:
             task.cancel()
         self.store.close()
+
+    def korrektur_status(self) -> dict:
+        """Stand der Korrekturen - und ein Satz, woran RTK gerade scheitert."""
+        quelle = self.corrections or self.rtcm_client
+        fix = self.engine.fix
+        position = self._current_position()
+        rtcm = quelle.pruefer.zusammenfassung(position) if quelle is not None else None
+        status = {
+            "source": self.config.corrections.source,
+            "weg": ("eigene Quelle" if self.corrections is not None else
+                    "vom Master" if self.rtcm_client is not None else "aus"),
+            "status": quelle.status if quelle is not None else "aus",
+            "healthy": bool(quelle is not None and quelle.healthy),
+            "bytes": quelle.bytes_received if quelle is not None else 0,
+            # Das Alter der Korrekturen meldet der Empfänger selbst im
+            # GGA-Satz. Es ist die ehrlichste Aussage darüber, ob der Weg
+            # von der Basis zum Traktor gerade wirklich trägt.
+            "age_s": fix.age_of_corrections if fix else None,
+            "rtcm": rtcm,
+            "an_empfaenger": getattr(self.source, "rtcm_geschrieben", 0),
+        }
+        status["hinweis"] = self._rtk_hinweis(quelle, rtcm, fix)
+        return status
+
+    def _rtk_hinweis(self, quelle, rtcm: Optional[dict], fix) -> str:
+        """Der erste Grund in der Kette Caster → Prüfung → Empfänger → Fix, der hakt."""
+        if fix is not None and fix.fix_quality == 4:
+            return ""
+        if quelle is None:
+            return ("Keine Korrekturquelle eingetragen - Einstellungen → Korrekturdaten (RTK): "
+                    "Caster, Mountpoint und Zugang eintragen.")
+        if not quelle.bytes_received:
+            return f"Vom Caster kommt nichts: {quelle.status}"
+        urteil = rtcm_urteil(rtcm, quelle.bytes_received) if rtcm is not None else ""
+        if urteil:
+            return urteil
+        if not getattr(self.source, "nimmt_korrekturen", False):
+            return (f"Korrekturen kommen an, aber die Positionsquelle ({self.config.gnss.source}) "
+                    "nimmt keine an - am Traktor den Empfänger über USB/seriell anschließen.")
+        if getattr(self.source, "rtcm_fehler", ""):
+            return f"Korrekturen lassen sich nicht zum Empfänger schreiben: {self.source.rtcm_fehler}"
+        if fix is None or not fix.valid:
+            return "Korrekturen kommen an, der Empfänger hat aber noch keine Position."
+        if fix.fix_quality == 5:
+            return "RTK Float - Korrekturen wirken, der Empfänger rechnet noch auf Fix (meist unter 1 min)."
+        return ("Korrekturen gehen an den Empfänger, er nutzt sie aber nicht. Im u-center prüfen: "
+                "RTCM3 als Eingang am Anschluss erlaubt (UBX-CFG-PRT bzw. CFG-USBINPROT-RTCM3X)?")
 
     def _on_rtcm(self, data: bytes) -> None:
         """Corrections go to our own receiver and out to the other machines."""
@@ -387,20 +467,7 @@ class Application:
                 "replay_s": getattr(self.source, "position_s", None),
             },
             "rohdaten": self.aufzeichnung.status(),
-            "corrections": {
-                "source": self.config.corrections.source,
-                "status": self.corrections.status if self.corrections else (
-                    self.rtcm_client.status if self.rtcm_client else "aus"),
-                "healthy": bool(self.corrections and self.corrections.healthy) or
-                           bool(self.rtcm_client and self.rtcm_client.healthy),
-                "bytes": (self.corrections.bytes_received if self.corrections else
-                          self.rtcm_client.bytes_received if self.rtcm_client else 0),
-                # Das Alter der Korrekturen meldet der Empfänger selbst im
-                # GGA-Satz. Es ist die ehrlichste Aussage darüber, ob der Weg
-                # von der Basis zum Traktor gerade wirklich trägt.
-                "age_s": (self.engine.fix.age_of_corrections
-                          if self.engine.fix else None),
-            },
+            "corrections": self.korrektur_status(),
             "imu": {
                 "source": self.config.imu.source,
                 "status": self.imu.status if self.imu else "aus",
@@ -1047,7 +1114,54 @@ def create_app(config=None) -> FastAPI:
         if any(k.startswith(("gnss.", "imu.")) and k not in NUR_WERT
                for k in aenderungen):
             ergebnis["quelle"] = await application.quelle_wechseln()
+        # Den Caster wechselt man auch auf dem Feld - dafür startet niemand den Dienst neu.
+        if any(k.startswith("corrections.") for k in aenderungen):
+            ergebnis["korrekturen"] = await application.korrekturen_wechseln()
         return ok({**ergebnis, "werte": settings_module.werte(config)})
+
+    def _caster_angaben(payload: dict):
+        """Die Angaben aus der Maske, ohne sie zu speichern - Lücken aus der Konfiguration.
+
+        Das Passwort kommt nie zur Oberfläche zurück. Steht dort der Platzhalter
+        oder nichts, gilt das gespeicherte - sonst müsste man es für jeden Test neu tippen.
+        """
+        cfg = config.corrections
+        passwort = str(payload.get("password") or "")
+        if passwort == settings_module.PASSWORT_PLATZHALTER:
+            passwort = ""
+        port = payload.get("port", cfg.port)
+        try:
+            port = int(port)
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(400, "Port muss eine Zahl sein") from exc
+        if not 1 <= port <= 65535:
+            raise HTTPException(400, "Port muss zwischen 1 und 65535 liegen")
+        return dataclasses.replace(
+            cfg,
+            host=str(payload.get("host", cfg.host) or "").strip(),
+            port=port,
+            mountpoint=str(payload.get("mountpoint", cfg.mountpoint) or "").strip().lstrip("/"),
+            username=str(payload.get("username", cfg.username) or ""),
+            password=passwort or cfg.password or "",
+            send_gga=bool(payload.get("send_gga", cfg.send_gga)),
+        )
+
+    @api.post("/api/ntrip/mountpoints")
+    async def ntrip_mountpoints(payload: dict = Body(...)):
+        """Die Mountpoint-Liste des Casters - nächste Basis zuerst."""
+        angaben = _caster_angaben(payload)
+        try:
+            liste = await mountpoints_holen(angaben.host, angaben.port, angaben.username,
+                                            angaben.password, application._current_position())
+        except CasterFehler as exc:
+            raise HTTPException(400, str(exc)) from exc
+        return ok({"mountpoints": liste[:300], "anzahl": len(liste)})
+
+    @api.post("/api/ntrip/test")
+    async def ntrip_test(payload: dict = Body(...)):
+        """Einmal verbinden und ein paar Sekunden mitlesen - ohne etwas zu speichern."""
+        angaben = _caster_angaben(payload)
+        return ok(await verbindung_testen(angaben, application._current_position()))
 
     @api.post("/api/quelle/neustart")
     async def quelle_neustart():

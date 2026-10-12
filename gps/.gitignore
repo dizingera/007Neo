@@ -5,3 +5,7 @@ build-exe/
 AgriPilot-Setup.exe
 build-exe-test/
 AgriPilot-Test.exe
+
+# Tablet-Paket enthaelt den Arbeitercode im Klartext - nie einchecken (Repo ist oeffentlich)
+Tablet-Paket/
+agripilot-installation-*/

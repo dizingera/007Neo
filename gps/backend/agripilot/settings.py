@@ -125,34 +125,38 @@ GRUPPEN: list[Gruppe] = [
     Gruppe(
         id="corrections",
         titel="Korrekturdaten (RTK)",
-        hinweis="Zentimeter gibt es nur mit Korrekturen von einer Basis. Der Weg "
-                "entscheidet, was einzutragen ist. Hängt das Funkmodem unmittelbar "
-                "am Empfänger, gehört hier 'aus' hin - dann sieht die Software den "
-                "Strom gar nicht, und das ist richtig so.",
+        hinweis="Zentimeter gibt es nur mit Korrekturen von einer Basis. Am Traktor-Tablet "
+                "hier den Caster eintragen - das Tablet holt die Korrekturen dann selbst "
+                "über sein Mobilfunknetz. Bleibt es 'aus', nimmt ein Arbeiter die "
+                "Korrekturen des Masters (nur im Hofnetz). Hängt das Funkmodem unmittelbar "
+                "am Empfänger, gehört hier ebenfalls 'aus' hin. Änderungen wirken sofort.",
         felder=[
-            Feld("corrections.source", "Weg zur Basis", "auswahl", auswahl=(
-                ("ntrip", "Caster (NTRIP, z. B. RTKBase oder ein Dienst)"),
+            Feld("corrections.source", "Weg zur Basis", "auswahl", sofort=True, auswahl=(
+                ("ntrip", "Caster (NTRIP, z. B. RTKBase, SAPOS oder ein Dienst)"),
                 ("tcp", "Roher RTCM3-Strom auf einem Port"),
                 ("serial", "Funkmodem am Rechner"),
-                ("aus", "Aus (Funkmodem hängt direkt am Empfänger)"),
+                ("aus", "Aus (Funkmodem am Empfänger, oder Arbeiter über den Master)"),
             )),
-            Feld("corrections.host", "Adresse", hilfe="Bei NTRIP und TCP: die eigene Basis "
-                                                      "oder der Caster."),
-            Feld("corrections.port", "Port", "ganzzahl", minimum=1, maximum=65535,
+            Feld("corrections.host", "Adresse", sofort=True,
+                 hilfe="Bei NTRIP und TCP: die eigene Basis oder der Caster, ohne http://."),
+            Feld("corrections.port", "Port", "ganzzahl", sofort=True, minimum=1, maximum=65535,
                  hilfe="NTRIP meist 2101; bei rohem Strom, was die Basis öffnet."),
-            Feld("corrections.mountpoint", "Mountpoint", hilfe="Nur bei NTRIP."),
-            Feld("corrections.username", "Benutzer", hilfe="Nur bei NTRIP mit Anmeldung."),
-            Feld("corrections.password", "Passwort", "passwort",
+            Feld("corrections.mountpoint", "Mountpoint", sofort=True,
+                 hilfe="Nur bei NTRIP. Am einfachsten über „Mountpoints abrufen“ wählen."),
+            Feld("corrections.username", "Benutzer", sofort=True,
+                 hilfe="Nur bei NTRIP mit Anmeldung."),
+            Feld("corrections.password", "Passwort", "passwort", sofort=True,
                  hilfe="Wird gespeichert, aber nie zurückgegeben."),
-            Feld("corrections.serial_port", "Anschluss des Funkmodems",
+            Feld("corrections.serial_port", "Anschluss des Funkmodems", sofort=True,
                  hilfe="Nur bei 'Funkmodem am Rechner', z. B. COM4."),
-            Feld("corrections.baudrate", "Baudrate des Funkmodems", "ganzzahl",
+            Feld("corrections.baudrate", "Baudrate des Funkmodems", "ganzzahl", sofort=True,
                  minimum=1200, maximum=921600),
             Feld("corrections.send_gga", "Eigene Position zum Caster senden", "schalter",
-                 hilfe="Netz-RTK (VRS) braucht das, sonst kommt nichts. Eine einzelne "
-                       "eigene Basis braucht es nicht."),
+                 sofort=True,
+                 hilfe="Netz-RTK (VRS, z. B. SAPOS) braucht das, sonst kommt nichts. Eine "
+                       "einzelne eigene Basis braucht es nicht, schadet aber auch nicht."),
             Feld("corrections.gga_interval_s", "Abstand der Positionsmeldung", "ganzzahl",
-                 einheit="s", minimum=1, maximum=120),
+                 sofort=True, einheit="s", minimum=1, maximum=120),
         ],
     ),
     Gruppe(

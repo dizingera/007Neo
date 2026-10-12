@@ -1658,6 +1658,12 @@ function renderSystem() {
         ? ` · ${system.corrections.age_s.toFixed(0)} s alt` : ''),
       system.corrections.healthy &&
       (system.corrections.age_s == null || system.corrections.age_s < 30)],
+    ...(system.corrections.rtcm && system.corrections.rtcm.rahmen ? [['RTCM3 vom Caster',
+      rtcmText(system.corrections.rtcm) +
+      ` · ${((system.corrections.an_empfaenger || 0) / 1024).toFixed(0)} kB an den Empfänger`,
+      !system.corrections.hinweis]] : []),
+    ...(system.corrections.hinweis
+      ? [['Warum kein RTK?', system.corrections.hinweis, false]] : []),
     ['Korrektur-Weitergabe', system.relay.running
       ? `aktiv · ${system.relay.clients} Traktor(en)` : 'aus', system.relay.running],
     ['Abgleich', system.sync.status + (system.sync.age_s != null
@@ -1665,11 +1671,22 @@ function renderSystem() {
   ];
   host.innerHTML = '';
   rows.forEach(([label, value, good]) => {
+    // Als Text, nicht als HTML: hier stehen auch Antworten fremder Caster.
     const row = document.createElement('div');
     row.className = 'item';
-    row.innerHTML = `<div class="main"><div class="title">${label}</div>
-      <div class="sub">${value}</div></div>
-      <div class="chip ${good ? 'good' : 'warn'}">${good ? 'OK' : 'prüfen'}</div>`;
+    const main = document.createElement('div');
+    main.className = 'main';
+    const title = document.createElement('div');
+    title.className = 'title';
+    title.textContent = label;
+    const sub = document.createElement('div');
+    sub.className = 'sub';
+    sub.textContent = value;
+    main.append(title, sub);
+    const chip = document.createElement('div');
+    chip.className = `chip ${good ? 'good' : 'warn'}`;
+    chip.textContent = good ? 'OK' : 'prüfen';
+    row.append(main, chip);
     host.appendChild(row);
   });
   (system.devices || []).forEach((device) => {
@@ -1710,10 +1727,112 @@ async function loadSettings() {
       box.appendChild(note);
     }
     gruppe.felder.forEach((feld) => box.appendChild(settingField(feld)));
+    if (gruppe.id === 'corrections') box.appendChild(ntripWerkzeug());
     host.appendChild(box);
   });
   el('settingsInfo').textContent = daten.datei
     ? `Datei: ${daten.datei}` : 'Noch keine Konfigurationsdatei – beim Übernehmen wird eine angelegt.';
+}
+
+/* NTRIP: Mountpoints vom Caster holen und die Verbindung probieren, bevor man
+   speichert. Beides nimmt, was gerade in der Maske steht - nicht das Gespeicherte. */
+function rtcmText(rtcm) {
+  const teile = [`${rtcm.rahmen} Nachrichten`];
+  if (rtcm.systeme.length) teile.push(rtcm.systeme.join('/'));
+  if (rtcm.station != null) teile.push(`Basis ${rtcm.station}`);
+  if (rtcm.basis_km != null) teile.push(`${rtcm.basis_km.toFixed(1)} km entfernt`);
+  if (rtcm.crc_fehler) teile.push(`${rtcm.crc_fehler} kaputte`);
+  return teile.join(' · ');
+}
+
+function casterAngaben() {
+  const wert = (schluessel) => {
+    const input = document.getElementById(`set-corrections.${schluessel}`);
+    if (!input) return undefined;
+    return input.type === 'checkbox' ? input.checked : input.value;
+  };
+  return {
+    host: wert('host'), port: wert('port'), mountpoint: wert('mountpoint'),
+    username: wert('username'), password: wert('password'), send_gga: wert('send_gga'),
+  };
+}
+
+function ntripWerkzeug() {
+  const box = document.createElement('div');
+  box.className = 'ntrip-tool';
+  const knoepfe = document.createElement('div');
+  knoepfe.className = 'ntrip-buttons';
+  const holen = document.createElement('button');
+  holen.type = 'button';
+  holen.textContent = 'Mountpoints abrufen';
+  const testen = document.createElement('button');
+  testen.type = 'button';
+  testen.textContent = 'Verbindung testen';
+  knoepfe.append(holen, testen);
+  const liste = document.createElement('select');
+  liste.className = 'ntrip-list';
+  liste.hidden = true;
+  const ergebnis = document.createElement('div');
+  ergebnis.className = 'ntrip-result';
+  box.append(knoepfe, liste, ergebnis);
+
+  const melden = (text, gut) => {
+    ergebnis.textContent = text;
+    ergebnis.className = `ntrip-result ${gut ? 'good' : 'bad'}`;
+  };
+
+  holen.onclick = async () => {
+    holen.disabled = true;
+    melden('Frage den Caster …', true);
+    const antwort = await api('POST', '/api/ntrip/mountpoints', casterAngaben());
+    holen.disabled = false;
+    if (!antwort) { melden('Keine Liste – siehe Meldung oben.', false); return; }
+    const punkte = antwort.data.mountpoints;
+    if (!punkte.length) { melden('Der Caster kennt keine Mountpoints.', false); return; }
+    liste.innerHTML = '';
+    const leer = document.createElement('option');
+    leer.value = '';
+    leer.textContent = `– ${antwort.data.anzahl} Mountpoints, nächste zuerst –`;
+    liste.appendChild(leer);
+    punkte.forEach((p) => {
+      const option = document.createElement('option');
+      option.value = p.mountpoint;
+      option.textContent = [p.mountpoint, p.km != null ? `${p.km.toFixed(1)} km` : '',
+        p.format, p.systeme, p.netz ? 'Netz/VRS' : '', p.gebuehr ? 'kostenpflichtig' : '']
+        .filter(Boolean).join(' · ');
+      liste.appendChild(option);
+    });
+    liste.hidden = false;
+    melden('Mountpoint auswählen, dann „Verbindung testen“ und speichern.', true);
+  };
+
+  liste.onchange = () => {
+    if (!liste.value) return;
+    const feld = document.getElementById('set-corrections.mountpoint');
+    feld.value = liste.value;
+    feld.dispatchEvent(new Event('input'));
+    const quelle = document.getElementById('set-corrections.source');
+    if (quelle && quelle.value !== 'ntrip') {
+      quelle.value = 'ntrip';
+      quelle.dispatchEvent(new Event('change'));
+    }
+  };
+
+  testen.onclick = async () => {
+    testen.disabled = true;
+    melden('Verbinde und lese 8 Sekunden mit …', true);
+    const antwort = await api('POST', '/api/ntrip/test', casterAngaben());
+    testen.disabled = false;
+    if (!antwort) { melden('Test nicht möglich – siehe Meldung oben.', false); return; }
+    const t = antwort.data;
+    if (t.fehler) { melden(t.fehler, false); return; }
+    const kopf = `Verbunden (NTRIP ${t.version}${t.chunked ? ', in Stücken' : ''}) · ` +
+      `${(t.bytes / 1024).toFixed(1)} kB`;
+    const rtcm = t.rtcm && t.rtcm.rahmen ? ` · ${rtcmText(t.rtcm)}` : '';
+    melden(t.ok ? `${kopf}${rtcm} – passt, jetzt speichern.`
+      : `${kopf}${rtcm} – ${t.urteil}`, t.ok);
+  };
+  return box;
 }
 
 function settingField(feld) {

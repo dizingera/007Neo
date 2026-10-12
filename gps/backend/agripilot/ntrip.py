@@ -16,11 +16,16 @@ than silently drifting apart.
 from __future__ import annotations
 
 import asyncio
-import base64
 import time
 from typing import Callable, Optional
 
 from .nmea import build_gga
+from .ntrip_protokoll import (
+    CasterFehler, ChunkedDecoder, RtcmPruefer, anfrage, antwort_pruefen, kopf_zerlegen,
+    rtcm_urteil, sourcetable_lesen,
+)
+
+KOPF_MAX = 16384          # Antwortkopf des Casters - länger ist keine Antwort eines Casters
 
 RtcmSink = Callable[[bytes], None]
 
@@ -38,6 +43,151 @@ async def _schliessen(writer: asyncio.StreamWriter) -> None:
         pass
 
 
+async def antwort_lesen(reader: asyncio.StreamReader, timeout: float = 15.0):
+    """Antwortkopf des Casters lesen: Deutung und die schon mitgelesenen Nutzbytes.
+
+    NTRIP 1 ("ICY 200 OK") hat oft keine Leerzeile vor den Daten; dann beginnen
+    die Korrekturen direkt nach der Statuszeile. NTRIP 2 ist sauberes HTTP.
+    """
+    puffer = b""
+    while b"\r\n" not in puffer:
+        stueck = await asyncio.wait_for(reader.read(4096), timeout)
+        if not stueck:
+            raise CasterFehler("Caster hat ohne Antwort aufgelegt - Adresse oder Port falsch?")
+        puffer += stueck
+        if len(puffer) > KOPF_MAX:
+            raise CasterFehler("Das ist kein NTRIP-Caster (keine lesbare Antwort).")
+    statuszeile = puffer.split(b"\r\n", 1)[0]
+    if statuszeile.upper().startswith(b"ICY"):
+        rest = puffer[len(statuszeile) + 2:]
+        if rest.startswith(b"\r\n"):
+            rest = rest[2:]
+        return antwort_pruefen(statuszeile.decode("latin-1"), {}), rest
+    while b"\r\n\r\n" not in puffer:
+        stueck = await asyncio.wait_for(reader.read(4096), timeout)
+        if not stueck:
+            break
+        puffer += stueck
+        if len(puffer) > KOPF_MAX:
+            raise CasterFehler("Antwortkopf des Casters zu lang.")
+    kopf, _, rest = puffer.partition(b"\r\n\r\n")
+    status, felder = kopf_zerlegen(kopf)
+    return antwort_pruefen(status, felder), rest
+
+
+async def _verbinden(host: str, port: int, timeout: float = 15.0):
+    try:
+        return await asyncio.wait_for(asyncio.open_connection(host, port), timeout)
+    except (OSError, asyncio.TimeoutError) as exc:
+        grund = str(exc) or "Zeitüberschreitung"
+        raise CasterFehler(f"{host}:{port} nicht erreichbar ({grund}).") from exc
+
+
+async def mountpoints_holen(host: str, port: int, benutzer: str = "", passwort: str = "",
+                            position: Optional[tuple[float, float]] = None,
+                            timeout: float = 15.0) -> list[dict]:
+    """Die Mountpoint-Liste (Sourcetable) eines Casters holen."""
+    if not host:
+        raise CasterFehler("Erst die Adresse des Casters eintragen.")
+    reader, writer = await _verbinden(host, port, timeout)
+    loop = asyncio.get_running_loop()
+    ende = loop.time() + timeout
+    try:
+        writer.write(anfrage(host, port, "", benutzer, passwort))
+        await writer.drain()
+        roh = b""
+        while b"\r\n\r\n" not in roh:
+            stueck = await asyncio.wait_for(reader.read(8192), max(0.1, ende - loop.time()))
+            if not stueck:
+                raise CasterFehler("Der Caster hat keine Mountpoint-Liste geschickt.")
+            roh += stueck
+        kopf, _, rest = roh.partition(b"\r\n\r\n")
+        status, felder = kopf_zerlegen(kopf)
+        teile = status.split()
+        if not (status.upper().startswith("SOURCETABLE") or teile[1:2] == ["200"]):
+            raise CasterFehler(antwort_pruefen(status, felder).fehler)
+        decoder = (ChunkedDecoder()
+                   if "chunked" in felder.get("transfer-encoding", "").lower() else None)
+        daten = decoder.feed(rest) if decoder else rest
+        while b"ENDSOURCETABLE" not in daten and not (decoder and decoder.ende):
+            try:
+                stueck = await asyncio.wait_for(reader.read(8192), max(0.1, ende - loop.time()))
+            except asyncio.TimeoutError:
+                break
+            if not stueck:
+                break
+            daten += decoder.feed(stueck) if decoder else stueck
+        return sourcetable_lesen(daten.decode("latin-1"), position)
+    except asyncio.TimeoutError as exc:
+        raise CasterFehler("Der Caster antwortet nicht.") from exc
+    finally:
+        await _schliessen(writer)
+
+
+async def verbindung_testen(cfg, position: Optional[tuple[float, float]] = None,
+                            dauer_s: float = 8.0) -> dict:
+    """Einmal zum Caster verbinden, ein paar Sekunden mitlesen, ehrlich berichten.
+
+    Schreibt nichts an den Empfänger - das ist ein Blick, kein Betrieb.
+    """
+    ergebnis = {"ok": False, "verbunden": False, "fehler": "", "version": "",
+                "chunked": False, "bytes": 0, "rtcm": None, "urteil": ""}
+    if not cfg.host:
+        ergebnis["fehler"] = "Erst die Adresse des Casters eintragen."
+        return ergebnis
+    if not cfg.mountpoint:
+        ergebnis["fehler"] = "Kein Mountpoint eingetragen - über „Mountpoints abrufen“ auswählen."
+        return ergebnis
+    try:
+        reader, writer = await _verbinden(cfg.host, cfg.port)
+    except CasterFehler as exc:
+        ergebnis["fehler"] = str(exc)
+        return ergebnis
+    pruefer = RtcmPruefer()
+    loop = asyncio.get_running_loop()
+    try:
+        writer.write(anfrage(cfg.host, cfg.port, cfg.mountpoint, cfg.username, cfg.password))
+        await writer.drain()
+        antwort, chunk = await antwort_lesen(reader)
+        if not antwort.ok:
+            ergebnis["fehler"] = antwort.fehler
+            return ergebnis
+        ergebnis.update(verbunden=True, version=antwort.version, chunked=antwort.chunked)
+        if cfg.send_gga and position:
+            writer.write(build_gga(position[0], position[1], 0.0, 1).encode())
+            await writer.drain()
+        decoder = ChunkedDecoder() if antwort.chunked else None
+        ende = loop.time() + dauer_s
+        while True:
+            if chunk:
+                daten = decoder.feed(chunk) if decoder else chunk
+                ergebnis["bytes"] += len(daten)
+                pruefer.feed(daten, time.time())
+            if loop.time() >= ende:
+                break
+            try:
+                chunk = await asyncio.wait_for(reader.read(4096), ende - loop.time())
+            except asyncio.TimeoutError:
+                break
+            if not chunk:
+                break
+    except asyncio.TimeoutError:
+        ergebnis["fehler"] = "Der Caster antwortet nicht."
+    except CasterFehler as exc:
+        ergebnis["fehler"] = str(exc)
+    finally:
+        await _schliessen(writer)
+    ergebnis["rtcm"] = pruefer.zusammenfassung(position)
+    if ergebnis["verbunden"] and not ergebnis["fehler"]:
+        ergebnis["urteil"] = rtcm_urteil(ergebnis["rtcm"], ergebnis["bytes"])
+        if not ergebnis["bytes"] and cfg.send_gga and not position:
+            ergebnis["urteil"] = ("Verbunden, aber keine Daten. Netz-RTK (VRS) schickt erst, "
+                                  "wenn der Empfänger eine Position hat.")
+    ergebnis["ok"] = bool(ergebnis["verbunden"] and not ergebnis["fehler"]
+                          and not ergebnis["urteil"])
+    return ergebnis
+
+
 class CorrectionSource:
     """Gemeinsames Verhalten aller Quellen: laufen, melden, sich erholen."""
 
@@ -47,6 +197,8 @@ class CorrectionSource:
         self.status = "aus"
         self.bytes_received = 0
         self.last_data_at = 0.0
+        # Liest mit, ob im Strom wirklich RTCM3 steckt - Bytes allein sagen nichts.
+        self.pruefer = RtcmPruefer()
 
     @property
     def healthy(self) -> bool:
@@ -55,6 +207,7 @@ class CorrectionSource:
     def _received(self, chunk: bytes) -> None:
         self.bytes_received += len(chunk)
         self.last_data_at = time.time()
+        self.pruefer.feed(chunk, self.last_data_at)
         self.sink(chunk)
 
     @property
@@ -110,41 +263,34 @@ class NtripClient(CorrectionSource):
 
     async def _session(self) -> None:
         cfg = self.config
-        reader, writer = await asyncio.open_connection(cfg.host, cfg.port)
+        reader, writer = await asyncio.wait_for(
+            asyncio.open_connection(cfg.host, cfg.port), timeout=15)
         self._writer = writer
-        credentials = base64.b64encode(
-            f"{cfg.username}:{cfg.password}".encode()
-        ).decode()
-        request = (
-            f"GET /{cfg.mountpoint} HTTP/1.1\r\n"
-            f"Host: {cfg.host}:{cfg.port}\r\n"
-            "Ntrip-Version: Ntrip/2.0\r\n"
-            "User-Agent: NTRIP AgriPilot/1.0\r\n"
-            f"Authorization: Basic {credentials}\r\n"
-            "Connection: close\r\n\r\n"
-        )
-        writer.write(request.encode())
-        await writer.drain()
-
-        header = await reader.readuntil(b"\r\n")
-        if b"200" not in header and b"ICY" not in header:
-            raise ConnectionError(header.decode(errors="ignore").strip())
-        # Skip the rest of the header block.
-        while True:
-            line = await reader.readline()
-            if line in (b"\r\n", b"\n", b""):
-                break
-
-        self.status = f"verbunden {self.adresse}"
-        gga_task = asyncio.create_task(self._send_gga_loop(writer))
         try:
-            while self.running:
-                chunk = await reader.read(4096)
-                if not chunk:
-                    raise ConnectionError("Caster hat die Verbindung beendet")
-                self._received(chunk)
+            writer.write(anfrage(cfg.host, cfg.port, cfg.mountpoint, cfg.username, cfg.password))
+            await writer.drain()
+            antwort, chunk = await antwort_lesen(reader)
+            if not antwort.ok:
+                raise CasterFehler(antwort.fehler)
+            decoder = ChunkedDecoder() if antwort.chunked else None
+            self.status = f"verbunden {self.adresse}" + (" (NTRIP 2)" if antwort.version == "2" else "")
+            gga_task = asyncio.create_task(self._send_gga_loop(writer))
+            try:
+                while self.running:
+                    if chunk:
+                        # Bei NTRIP 2 erst die Stücklängen herausnehmen, sonst
+                        # stehen sie mitten im RTCM-Strom des Empfängers.
+                        daten = decoder.feed(chunk) if decoder else chunk
+                        if daten:
+                            self._received(daten)
+                        if decoder and decoder.ende:
+                            raise ConnectionError("Caster hat den Strom beendet")
+                    chunk = await reader.read(4096)
+                    if not chunk:
+                        raise ConnectionError("Caster hat die Verbindung beendet")
+            finally:
+                gga_task.cancel()
         finally:
-            gga_task.cancel()
             await _schliessen(writer)
             self._writer = None
 
@@ -165,7 +311,8 @@ class NtripClient(CorrectionSource):
                     await writer.drain()
             except Exception:  # noqa: BLE001
                 return
-            await asyncio.sleep(self.config.gga_interval_s)
+            # Ohne Position nicht lange warten: ein VRS-Caster schweigt, bis er sie kennt.
+            await asyncio.sleep(self.config.gga_interval_s if position else 2)
 
     async def stop(self) -> None:
         self.running = False
