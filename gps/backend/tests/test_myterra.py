@@ -135,6 +135,107 @@ class BerichtTests(unittest.TestCase):
         self.assertEqual(myterra.arbeiten(self.store)[0]["id"], job_id)
 
 
+MYTERRA_LISTE = [
+    {"id": "tractor-jd7530", "type": "Traktor", "active": True, "name": "John Deere 7530 Premium", "hp": 204},
+    {"id": "tractor-ihc956", "type": "Traktor", "active": True, "name": "IHC 956 XL", "hp": 95},
+    {"id": "impl-disc3", "type": "Bodenbearbeitung", "active": True, "name": "Scheibenegge 3 m", "widthM": 3},
+    {"id": "impl-cultivator250", "type": "Bodenbearbeitung", "active": True, "name": "Grubber 2,50 m", "widthM": 2.5},
+    {"id": "impl-guettler", "type": "Bodenbearbeitung", "active": True, "name": "Güttler Großfederzahnegge", "widthM": 0},
+    {"id": "impl-alt", "type": "Saat", "active": False, "name": "Alte Drille"},
+    {"id": "combine-dominator98", "type": "Mähdrescher", "active": True, "name": "Claas Dominator 98 SL"},
+]
+
+
+class MaschinenUebernahmeTests(unittest.TestCase):
+    def _client(self, ordner):
+        from fastapi.testclient import TestClient
+        from agripilot.server import create_app
+        warnings.filterwarnings("ignore")
+        config = config_module.load("/kein-solcher-pfad.yaml")
+        config.server.data_dir = ordner
+        return TestClient(create_app(config))
+
+    def test_one_machine_per_implement_with_tractor_and_known_width(self):
+        with tempfile.TemporaryDirectory() as ordner, self._client(ordner) as c:
+            vorher = next(p for p in c.get("/api/profiles").json() if p["aktiv"])
+            antwort = c.post("/api/myterra/maschinen", json={
+                "maschinen": MYTERRA_LISTE, "traktor": "John Deere 7530 Premium"}).json()["data"]
+            self.assertEqual(antwort["neu"], ["Scheibenegge 3 m", "Grubber 2,50 m",
+                                              "Güttler Großfederzahnegge", "Claas Dominator 98 SL"])
+            self.assertEqual(antwort["ohne_breite"], ["Güttler Großfederzahnegge", "Claas Dominator 98 SL"])
+            profile = {p["name"]: p for p in c.get("/api/profiles").json()}
+            self.assertEqual(profile["Grubber 2,50 m"]["width_m"], 2.5)
+            self.assertEqual(profile["Grubber 2,50 m"]["traktor"], "John Deere 7530 Premium")
+            self.assertEqual(profile["Grubber 2,50 m"]["anbaugeraet"], "Grubber 2,50 m")
+            # Der Mähdrescher fährt selbst - kein Traktor davor.
+            self.assertEqual(profile["Claas Dominator 98 SL"]["traktor"], "")
+            self.assertNotIn("Alte Drille", profile)                 # außer Betrieb
+            self.assertNotIn("IHC 956 XL", profile)                   # Traktoren sind keine Gespanne
+            # Die gewählte Maschine bleibt gewählt.
+            self.assertTrue(profile[vorher["name"]]["aktiv"])
+            katalog = c.get("/api/myterra/maschinen").json()
+            self.assertEqual(katalog["traktoren"], ["IHC 956 XL", "John Deere 7530 Premium"])
+            self.assertIn("Claas Dominator 98 SL", katalog["geraete"])
+
+    def test_running_it_again_changes_nothing_that_was_set(self):
+        with tempfile.TemporaryDirectory() as ordner, self._client(ordner) as c:
+            c.post("/api/myterra/maschinen", json={"maschinen": MYTERRA_LISTE})
+            egge = next(p for p in c.get("/api/profiles").json() if p["name"] == "Güttler Großfederzahnegge")
+            c.post(f"/api/profiles/{egge['id']}/select")
+            c.post("/api/profile", json={"width_m": 6.0})            # selbst gemessen
+            zweites = c.post("/api/myterra/maschinen", json={"maschinen": MYTERRA_LISTE}).json()["data"]
+            self.assertEqual(zweites["neu"], [])
+            self.assertEqual(len(zweites["vorhanden"]), 4)
+            egge = next(p for p in c.get("/api/profiles").json() if p["name"] == "Güttler Großfederzahnegge")
+            self.assertEqual(egge["width_m"], 6.0)
+
+    def test_an_older_machine_inherits_nothing_and_unknown_widths_copy_the_chosen_one(self):
+        with tempfile.TemporaryDirectory() as ordner, self._client(ordner) as c:
+            # Eine Maschine aus einer älteren Version: ohne die neuen Felder.
+            alt = c.post("/api/profiles", json={"name": "SuperMax", "werte": {"width_m": 4.0}}).json()["data"]
+            store = c.app.state.app.engine.store
+            liste = store.get_setting("vehicle_profiles")
+            for p in liste:
+                if p["id"] == alt["id"]:
+                    p.pop("traktor", None)
+                    p.pop("anbaugeraet", None)
+            store.set_setting("vehicle_profiles", liste)
+            c.post(f"/api/profiles/{alt['id']}/select")
+            c.post("/api/myterra/maschinen", json={"maschinen": MYTERRA_LISTE,
+                                                   "traktor": "John Deere 7530 Premium"})
+            profile = {p["name"]: p for p in c.get("/api/profiles").json()}
+            self.assertTrue(profile["SuperMax"]["aktiv"])
+            self.assertEqual(profile["SuperMax"]["anbaugeraet"], "")    # nichts geerbt
+            self.assertEqual(profile["SuperMax"]["traktor"], "")
+            self.assertEqual(profile["SuperMax"]["width_m"], 4.0)
+            # Ohne Breite aus MyTerra: die der gewählten Maschine, nicht die des Grubbers davor.
+            self.assertEqual(profile["Güttler Großfederzahnegge"]["width_m"], 4.0)
+            self.assertEqual(profile["Grubber 2,50 m"]["width_m"], 2.5)
+
+    def test_unknown_tractor_and_missing_list_are_refused(self):
+        with tempfile.TemporaryDirectory() as ordner, self._client(ordner) as c:
+            self.assertEqual(c.post("/api/myterra/maschinen", json={}).status_code, 400)
+            fehler = c.post("/api/myterra/maschinen", json={"maschinen": MYTERRA_LISTE, "traktor": "Fendt 724"})
+            self.assertEqual(fehler.status_code, 400)
+            self.assertIn("Fendt 724", fehler.json()["detail"])
+
+
+class MaschineImBerichtTests(BerichtTests):
+    def test_report_names_tractor_and_implement_as_myterra_does(self):
+        self.store.set_setting("vehicle_profiles", [
+            {"id": "a", "name": "Fendt 724", "traktor": "John Deere 7530 Premium",
+             "anbaugeraet": "Grubber 2,50 m"}])
+        b = self._bericht()
+        self.assertEqual(b["maschine"], "John Deere 7530 Premium")
+        self.assertEqual(b["anbaugeraet"], "Grubber 2,50 m")
+        self.assertEqual(b["agripilot_maschine"], "Fendt 724")
+
+    def test_without_assignment_the_machine_name_goes(self):
+        b = self._bericht()
+        self.assertEqual(b["maschine"], "Fendt 724")
+        self.assertEqual(b["anbaugeraet"], "")
+
+
 class ServerTests(unittest.TestCase):
     def test_the_file_comes_through_the_interface(self):
         from fastapi.testclient import TestClient

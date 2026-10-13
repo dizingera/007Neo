@@ -325,6 +325,16 @@ def plan(ziel: str, port: int = 8080, quelle: Optional[str] = None,
             # Über den Explorer, damit das Fenster als normaler Benutzer läuft und
             # nicht mit den Administratorrechten der Installation.
             subprocess.Popen(["explorer.exe", str(vbs_fenster)])
+        else:
+            # Still eingespielt, ohne dass AgriPilot offen war: nur geprüft, ob die neue
+            # Version anläuft - danach wieder zu. Ohne Fenster läuft nichts im Hintergrund.
+            try:
+                anfrage = urllib.request.Request(
+                    f"http://localhost:{port}/api/beenden", data=b"{}", method="POST",
+                    headers={"Content-Type": "application/json"})
+                urllib.request.urlopen(anfrage, timeout=5).read()
+            except Exception:  # noqa: BLE001 - dann eben hart
+                _lauf(["schtasks", "/End", "/TN", AUFGABE], ok_codes=None)
 
     def aufraeumen() -> None:
         _lauf(["schtasks", "/Delete", "/TN", UPDATE_AUFGABE, "/F"], ok_codes=None)

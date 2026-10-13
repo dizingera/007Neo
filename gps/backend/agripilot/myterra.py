@@ -23,6 +23,7 @@ import time
 import unicodedata
 from typing import Any, Optional
 
+from .guidance import VehicleProfile
 from .storage import Storage
 
 FORMAT = "agripilot-arbeitsbericht"
@@ -83,10 +84,23 @@ def _spur(store: Storage, job_id: str) -> Optional[dict]:
     return {"type": "LineString", "coordinates": [[round(x, 7), round(y, 7)] for x, y in punkte]}
 
 
+def _maschinen(store: Storage) -> dict[str, dict]:
+    """Die Maschinen nach Namen - für Traktor und Gerät, wie MyTerra sie nennt."""
+    return {p.get("name", ""): p for p in (store.get_setting("vehicle_profiles") or [])}
+
+
 def bericht_aus_arbeit(store: Storage, job: dict, felder: dict[str, dict],
-                       geraete: dict[str, str]) -> dict:
-    """Einen Bericht aus einer fertigen Arbeit."""
+                       geraete: dict[str, str],
+                       maschinen: Optional[dict[str, dict]] = None) -> dict:
+    """Einen Bericht aus einer fertigen Arbeit.
+
+    ``maschine`` ist der Traktor so, wie MyTerra ihn nennt, ``anbaugeraet`` das Gerät.
+    Ist bei der AgriPilot-Maschine kein MyTerra-Traktor eingetragen, geht ihr eigener
+    Name - dann ordnet MyTerra nur bei gleichem Namen zu.
+    """
     feld = felder.get(job["field_id"]) or {}
+    maschine = (maschinen if maschinen is not None else _maschinen(store)).get(
+        job.get("vehicle", "")) or {}
     beginn, ende = job["started_at"], job.get("ended_at") or job["started_at"]
     flaeche, doppelt = float(job.get("area_ha") or 0.0), float(job.get("overlap_ha") or 0.0)
     return {
@@ -108,10 +122,74 @@ def bericht_aus_arbeit(store: Storage, job: dict, felder: dict[str, dict],
         "strecke_km": round(float(job.get("distance_m") or 0.0) / 1000.0, 2),
         "taetigkeit": taetigkeit_aus(job.get("operation", "")),
         "taetigkeit_text": job.get("operation", ""),
-        "maschine": job.get("vehicle", ""),
+        "maschine": (maschine.get("traktor") or "").strip() or job.get("vehicle", ""),
+        "anbaugeraet": (maschine.get("anbaugeraet") or "").strip(),
+        "agripilot_maschine": job.get("vehicle", ""),
         "geraet": geraete.get(job.get("device_id", ""), job.get("device_id", "")),
         "spur": _spur(store, job["id"]),
     }
+
+
+# ------------------------------------------------ Maschinen aus MyTerra
+
+KATALOG = "myterra_maschinen"      # {"traktoren": [...], "geraete": [...]} für die Auswahl
+
+
+def _ist_traktor(eintrag: dict) -> bool:
+    return _glatt(eintrag.get("type") or "") in ("traktor", "schlepper")
+
+
+def maschinen_uebernehmen(engine, liste: list[dict], traktor: str = "") -> dict:
+    """Die Maschinenliste von MyTerra übernehmen.
+
+    In MyTerra sind Traktor und Gerät getrennt, in AgriPilot ist eine Maschine das
+    Gespann (die Arbeitsbreite gehört zum Gerät, Antenne und Radstand zum Traktor).
+    Deshalb wird je Gerät (und je Mähdrescher) eine AgriPilot-Maschine angelegt, mit
+    ``traktor`` als Zugmaschine; Traktoren selbst stehen in der Auswahl. Eine Maschine,
+    die es für dieses Gerät schon gibt, bleibt unverändert - was dort eingestellt ist,
+    hat jemand gemessen. Die gerade gewählte Maschine bleibt gewählt.
+    """
+    aktive = [e for e in liste if isinstance(e, dict) and (e.get("name") or "").strip()
+              and e.get("active", True) is not False]
+    traktoren = sorted({e["name"].strip() for e in aktive if _ist_traktor(e)})
+    geraete = [e for e in aktive if not _ist_traktor(e)]
+    if traktor and traktor not in traktoren:
+        raise ValueError(f"Traktor „{traktor}“ gibt es in MyTerra nicht")
+    engine.store.set_setting(KATALOG, {
+        "traktoren": traktoren,
+        "geraete": sorted({e["name"].strip() for e in geraete}),
+    })
+    vorhanden = engine.list_profiles()
+    belegt = {_glatt(p.get("anbaugeraet") or p.get("name") or "") for p in vorhanden}
+    zuvor = next((p for p in vorhanden if p.get("aktiv")), None)
+    # Jede neue Maschine geht von der gewählten aus (Antenne, Radstand des Traktors) -
+    # nicht von der zuletzt angelegten, sonst erbt ein Gerät ohne Breite die des Vorgängers.
+    felder = VehicleProfile.__dataclass_fields__
+    basis = {k: v for k, v in (zuvor or {}).items() if k in felder}
+    ergebnis: dict[str, list[str]] = {"neu": [], "vorhanden": [], "ohne_breite": []}
+    for eintrag in geraete:
+        name = eintrag["name"].strip()
+        if _glatt(name) in belegt:
+            ergebnis["vorhanden"].append(name)
+            continue
+        maehdrescher = "mahdrescher" in _glatt(eintrag.get("type") or "")
+        werte = {**basis, "anbaugeraet": name, "traktor": "" if maehdrescher else traktor}
+        try:
+            breite = float(eintrag.get("widthM") or 0.0)
+        except (TypeError, ValueError):
+            breite = 0.0
+        if breite > 0:
+            werte["width_m"] = breite
+        else:
+            ergebnis["ohne_breite"].append(name)
+        engine.save_profile_as(name, werte)
+        belegt.add(_glatt(name))
+        ergebnis["neu"].append(name)
+    if zuvor and ergebnis["neu"]:
+        engine.select_profile(zuvor["id"])
+    engine.note(f"Maschinen aus MyTerra: {len(ergebnis['neu'])} neu, "
+                f"{len(ergebnis['vorhanden'])} schon da")
+    return {**ergebnis, "traktoren": traktoren}
 
 
 def arbeiten(store: Storage) -> list[dict]:
@@ -140,6 +218,7 @@ def paket_bauen(store: Storage, von: str, ids: Optional[list[str]] = None,
     uebergeben = dict(store.get_setting(SETTING) or {})
     felder = {f["id"]: f for f in store.list_fields()}
     geraete = {d["id"]: d.get("name") or d["id"] for d in store.list_devices()}
+    maschinen = _maschinen(store)
     berichte, genommen = [], []
     for job in store.list_jobs(limit=500):
         if not job.get("ended_at") or float(job.get("area_ha") or 0.0) <= 0.0:
@@ -148,7 +227,7 @@ def paket_bauen(store: Storage, von: str, ids: Optional[list[str]] = None,
             continue
         if ids is None and nur_neue and job["id"] in uebergeben:
             continue
-        berichte.append(bericht_aus_arbeit(store, job, felder, geraete))
+        berichte.append(bericht_aus_arbeit(store, job, felder, geraete, maschinen))
         genommen.append(job["id"])
     berichte.sort(key=lambda b: b["beginn"])
     zeit = jetzt if jetzt is not None else time.time()

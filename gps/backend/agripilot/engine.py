@@ -204,7 +204,11 @@ class Engine:
         if eintrag is None:
             raise KeyError("Maschine nicht gefunden")
         self.store.set_setting("vehicle_profile_active", profile_id)
-        werte = {k: v for k, v in eintrag.items() if k in VehicleProfile.__dataclass_fields__}
+        # Von den Grundwerten aus, nicht von der vorher gewählten Maschine: einer Maschine aus
+        # einer älteren Version fehlen neuere Felder, und die erbte sie sonst vom Vorgänger
+        # (so bekam "SuperMax" das MyTerra-Gerät der zuletzt angelegten Maschine).
+        werte = {**asdict(VehicleProfile()),
+                 **{k: v for k, v in eintrag.items() if k in VehicleProfile.__dataclass_fields__}}
         self.update_profile(werte, stempeln=False)    # Auswählen ändert die Maschine nicht
         self.note(f"Maschine: {self.profile.name}")
         return self.profile

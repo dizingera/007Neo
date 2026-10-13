@@ -51,6 +51,36 @@ class BeendenEndpunktTests(unittest.TestCase):
             app.state.beenden.assert_not_called()
 
 
+class StilleInstallationTests(unittest.TestCase):
+    def _starten(self, fenster_offen: bool):
+        with tempfile.TemporaryDirectory() as tmp:
+            plan = exe.plan(str(Path(tmp) / "AgriPilot"), daten=str(Path(tmp) / "d"), still=True)
+            stoppen = [s for s in plan if s.text.startswith("Laufende")][0]
+            starten = [s for s in plan if s.text.startswith("Programm starten")][0]
+            # Erster _lauf-Aufruf in stoppen() fragt, ob ein Fenster offen ist (0 = ja).
+            with mock.patch.object(exe, "_lauf", side_effect=[0 if fenster_offen else 1] + [0] * 10), \
+                    mock.patch.object(exe.time, "sleep"):
+                stoppen.aktion()
+            with mock.patch.object(exe, "_lauf", return_value=0), \
+                    mock.patch.object(exe.time, "sleep"), \
+                    mock.patch.object(exe.urllib.request, "urlopen") as urlopen, \
+                    mock.patch.object(exe.subprocess, "Popen") as popen:
+                starten.aktion()
+            beendet = any(getattr(c.args[0], "full_url", "").endswith("/api/beenden")
+                          for c in urlopen.call_args_list)
+            return beendet, popen.called
+
+    def test_without_an_open_window_nothing_keeps_running(self):
+        beendet, fenster = self._starten(fenster_offen=False)
+        self.assertTrue(beendet)
+        self.assertFalse(fenster)
+
+    def test_an_open_window_comes_back_after_the_update(self):
+        beendet, fenster = self._starten(fenster_offen=True)
+        self.assertFalse(beendet)
+        self.assertTrue(fenster)
+
+
 class EintragTests(unittest.TestCase):
     def test_apps_and_features_entry_points_at_the_uninstaller(self):
         eintrag = exe.deinstallations_eintrag(Path(r"C:\AgriPilot\AgriPilot.exe"),

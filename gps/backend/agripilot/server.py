@@ -1292,6 +1292,20 @@ def create_app(config=None) -> FastAPI:
         """Fertige Arbeiten mit erkannter Tätigkeit und Übergabestand."""
         return myterra_module.arbeiten(store)
 
+    @api.get("/api/myterra/maschinen")
+    async def myterra_maschinen() -> dict:
+        """Traktoren und Geräte, wie MyTerra sie nennt - für die Auswahl bei der Maschine."""
+        return store.get_setting(myterra_module.KATALOG) or {"traktoren": [], "geraete": []}
+
+    @api.post("/api/myterra/maschinen")
+    async def myterra_maschinen_uebernehmen(payload: dict = Body(...)):
+        """Die Maschinenliste aus MyTerra übernehmen: je Gerät eine Maschine."""
+        liste = payload.get("maschinen")
+        if not isinstance(liste, list):
+            raise HTTPException(400, "Keine Maschinenliste übergeben")
+        return guard(myterra_module.maschinen_uebernehmen, engine, liste,
+                     str(payload.get("traktor") or ""))
+
     @api.get("/api/myterra/export")
     async def myterra_export(ids: str = "", alle: int = 0):
         """Arbeitsberichte als Datei für den Prüfeingang von MyTerra.

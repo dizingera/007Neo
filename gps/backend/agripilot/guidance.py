@@ -91,6 +91,11 @@ class VehicleProfile:
     # Anteil der Überdeckung, ab dem ein offenes Teilstück schließt (Cerea: pcc).
     section_pcc: float = 0.9
 
+    # Wie MyTerra Traktor und Gerät dieser Maschine nennt. Damit kommen beide beim
+    # Einlesen einer Arbeit in MyTerra von selbst richtig an (Freigabe braucht beide).
+    traktor: str = ""
+    anbaugeraet: str = ""
+
     @property
     def spacing_m(self) -> float:
         """Distance between passes: working width minus intentional overlap."""

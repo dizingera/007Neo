@@ -1027,6 +1027,18 @@ function renderProfiles(profile) {
     select.appendChild(option);
   });
   el('btnDeleteProfile').disabled = profile.length <= 1;
+  myterraAuswahlLaden();
+}
+
+/* Traktoren und Geräte, wie MyTerra sie nennt - als Vorschlag beim Tippen, damit
+   der Name genau stimmt und die Arbeit in MyTerra von selbst zugeordnet wird. */
+async function myterraAuswahlLaden() {
+  const antwort = await fetch('/api/myterra/maschinen').then((r) => r.json()).catch(() => null);
+  if (!antwort) return;
+  [['mtTraktoren', antwort.traktoren || []], ['mtGeraete', antwort.geraete || []]].forEach(([id, namen]) => {
+    const liste = el(id);
+    liste.replaceChildren(...namen.map((name) => Object.assign(document.createElement('option'), { value: name })));
+  });
 }
 
 function fillProfileFrom(profile) {
