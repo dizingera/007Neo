@@ -28,7 +28,7 @@ body.tag {
   --grund: #dfe6dc; --himmel: #f4f7ef;
   --text: #14201a; --muted: #57645d;
   --glas: rgba(255,255,255,.70); --haar: rgba(20,32,26,.12);
-  --leucht: #15a350; --leucht-tinte: #ffffff; --amber: #c96f0c; --rot: #d8362f; --blau: #1f63d6;
+  --leucht: #0b7a38; --leucht-tinte: #ffffff; --amber: #9a5200; --rot: #b3241e; --blau: #1f63d6;
   --led-aus: rgba(20,32,26,.10);
   --f-boden: #cfd9c9; --f-raster: rgba(20,32,26,.05); --f-grenze: #b57c0e;
   --f-vg: rgba(216,54,47,.8); --f-pass: rgba(20,32,26,.16); --f-aktiv: #15a350;
@@ -93,7 +93,19 @@ body.tag .vignette { background: radial-gradient(120% 90% at 50% 70%, transparen
   display: flex; align-items: baseline; justify-content: center; gap: calc(.7 * var(--u)); }
 .abw .pfeil { font-size: calc(4 * var(--u)); color: var(--muted); }
 .abw b.ok, .abw .pfeil.ok { color: var(--leucht); } .abw b.warn { color: var(--amber); } .abw b.bad { color: var(--rot); }
-.abw small { font-family: "IBM Plex Sans", sans-serif; font-size: calc(1.3 * var(--u)); font-weight: 600; color: var(--muted); letter-spacing: .14em; text-transform: uppercase; }
+.abw small { font-family: "IBM Plex Sans", sans-serif; font-size: max(11px, calc(1.3 * var(--u))); font-weight: 600; color: var(--muted); letter-spacing: .14em; text-transform: uppercase; }
+
+/* Lenkt die Maschine? Am Lichtbalken, nicht nur in der Taste unten rechts. */
+.balken.lenkt .leds, .balken.scharf .leds { outline: calc(.35 * var(--u)) solid var(--leucht); outline-offset: calc(.6 * var(--u)); border-radius: calc(.8 * var(--u)); }
+.balken.scharf .leds { outline-color: var(--amber); outline-style: dashed; }
+.lenkstatus { display: inline-block; margin-top: calc(.6 * var(--u)); padding: calc(.35 * var(--u)) calc(1.2 * var(--u)); border-radius: 999px;
+  font-family: "Rajdhani", "Bahnschrift", sans-serif; font-weight: 700; font-size: max(15px, calc(1.8 * var(--u))); letter-spacing: .1em; text-transform: uppercase; }
+.lenkstatus.lenkt { background: var(--leucht); color: var(--leucht-tinte); }
+.lenkstatus.scharf { background: var(--glas); color: var(--amber); border: 2px solid var(--amber); }
+
+/* Spurwechsel mit einem Tipp war zu leicht: der erste Tipp fragt, der zweite tut es. */
+.taste.bestaetigen { border: 2px solid var(--amber); color: var(--amber); }
+.taste.bestaetigen::after { content: attr(data-frage); font-size: max(12px, calc(1.1 * var(--u))); font-weight: 700; margin-left: calc(.4 * var(--u)); }
 
 /* --- Glas --- */
 .glas { position: absolute; background: var(--glas); backdrop-filter: blur(16px) saturate(1.2); -webkit-backdrop-filter: blur(16px) saturate(1.2);
@@ -101,15 +113,17 @@ body.tag .vignette { background: radial-gradient(120% 90% at 50% 70%, transparen
 .chips { position: absolute; top: calc(2.2 * var(--u)); display: flex; flex-direction: column; gap: calc(.7 * var(--u)); z-index: 3; pointer-events: none; }
 .chips.l { left: calc(2.2 * var(--u)); align-items: flex-start; max-width: calc(50% - 26.4 * var(--u)); } .chips.r { right: calc(2.2 * var(--u)); align-items: flex-end; }
 .chip { display: inline-flex; align-items: center; gap: calc(.6 * var(--u)); padding: calc(.55 * var(--u)) calc(1.1 * var(--u)); border-radius: 999px;
-  background: var(--glas); border: 1px solid var(--haar); font-size: calc(1.25 * var(--u)); font-weight: 600; white-space: nowrap; backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); }
+  background: var(--glas); border: 1px solid var(--haar); font-size: max(12px, calc(1.25 * var(--u))); font-weight: 600; white-space: nowrap; backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); }
 .chip i { width: calc(.8 * var(--u)); height: calc(.8 * var(--u)); border-radius: 50%; background: var(--muted); flex: none; }
 .chip.good { color: var(--leucht); } .chip.good i { background: var(--leucht); box-shadow: 0 0 calc(.8 * var(--u)) var(--leucht); }
 .chip.warn { color: var(--amber); } .chip.warn i { background: var(--amber); box-shadow: 0 0 calc(.8 * var(--u)) var(--amber); }
 .chip.bad { color: var(--rot); } .chip.bad i { background: var(--rot); }
 .chip.titel { font-family: "Rajdhani", "Bahnschrift", sans-serif; font-weight: 700; font-size: calc(1.9 * var(--u)); letter-spacing: .03em; text-transform: uppercase; padding: calc(.5 * var(--u)) calc(1.3 * var(--u)); }
 #datenRolle { white-space: pre-line; }
-.hint { margin-top: calc(.4 * var(--u)); font-size: calc(1.3 * var(--u)); font-weight: 600; color: var(--amber); max-width: calc(34 * var(--u)); white-space: pre-line; text-shadow: 0 1px 6px rgba(0,0,0,.6); }
-body.tag .hint { text-shadow: none; }
+.hint { margin-top: calc(.4 * var(--u)); font-size: max(14px, calc(1.5 * var(--u))); font-weight: 600; color: var(--amber); max-width: calc(34 * var(--u)); white-space: pre-line;
+  background: var(--glas); border: 1px solid var(--haar); border-radius: calc(1 * var(--u)); padding: calc(.6 * var(--u)) calc(1 * var(--u));
+  backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); }
+.hint:empty { display: none; }
 .hint.alarm { color: var(--rot); animation: alarm 1s steps(2) infinite; }
 @keyframes alarm { 50% { opacity: .35; } }
 
@@ -131,7 +145,7 @@ body.tag .hint { text-shadow: none; }
   display: grid; grid-template-columns: auto auto auto; gap: calc(.9 * var(--u)) calc(2.2 * var(--u)); font-variant-numeric: tabular-nums; }
 .cluster .kmh { grid-column: 1 / -1; display: flex; align-items: baseline; gap: calc(.8 * var(--u)); }
 .cluster .kmh b { font-family: "Rajdhani", "Bahnschrift", sans-serif; font-weight: 700; font-size: calc(6.2 * var(--u)); line-height: .9; }
-.cluster .kmh span, .cluster div span { font-size: calc(1.05 * var(--u)); font-weight: 600; color: var(--muted); letter-spacing: .12em; text-transform: uppercase; }
+.cluster .kmh span, .cluster div span { font-size: max(11px, calc(1.05 * var(--u))); font-weight: 600; color: var(--muted); letter-spacing: .12em; text-transform: uppercase; }
 .cluster div b { display: block; font-family: "Rajdhani", "Bahnschrift", sans-serif; font-weight: 600; font-size: calc(2.6 * var(--u)); line-height: 1; }
 .cluster div b.warn { color: var(--amber); }
 .cluster .spark { grid-column: 1 / -1; height: calc(3 * var(--u)); }
@@ -140,8 +154,8 @@ body.tag .hint { text-shadow: none; }
 .cluster .spark .band { fill: color-mix(in srgb, var(--leucht) 10%, transparent); stroke: none; }
 .cluster .spark .null { stroke: var(--haar); stroke-width: 1; }
 .cluster .sections { grid-column: 1 / -1; display: flex; gap: calc(.3 * var(--u)); }
-.sections .sec { flex: 1; height: calc(2.2 * var(--u)); min-height: 24px; border-radius: calc(.4 * var(--u)); background: var(--led-aus);
-  border: 1px solid var(--haar); font-size: calc(1 * var(--u)); color: var(--muted); display: grid; place-items: center; cursor: pointer; }
+.sections .sec { flex: 1; height: calc(3.2 * var(--u)); min-height: 44px; border-radius: calc(.4 * var(--u)); background: var(--led-aus);
+  border: 1px solid var(--haar); font-size: max(13px, calc(1.2 * var(--u))); font-weight: 700; color: var(--muted); display: grid; place-items: center; cursor: pointer; }
 .sections .sec.on { background: var(--leucht); color: var(--leucht-tinte); border-color: transparent; }
 .sections .sec.forced { background: color-mix(in srgb, var(--rot) 25%, transparent); color: var(--rot); border-color: var(--rot); }
 
@@ -166,13 +180,13 @@ body.tag .hint { text-shadow: none; }
 .reihe .taste { flex: 1; justify-content: center; padding: 0 calc(.6 * var(--u)); }
 .taste { display: flex; align-items: center; gap: calc(.6 * var(--u)); padding: 0 calc(1.2 * var(--u)); height: calc(5 * var(--u)); min-height: 48px;
   border-radius: calc(1.2 * var(--u)); background: var(--glas); border: 1px solid var(--haar); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
-  font-size: calc(1.4 * var(--u)); font-weight: 600; white-space: nowrap; cursor: pointer; text-align: left; color: var(--text); }
+  font-size: max(14px, calc(1.4 * var(--u))); font-weight: 600; white-space: nowrap; cursor: pointer; text-align: left; color: var(--text); }
 .taste svg { width: calc(2.2 * var(--u)); height: calc(2.2 * var(--u)); min-width: 18px; min-height: 18px; stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; flex: none; }
 .taste:active { background: color-mix(in srgb, var(--text) 12%, var(--glas)); }
 .taste:focus-visible { outline: calc(.3 * var(--u)) solid var(--text); outline-offset: 2px; }
 .taste:disabled { opacity: .4; cursor: default; }
 .taste.recording { color: var(--rot); border-color: color-mix(in srgb, var(--rot) 50%, transparent); }
-.reihe.klein .taste { height: calc(3.6 * var(--u)); min-height: 40px; font-size: calc(1.1 * var(--u)); color: var(--muted); border-radius: 999px; padding: 0 calc(.5 * var(--u)); gap: calc(.35 * var(--u)); }
+.reihe.klein .taste { height: calc(4.4 * var(--u)); min-height: var(--touch); font-size: max(14px, calc(1.3 * var(--u))); color: var(--text); border-radius: 999px; padding: 0 calc(.5 * var(--u)); gap: calc(.35 * var(--u)); }
 .reihe.klein .taste svg { width: calc(1.6 * var(--u)); height: calc(1.6 * var(--u)); min-width: 14px; min-height: 14px; }
 .taste.turn { position: relative; overflow: hidden; color: var(--blau); border-color: color-mix(in srgb, var(--blau) 35%, transparent); flex: 1.15; }
 .taste.turn .fuellung { position: absolute; left: 0; top: 0; bottom: 0; width: 0; background: color-mix(in srgb, var(--blau) 22%, transparent); z-index: -1; }
@@ -180,7 +194,7 @@ body.tag .hint { text-shadow: none; }
 .taste.turn.aktiv { color: #fff; background: var(--blau); border-color: transparent; }
 .taste.mark, .taste.lenk { gap: calc(1 * var(--u)); font-family: "Rajdhani", "Bahnschrift", sans-serif; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
 .taste.mark span, .taste.lenk span { display: flex; flex-direction: column; line-height: 1; flex: 1; }
-.taste.mark small, .taste.lenk small { font-family: "IBM Plex Sans", sans-serif; font-weight: 600; font-size: calc(1.05 * var(--u)); letter-spacing: .02em; text-transform: none; margin-top: calc(.35 * var(--u)); opacity: .8; white-space: normal; line-height: 1.15; }
+.taste.mark small, .taste.lenk small { font-family: "IBM Plex Sans", sans-serif; font-weight: 600; font-size: max(12px, calc(1.2 * var(--u))); letter-spacing: .02em; text-transform: none; margin-top: calc(.35 * var(--u)); opacity: .9; white-space: normal; line-height: 1.15; }
 .taste.mark i, .taste.lenk i { border-radius: 50%; background: var(--muted); flex: none; }
 .taste.mark { height: calc(6.2 * var(--u)); min-height: 56px; border-radius: calc(1.4 * var(--u)); font-size: calc(2 * var(--u)); }
 .taste.mark i { width: calc(1 * var(--u)); height: calc(1 * var(--u)); }
@@ -460,11 +474,11 @@ label.button { display: inline-flex; align-items: center; cursor: pointer; }
   /* Oben unter dem Balken, nicht unten: dort liegen die Zahlen und der
      Vorgewende-Kasten, und eine Meldung darüber verdeckte genau das. */
   position: fixed; left: 50%; top: calc(13 * var(--u)); transform: translateX(-50%); max-width: 70vw;
-  background: var(--panel-2); border: 1px solid var(--line); border-left: 4px solid var(--blue);
-  padding: 13px 18px; border-radius: 8px; font-size: 15px; z-index: 30;
+  background: var(--panel-2); border: 2px solid var(--blue);
+  padding: 14px 20px; border-radius: 12px; font-size: max(16px, calc(1.6 * var(--u))); font-weight: 600; z-index: 30;
   max-width: 80vw; box-shadow: 0 8px 24px #0008;
 }
-.toast.error { border-left-color: var(--red); }
+.toast.error { border-color: var(--red); color: var(--red); }
 
 /* Feld erkannt: ein großer Knopf, den man mit dem Handschuh trifft. Er blockiert
    nichts - wer ihn ignoriert, fährt einfach weiter. */

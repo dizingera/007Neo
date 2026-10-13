@@ -299,6 +299,15 @@ function updateHud(s) {
   const steering = s.steering;
   const steer = el('btnSteer');
   steer.classList.remove('an', 'scharf');
+  // Dasselbe am Lichtbalken, wo der Blick ist: Rahmen und Plakette.
+  const lenkt = !!(steering && steering.configured && steering.command.engaged);
+  const scharf = !lenkt && !!(steering && steering.configured && steering.armed);
+  el('balken').classList.toggle('lenkt', lenkt);
+  el('balken').classList.toggle('scharf', scharf);
+  const plakette = el('lenkStatus');
+  plakette.hidden = !(lenkt || scharf);
+  plakette.className = 'lenkstatus' + (lenkt ? ' lenkt' : scharf ? ' scharf' : '');
+  plakette.textContent = lenkt ? 'Lenkt' : scharf ? 'Scharf' : '';
   if (!steering || !steering.configured) {
     steer.setAttribute('aria-checked', 'false');
     el('steerText').textContent = 'Lenkhilfe · kein Motor freigegeben';
@@ -755,7 +764,8 @@ function toast(message, isError) {
   box.className = 'toast' + (isError ? ' error' : '');
   box.hidden = false;
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => { box.hidden = true; }, 3500);
+  // Fehler länger: wer nur kurz hinschaut, soll sie noch lesen können.
+  toastTimer = setTimeout(() => { box.hidden = true; }, isError ? 7000 : 4000);
 }
 
 /* A/B in einem Knopf: erst A, bis zum Ende fahren, dann B. */
@@ -810,6 +820,21 @@ el('btnTurn').onclick = async () => {
  * drei Zustände: Grenze aufzeichnen - Grenze abschließen (und sofort auf der
  * Kontur fahren) - Kontur wieder aktivieren, wenn gerade eine andere Spur
  * aktiv war. Neu abfahren geht über Menü → Felder → Grenze abfahren. */
+/* Was die aktive Spur ersetzt, braucht einen zweiten Tipp: auf dem rüttelnden Sitz
+   trifft der Handschuh leicht die Nachbartaste, und bei eingeschalteter Lenkung
+   wechselte sonst das Lenkziel. Wie bei der Wende - erst fragen, dann tun. */
+function nachfragen(knopf, frage) {
+  if (knopf.classList.contains('bestaetigen')) {
+    knopf.classList.remove('bestaetigen');
+    clearTimeout(knopf._frageZeit);
+    return true;
+  }
+  knopf.dataset.frage = frage;
+  knopf.classList.add('bestaetigen');
+  knopf._frageZeit = setTimeout(() => knopf.classList.remove('bestaetigen'), 4000);
+  return false;
+}
+
 el('btnContour').onclick = async () => {
   const s = state.live || {};
   if (s.recording && s.recording.mode === 'boundary') {
@@ -827,6 +852,7 @@ el('btnContour').onclick = async () => {
       toast('Kontur ist aktiv. Grenze neu abfahren: Menü → Felder → Grenze abfahren');
       return;
     }
+    if (s.line && !nachfragen(el('btnContour'), 'Spur wechseln? nochmal')) return;
     const result = await api('POST', '/api/guidance/contour');
     if (result) { toast('Kontur aktiv – Ring 0 ist die Feldgrenze'); refreshLists(); }
     return;
@@ -1033,6 +1059,8 @@ el('shpDateien').onchange = async (event) => {
 };
 
 el('btnAPlus').onclick = async () => {
+  const s = state.live || {};
+  if (s.line && !nachfragen(el('btnAPlus'), 'neue Spur? nochmal')) return;
   const result = await api('POST', '/api/guidance/a-plus', {});
   if (result) { toast(`Spur "${result.data.name}" angelegt`); refreshLists(); }
 };

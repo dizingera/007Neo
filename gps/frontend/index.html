@@ -29,10 +29,12 @@
 
   <!-- Lichtbalken: die eine Anzeige, die man im Augenwinkel lesen kann. Eine
        Lampe sind 5 cm; die Zahl darunter sagt es genau. -->
-  <div class="balken">
+  <div class="balken" id="balken">
     <div class="leds" id="lightbar"></div>
     <div class="mitte"></div>
     <div class="abw"><span class="pfeil" id="xtePfeil">●</span><b id="xte">--</b><small>cm</small></div>
+    <!-- Ob die Maschine gerade selbst lenkt, steht dort, wo der Blick ohnehin ist. -->
+    <div class="lenkstatus" id="lenkStatus" role="status" aria-live="polite" hidden></div>
   </div>
 
   <div class="chips l">
