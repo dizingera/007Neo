@@ -1,26 +1,32 @@
 """Die Anzeige in einem eigenen Fenster - ohne Browser, ohne Adresszeile.
 
-Das Programm selbst läuft weiter als Dienst im Hintergrund (Aufgabe "AgriPilot"):
-schließt man das Fenster, lenkt und zeichnet es weiter. Das Fenster ist nur die
-Anzeige dafür, gebaut mit WebView2 - dem Edge-Kern, der in Windows 10/11 steckt.
-Darin läuft dieselbe Oberfläche wie auf dem Android-Tablet; es gibt nur eine.
+Das Fenster ist das Programm, so wie man es von Windows kennt: das Symbol startet
+AgriPilot, Schließen beendet es. Dahinter läuft der eigentliche Teil (Empfänger,
+Lenkung, Abgleich) als Aufgabe "AgriPilot" - mit höchsten Rechten und Neustart nach
+einem Absturz, aber ohne Start beim Anmelden. Läuft gerade die Lenkung oder eine
+Arbeit, fragt das Fenster vor dem Beenden nach.
 
-Ein Fenster genügt: ein zweiter Klick auf das Symbol holt das offene nach vorn,
-statt ein zweites zu öffnen. Fehlt WebView2 doch einmal, öffnet sich die Anzeige
-als Edge-App-Fenster (auch ohne Adresszeile) und erst zuletzt im Browser.
+Gebaut mit WebView2 - dem Edge-Kern, der in Windows 10/11 steckt. Darin läuft
+dieselbe Oberfläche wie auf dem Android-Tablet; es gibt nur eine. Ein zweiter
+Klick auf das Symbol holt das offene Fenster nach vorn. Fehlt WebView2 doch
+einmal, öffnet sich die Anzeige als Edge-App-Fenster und erst zuletzt im Browser.
 """
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import subprocess
+import time
 import urllib.request
 from pathlib import Path
 from typing import Optional
 
 TITEL = "AgriPilot"
 MUTEX = "Local\\AgriPilotFenster"
+AUFGABE = "AgriPilot"
+OHNE_KONSOLE = 0x08000000      # CREATE_NO_WINDOW: schtasks ohne aufblitzendes Fenster
 
 
 def adresse(port: int) -> str:
@@ -33,6 +39,67 @@ def dienst_bereit(url: str, timeout: float = 2.0) -> bool:
         return True
     except Exception:  # noqa: BLE001 - noch nicht oben, oder gar nicht
         return False
+
+
+def _aufgabe(aktion: str) -> bool:
+    """Die Aufgabe "AgriPilot" starten (/Run) oder hart anhalten (/End)."""
+    if os.name != "nt":
+        return False
+    try:
+        return subprocess.run(["schtasks", aktion, "/TN", AUFGABE], capture_output=True,
+                              creationflags=OHNE_KONSOLE, timeout=20).returncode == 0
+    except Exception:  # noqa: BLE001 - etwa aus dem Quellbaum ohne Installation
+        return False
+
+
+def dienst_starten() -> bool:
+    return _aufgabe("/Run")
+
+
+def _anfrage(url: str, methode: str = "GET", timeout: float = 3.0) -> Optional[dict]:
+    try:
+        anfrage = urllib.request.Request(url, method=methode,
+                                         data=b"{}" if methode == "POST" else None,
+                                         headers={"Content-Type": "application/json"})
+        with urllib.request.urlopen(anfrage, timeout=timeout) as antwort:
+            return json.loads(antwort.read() or b"{}")
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def beenden_erlaubt(url: str, fragen=None) -> bool:
+    """Vor dem Schließen: läuft die Lenkung oder eine Arbeit, erst nachfragen."""
+    stand = (_anfrage(f"{url}/api/beenden") or {}).get("data") or {}
+    gruende = []
+    if stand.get("lenkung"):
+        gruende.append("Die Lenkung ist eingeschaltet und wird ausgeschaltet.")
+    if stand.get("arbeit"):
+        gruende.append("Eine Arbeit läuft. Sie wird gesichert und kann später fortgesetzt werden.")
+    if not gruende:
+        return True
+    fragen = fragen or _frage_ja_nein
+    return fragen("AgriPilot beenden?", "\n".join(gruende) + "\n\nAgriPilot jetzt beenden?")
+
+
+def _frage_ja_nein(titel: str, text: str) -> bool:
+    import ctypes
+    # MB_YESNO | MB_ICONWARNING | MB_DEFBUTTON2 | MB_TOPMOST; 6 = Ja
+    return ctypes.windll.user32.MessageBoxW(  # type: ignore[attr-defined]
+        None, text, titel, 0x4 | 0x30 | 0x100 | 0x40000) == 6
+
+
+def dienst_beenden(url: str, warten_s: float = 15.0) -> str:
+    """Sauber beenden lassen; hilft das nicht, die Aufgabe anhalten."""
+    if not dienst_bereit(url, timeout=1.0):
+        return "lief nicht"
+    _anfrage(f"{url}/api/beenden", "POST")
+    ende = time.monotonic() + warten_s
+    while time.monotonic() < ende:
+        if not dienst_bereit(url, timeout=1.0):
+            return "beendet"
+        time.sleep(0.5)
+    _aufgabe("/End")
+    return "angehalten"
 
 
 def warteseite(url: str) -> str:
@@ -61,8 +128,8 @@ async function pruefen() {{
   }} catch (e) {{}}
   if (Date.now() - beginn > 60000) {{
     document.getElementById('t').textContent = 'AgriPilot antwortet nicht.';
-    document.getElementById('h').textContent = 'Das Programm läuft im Hintergrund als Aufgabe '
-      + '„AgriPilot“. Rechner neu starten oder die Setup-Datei erneut ausführen. Protokoll: '
+    document.getElementById('h').textContent = 'Fenster schließen und AgriPilot neu öffnen. '
+      + 'Hilft das nicht, die Setup-Datei erneut ausführen. Protokoll: '
       + 'C:\\\\ProgramData\\\\AgriPilot\\\\agripilot.log';
   }}
   setTimeout(pruefen, 1000);
@@ -137,21 +204,30 @@ def oeffnen(port: int) -> int:
     url = adresse(port)
     if schon_offen():
         return 0
+    bereit = dienst_bereit(url)
+    if not bereit:
+        dienst_starten()
     try:
         import webview
     except Exception:  # noqa: BLE001 - fehlt das Paket, geht es trotzdem
         ersatz_oeffnen(url)
         return 0
     bruecke = _Bruecke()
-    if dienst_bereit(url):
+    if bereit:
         fenster = webview.create_window(TITEL, url, maximized=True, min_size=(800, 500),
                                         text_select=False, js_api=bruecke)
     else:
         fenster = webview.create_window(TITEL, html=warteseite(url), maximized=True,
                                         min_size=(800, 500), text_select=False, js_api=bruecke)
     bruecke.fenster = fenster
+    # False hält das Fenster offen: wer bei der Rückfrage "Nein" sagt, arbeitet weiter.
+    fenster.events.closing += lambda: beenden_erlaubt(url)
     try:
         webview.start(private_mode=False, storage_path=speicherort())
     except Exception:  # noqa: BLE001 - etwa WebView2 fehlt: dann wenigstens die Anzeige
         ersatz_oeffnen(url)
+        return 0
+    # Fenster zu = Programm zu. Im Ersatzweg (Edge, Browser) gibt es kein Schließen
+    # zum Abfangen; dort bleibt das Programm an, bis der Rechner herunterfährt.
+    dienst_beenden(url)
     return 0

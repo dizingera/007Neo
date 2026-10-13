@@ -4,8 +4,10 @@
 
 * **Doppelklick** richtet AgriPilot auf diesem Rechner ein (Installation,
   Erst- und Wiederholungslauf; Konfiguration und Daten bleiben erhalten),
-* ``--dienst`` ist das laufende Programm - so startet es Windows beim Anmelden.
-* ``--fenster`` ist die Anzeige in einem eigenen Fenster (Symbol auf dem Desktop).
+* ``--fenster`` ist AgriPilot im eigenen Fenster (Symbol auf dem Desktop): startet
+  das Programm und beendet es beim Schließen,
+* ``--dienst`` ist das laufende Programm dahinter (Aufgabe "AgriPilot", kein Autostart),
+* ``--deinstallieren`` entfernt alles wieder (Apps & Features; Daten bleiben auf Wunsch).
 
 Gebaut wird sie mit ``scripts/build_exe.py`` (PyInstaller). Was die Installation
 tut, steht als Liste von Schritten in ``plan()``; ``--trocken`` zeigt sie nur an.
@@ -115,25 +117,29 @@ def fenster_vbs(exe: str) -> str:
     )
 
 
-def verknuepfung_skript(lnk: str, vbs: str, symbol: str, ordner: str) -> tuple[str, dict]:
-    """PowerShell für eine Verknüpfung, die das Fenster öffnet - mit dem Programmsymbol.
+def verknuepfung_skript(lnk: str, ziel: str, argumente: str, symbol: str, ordner: str,
+                        beschreibung: str) -> tuple[str, dict]:
+    """PowerShell für eine Verknüpfung mit dem Programmsymbol.
 
-    Die Pfade gehen als Umgebungsvariablen hinein, nicht in den Befehlstext: so
+    Die Werte gehen als Umgebungsvariablen hinein, nicht in den Befehlstext: so
     stören weder Leerzeichen noch Anführungszeichen in einem Pfad.
     """
     return (
         "$s = (New-Object -ComObject WScript.Shell).CreateShortcut($env:LNK); "
-        '$s.TargetPath = "$env:SystemRoot\\System32\\wscript.exe"; '
-        "$s.Arguments = '\"' + $env:VBS + '\"'; "
+        "$s.TargetPath = $env:ZIEL; "
+        "$s.Arguments = $env:ARGUMENTE; "
         "$s.IconLocation = $env:SYMBOL + ',0'; "
         "$s.WorkingDirectory = $env:ORDNER; "
-        "$s.Description = 'AgriPilot - Spurführung'; "
+        "$s.Description = $env:BESCHREIBUNG; "
         "$s.Save()"
-    ), {"LNK": lnk, "VBS": vbs, "SYMBOL": symbol, "ORDNER": ordner}
+    ), {"LNK": lnk, "ZIEL": ziel, "ARGUMENTE": argumente, "SYMBOL": symbol,
+        "ORDNER": ordner, "BESCHREIBUNG": beschreibung}
 
 
-def verknuepfung_anlegen(lnk: Path, vbs: Path, symbol: Path, ordner: Path) -> None:
-    skript, umgebung = verknuepfung_skript(str(lnk), str(vbs), str(symbol), str(ordner))
+def verknuepfung_anlegen(lnk: Path, ziel: Path, argumente: str, symbol: Path, ordner: Path,
+                         beschreibung: str = "AgriPilot - Spurführung") -> None:
+    skript, umgebung = verknuepfung_skript(str(lnk), str(ziel), argumente, str(symbol),
+                                           str(ordner), beschreibung)
     ergebnis = subprocess.run(["powershell", "-NoProfile", "-Command", skript],
                               capture_output=True, text=True, errors="replace",
                               env={**os.environ, **umgebung})
@@ -142,27 +148,40 @@ def verknuepfung_anlegen(lnk: Path, vbs: Path, symbol: Path, ordner: Path) -> No
                            f"{(ergebnis.stderr or ergebnis.stdout).strip()[:300]}")
 
 
-def ist_arbeiter(konfig: Path) -> bool:
-    """Steht in der vorhandenen Konfiguration die Rolle Arbeiter? (bei einer Aktualisierung)"""
-    try:
-        text = konfig.read_text(encoding="utf-8")
-    except OSError:
-        return False
-    import re
-    return re.search(r"^\s+role:\s*['\"]?client\b", text, re.MULTILINE) is not None
+def wscript() -> Path:
+    return Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32" / "wscript.exe"
+
+
+def desktop_ordner() -> Path:
+    return Path(os.environ.get("PUBLIC", r"C:\Users\Public")) / "Desktop"
+
+
+def startmenue_ordner() -> Path:
+    return (Path(os.environ.get("PROGRAMDATA", r"C:\ProgramData"))
+            / "Microsoft" / "Windows" / "Start Menu" / "Programs")
+
+
+def alte_autostarts() -> list[Path]:
+    """Was AgriPilot früher beim Anmelden gestartet hat - kommt bei jeder Einrichtung weg."""
+    return [startmenue_ordner() / "StartUp" / "AgriPilot.lnk", desktop_ordner() / "AgriPilot.url"]
 
 
 def aufgaben_skript(ziel: str, vbs: str) -> str:
-    """PowerShell, das die Aufgabe "AgriPilot" einträgt: Start beim Anmelden,
-    Neustart nach Absturz, keine Zeitbegrenzung, auch im Akkubetrieb."""
+    """PowerShell, das die Aufgabe "AgriPilot" einträgt: Neustart nach Absturz,
+    keine Zeitbegrenzung, auch im Akkubetrieb - aber **kein** Start beim Anmelden.
+
+    Gestartet wird sie vom Fenster (Symbol "AgriPilot"), beendet beim Schließen.
+    Eine Aufgabe statt eines einfachen Prozesses, weil sie mit höchsten Rechten
+    läuft, ohne dass Windows bei jedem Start nachfragt, und nach einem Absturz
+    von selbst wieder anläuft.
+    """
     return (
         f'$aktion = New-ScheduledTaskAction -Execute "wscript.exe" -Argument \'"{vbs}"\' '
         f'-WorkingDirectory "{ziel}"; '
-        "$ausloeser = New-ScheduledTaskTrigger -AtLogOn; "
         "$option = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries "
         "-DontStopIfGoingOnBatteries -ExecutionTimeLimit ([TimeSpan]::Zero) "
         "-RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1); "
-        f'Register-ScheduledTask -TaskName "{AUFGABE}" -Action $aktion -Trigger $ausloeser '
+        f'Register-ScheduledTask -TaskName "{AUFGABE}" -Action $aktion '
         "-Settings $option -Force -RunLevel Highest | Out-Null"
     )
 
@@ -204,7 +223,16 @@ def plan(ziel: str, port: int = 8080, quelle: Optional[str] = None,
     vbs_fenster = zielpfad / "fenster.vbs"
     konfig = daten_ordner / "config.yaml"
 
+    fenster_war_offen = []
+
     def stoppen() -> None:
+        # Auch das Fenster muss zu: es hält die exe-Datei offen. Nach der
+        # Aktualisierung geht es wieder auf, wenn es vorher offen war.
+        if _lauf(["powershell", "-NoProfile", "-Command",
+                  "if (Get-CimInstance Win32_Process -Filter \"Name='AgriPilot.exe'\" | "
+                  "Where-Object { $_.CommandLine -like '*--fenster*' }) { exit 0 } else { exit 1 }"],
+                 ok_codes=None) == 0:
+            fenster_war_offen.append(True)
         _lauf(["schtasks", "/End", "/TN", AUFGABE], ok_codes=None)
         eigene = os.getpid()
         _lauf(["powershell", "-NoProfile", "-Command",
@@ -259,21 +287,21 @@ def plan(ziel: str, port: int = 8080, quelle: Optional[str] = None,
                aufgaben_skript(str(zielpfad), str(vbs))])
 
     def symbol() -> None:
-        # Für alle Benutzer: Desktop und Startmenü, und auf dem Tablet im Traktor
-        # öffnet sich die Anzeige gleich beim Anmelden.
-        desktop = Path(os.environ.get("PUBLIC", r"C:\Users\Public")) / "Desktop"
-        programme = (Path(os.environ.get("PROGRAMDATA", r"C:\ProgramData"))
-                     / "Microsoft" / "Windows" / "Start Menu" / "Programs")
-        orte = [desktop, programme]
-        if rolle == "client" or ist_arbeiter(konfig):
-            orte.append(programme / "StartUp")
-        for ort in orte:
+        # Für alle Benutzer: Desktop und Startmenü. Nichts im Autostart - AgriPilot
+        # läuft nur, wenn man es öffnet.
+        for ort in (desktop_ordner(), startmenue_ordner()):
             if ort.is_dir():
-                verknuepfung_anlegen(ort / "AgriPilot.lnk", vbs_fenster, exe, zielpfad)
-        # Das alte Symbol öffnete den Browser.
-        alt_symbol = desktop / "AgriPilot.url"
-        if alt_symbol.exists():
-            alt_symbol.unlink()
+                verknuepfung_anlegen(ort / "AgriPilot.lnk", wscript(), f'"{vbs_fenster}"',
+                                     exe, zielpfad)
+        if startmenue_ordner().is_dir():
+            verknuepfung_anlegen(startmenue_ordner() / "AgriPilot deinstallieren.lnk", exe,
+                                 "--deinstallieren", exe, zielpfad, "AgriPilot entfernen")
+        for alt_eintrag in alte_autostarts():
+            if alt_eintrag.exists():
+                alt_eintrag.unlink()
+
+    def eintragen() -> None:
+        deinstallation_eintragen(exe, zielpfad)
 
     def starten() -> None:
         _lauf(["schtasks", "/Run", "/TN", AUFGABE])
@@ -293,7 +321,7 @@ def plan(ziel: str, port: int = 8080, quelle: Optional[str] = None,
                 zurueck = f" Zurückrollen scheiterte: {exc}"
             raise RuntimeError(f"Das neue Programm meldet sich nach 60 Sekunden nicht.{zurueck} "
                                f"Protokoll: {daten_ordner / 'agripilot.log'}")
-        if not still:
+        if not still or fenster_war_offen:
             # Über den Explorer, damit das Fenster als normaler Benutzer läuft und
             # nicht mit den Administratorrechten der Installation.
             subprocess.Popen(["explorer.exe", str(vbs_fenster)])
@@ -307,12 +335,194 @@ def plan(ziel: str, port: int = 8080, quelle: Optional[str] = None,
         Schritt(f"Konfiguration in {daten_ordner} (vorhandene bleibt)", konfiguration),
         Schritt(f"Firewall: Port {port} für das Android-Tablet freigeben", firewall),
         Schritt("Startdatei ohne Fenster anlegen", starter),
-        Schritt("Automatischen Start beim Anmelden eintragen (mit Neustart nach Absturz)", aufgabe),
-        Schritt("Symbol 'AgriPilot' auf Desktop und Startmenü legen "
-                "(beim Arbeiter öffnet die Anzeige beim Anmelden)", symbol),
+        Schritt("Aufgabe 'AgriPilot' eintragen (Neustart nach Absturz, kein Autostart)", aufgabe),
+        Schritt("Symbol 'AgriPilot' auf Desktop und Startmenü legen", symbol),
+        Schritt("Unter Apps & Features zum Deinstallieren eintragen", eintragen),
         Schritt("Programm starten und Anzeige im eigenen Fenster öffnen", starten),
         Schritt("Aufräumen", aufraeumen),
     ]
+
+
+# ---------------------------------------------------------- Deinstallation
+
+UNINSTALL_SCHLUESSEL = r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\AgriPilot"
+
+
+def deinstallations_eintrag(exe: Path, ziel: Path, version: str, groesse_kb: int) -> dict:
+    """Was Windows unter "Apps & Features" anzeigt - und womit es deinstalliert."""
+    return {
+        "DisplayName": "AgriPilot",
+        "DisplayVersion": version,
+        "Publisher": "AgriPilot",
+        "DisplayIcon": f"{exe},0",
+        "InstallLocation": str(ziel),
+        "UninstallString": f'"{exe}" --deinstallieren',
+        "QuietUninstallString": f'"{exe}" --deinstallieren --still',
+        "NoModify": 1,
+        "NoRepair": 1,
+        "EstimatedSize": groesse_kb,
+    }
+
+
+def deinstallation_eintragen(exe: Path, ziel: Path) -> None:
+    import winreg
+    from . import __version__
+    groesse = int(exe.stat().st_size / 1024) if exe.exists() else 0
+    with winreg.CreateKeyEx(winreg.HKEY_LOCAL_MACHINE, UNINSTALL_SCHLUESSEL, 0,
+                            winreg.KEY_WRITE | winreg.KEY_WOW64_64KEY) as schluessel:
+        for name, wert in deinstallations_eintrag(exe, ziel, __version__, groesse).items():
+            art = winreg.REG_DWORD if isinstance(wert, int) else winreg.REG_SZ
+            winreg.SetValueEx(schluessel, name, 0, art, wert)
+
+
+def deinstallation_austragen() -> None:
+    import winreg
+    try:
+        winreg.DeleteKeyEx(winreg.HKEY_LOCAL_MACHINE, UNINSTALL_SCHLUESSEL,
+                           winreg.KEY_WOW64_64KEY)
+    except FileNotFoundError:
+        pass
+
+
+def ordner_sicher_loeschbar(ordner: Path) -> bool:
+    """Nur einen Programmordner von AgriPilot löschen - nie ein Laufwerk oder Windows."""
+    ordner = Path(ordner)
+    return (len(ordner.resolve().parts) >= 2 and "agripilot" in ordner.name.lower()
+            and ordner.resolve() != Path(os.environ.get("SystemRoot", r"C:\Windows")).resolve())
+
+
+def plan_deinstallation(ziel: str, daten: Optional[str] = None, port: int = 8080,
+                        daten_loeschen: bool = False) -> list[Schritt]:
+    """Die Schritte der Deinstallation. Daten bleiben, wenn nicht ausdrücklich anders gewählt."""
+    zielpfad = Path(ziel)
+    daten_ordner = Path(daten or Path(os.environ.get("PROGRAMDATA", r"C:\ProgramData")) / "AgriPilot")
+    fenster_daten = Path(os.environ.get("LOCALAPPDATA") or Path.home()) / "AgriPilot"
+
+    def beenden() -> None:
+        try:
+            anfrage = urllib.request.Request(f"http://localhost:{port}/api/beenden", data=b"{}",
+                                             method="POST",
+                                             headers={"Content-Type": "application/json"})
+            urllib.request.urlopen(anfrage, timeout=3).read()
+            time.sleep(3.0)          # Arbeit sichern lassen
+        except Exception:  # noqa: BLE001 - läuft nicht, umso besser
+            pass
+        _lauf(["schtasks", "/End", "/TN", AUFGABE], ok_codes=None)
+        # Alles von AgriPilot außer dieser Deinstallation selbst.
+        _lauf(["powershell", "-NoProfile", "-Command",
+               "Get-CimInstance Win32_Process -Filter \"Name='AgriPilot.exe'\" | "
+               "Where-Object { $_.CommandLine -notlike '*--deinstallieren*' } | "
+               "ForEach-Object { Stop-Process -Id $_.ProcessId -Force "
+               "-ErrorAction SilentlyContinue }"], ok_codes=None)
+        time.sleep(2.0)
+
+    def aufgaben() -> None:
+        for name in (AUFGABE, UPDATE_AUFGABE):
+            _lauf(["schtasks", "/Delete", "/TN", name, "/F"], ok_codes=None)
+
+    def firewall() -> None:
+        _lauf(["powershell", "-NoProfile", "-Command",
+               "Get-NetFirewallRule -DisplayName 'AgriPilot *' -ErrorAction SilentlyContinue | "
+               "Remove-NetFirewallRule"], ok_codes=None)
+
+    def symbole() -> None:
+        for eintrag in [desktop_ordner() / "AgriPilot.lnk",
+                        startmenue_ordner() / "AgriPilot.lnk",
+                        startmenue_ordner() / "AgriPilot deinstallieren.lnk",
+                        *alte_autostarts()]:
+            if eintrag.exists():
+                eintrag.unlink()
+
+    def austragen() -> None:
+        deinstallation_austragen()
+
+    def daten_weg() -> None:
+        for ordner in (daten_ordner, fenster_daten):
+            if ordner.exists() and ordner_sicher_loeschbar(ordner):
+                shutil.rmtree(ordner, ignore_errors=True)
+
+    def fensterdaten_weg() -> None:
+        if fenster_daten.exists() and ordner_sicher_loeschbar(fenster_daten):
+            shutil.rmtree(fenster_daten, ignore_errors=True)
+
+    def programm_weg() -> None:
+        if not zielpfad.exists():
+            return
+        if not ordner_sicher_loeschbar(zielpfad):
+            raise RuntimeError(f"{zielpfad} sieht nicht nach dem AgriPilot-Ordner aus - "
+                               "bitte von Hand löschen.")
+        # Die laufende exe kann sich nicht selbst löschen: das übernimmt eine kurze
+        # Befehlszeile, die wartet, bis diese Deinstallation zu Ende ist.
+        subprocess.Popen(f'cmd /c ping -n 6 127.0.0.1 >nul & rmdir /s /q "{zielpfad}"',
+                         creationflags=0x00000008 | 0x08000000,   # DETACHED, kein Fenster
+                         close_fds=True)
+
+    schritte = [
+        Schritt("AgriPilot beenden (laufende Arbeit wird gesichert)", beenden),
+        Schritt("Aufgaben 'AgriPilot' entfernen", aufgaben),
+        Schritt("Firewall-Freigabe entfernen", firewall),
+        Schritt("Symbole auf Desktop und im Startmenü entfernen", symbole),
+        Schritt("Eintrag unter Apps & Features entfernen", austragen),
+    ]
+    if daten_loeschen:
+        schritte.append(Schritt(f"Felder, Spuren, Aufträge und Einstellungen löschen "
+                                f"({daten_ordner})", daten_weg))
+    else:
+        schritte.append(Schritt(f"Fensterdaten entfernen - Felder, Spuren, Aufträge und "
+                                f"Einstellungen bleiben in {daten_ordner}", fensterdaten_weg))
+    schritte.append(Schritt(f"Programmordner {zielpfad} entfernen", programm_weg))
+    return schritte
+
+
+def _ja(frage: str) -> bool:
+    return input(f"{frage} [j/N]: ").strip().lower().startswith(("j", "y"))
+
+
+def deinstallieren(ziel: str, still: bool = False, daten_loeschen: bool = False,
+                   trocken: bool = False) -> int:
+    if trocken:
+        for nummer, schritt in enumerate(plan_deinstallation(ziel, daten_loeschen=daten_loeschen), 1):
+            print(f"{nummer}. {schritt.text}")
+        return 0
+    if os.name != "nt":
+        print("Die Deinstallation gibt es nur für Windows.")
+        return 1
+    if not ist_admin():
+        _als_admin_neu_starten()
+        return 0
+    port = 8080
+    try:
+        from . import config as config_module
+        port = config_module.load().server.port
+    except Exception:  # noqa: BLE001
+        pass
+    if not still:
+        print("AgriPilot deinstallieren\n")
+        if not _ja("AgriPilot wirklich von diesem Rechner entfernen?"):
+            print("Abgebrochen - nichts wurde geändert.")
+            return 0
+        daten_loeschen = _ja("Auch Felder, Spuren, Aufträge und Einstellungen löschen? "
+                             "(Nein = sie bleiben für eine spätere Neuinstallation)")
+    schritte = plan_deinstallation(ziel, port=port, daten_loeschen=daten_loeschen)
+    for nummer, schritt in enumerate(schritte, 1):
+        print(f"[{nummer}/{len(schritte)}] {schritt.text} ...", flush=True)
+        try:
+            schritt.aktion()
+        except Exception as exc:  # noqa: BLE001
+            print(f"\nFEHLER: {exc}")
+            return 1
+    print("\nAgriPilot ist entfernt.")
+    return 0
+
+
+def _als_admin_neu_starten() -> None:
+    """Sich selbst mit Administratorrechten neu starten (Windows fragt einmal nach)."""
+    import ctypes
+    global _WEITERGEREICHT
+    print("Administratorrechte werden angefordert ...")
+    ctypes.windll.shell32.ShellExecuteW(  # type: ignore[attr-defined]
+        None, "runas", sys.executable, " ".join(f'"{a}"' for a in sys.argv[1:]), None, 1)
+    _WEITERGEREICHT = True
 
 
 def _lauf(befehl: list[str], ok_codes: Optional[tuple] = (0,)) -> int:
@@ -366,12 +576,7 @@ def installieren(ziel: str, port: int, trocken: bool, still: bool = False,
     if not ist_admin():
         # Die exe verlangt Adminrechte nicht schon beim Start (sonst fragte Windows
         # auch bei jedem Öffnen des Anzeigefensters) - nur die Einrichtung holt sie sich.
-        import ctypes
-        print("Administratorrechte werden angefordert ...")
-        ctypes.windll.shell32.ShellExecuteW(  # type: ignore[attr-defined]
-            None, "runas", sys.executable, " ".join(f'"{a}"' for a in sys.argv[1:]), None, 1)
-        global _WEITERGEREICHT
-        _WEITERGEREICHT = True
+        _als_admin_neu_starten()
         return 0
     if rolle is None and not still:
         daten_ordner = Path(os.environ.get("PROGRAMDATA", r"C:\ProgramData")) / "AgriPilot"
@@ -385,7 +590,9 @@ def installieren(ziel: str, port: int, trocken: bool, still: bool = False,
         except Exception as exc:  # noqa: BLE001
             print(f"\nFEHLER: {exc}")
             return 1
-    print("\nFertig. AgriPilot läuft und startet künftig beim Anmelden von selbst.")
+    print("\nFertig. AgriPilot läuft. Fenster schließen beendet es, das Symbol startet es wieder.")
+    print("Kein Start mit Windows. Entfernen: Apps & Features oder Startmenü → "
+          "'AgriPilot deinstallieren'.")
     print("Anzeige: Symbol 'AgriPilot' auf dem Desktop oder im Startmenü "
           f"(im Netz auch http://<dieser Rechner>:{port})")
     return 0
@@ -436,7 +643,11 @@ def main(argv: Optional[list[str]] = None) -> int:
     parser.add_argument("--still", action="store_true",
                         help="ohne Rückfragen und ohne Browser (Aktualisierung über das Netz)")
     parser.add_argument("--fenster", action="store_true",
-                        help="die Anzeige im eigenen Fenster öffnen (so startet sie das Desktop-Symbol)")
+                        help="AgriPilot im eigenen Fenster öffnen (so startet es das Desktop-Symbol)")
+    parser.add_argument("--deinstallieren", action="store_true",
+                        help="AgriPilot von diesem Rechner entfernen (fragt, ob die Daten bleiben)")
+    parser.add_argument("--daten-loeschen", action="store_true",
+                        help="beim Deinstallieren mit --still auch Felder, Spuren und Einstellungen löschen")
     parser.add_argument("--version", action="store_true")
     args = parser.parse_args(argv)
     if args.version:
@@ -447,6 +658,16 @@ def main(argv: Optional[list[str]] = None) -> int:
         return dienst()
     if args.fenster:
         return fenster(args.port)
+    if args.deinstallieren:
+        # Aus dem installierten Programm aufgerufen (Apps & Features): dessen Ordner.
+        ziel = args.ziel
+        if getattr(sys, "frozen", False) and Path(sys.executable).name.lower() == EXE_NAME.lower():
+            ziel = str(Path(sys.executable).parent)
+        code = deinstallieren(ziel, args.still, args.daten_loeschen, args.trocken)
+        if (getattr(sys, "frozen", False) and not args.trocken and not args.still
+                and not _WEITERGEREICHT):
+            input("\nEnter zum Schließen ... ")
+        return code
     if args.still:
         # Gestartet vom laufenden Programm, ohne Fenster: Ausgabe in eine Datei.
         from . import config as config_module

@@ -95,7 +95,8 @@ class StartdateiTests(unittest.TestCase):
     def test_the_task_script_is_valid_powershell_with_restart_on_failure(self):
         skript = exe.aufgaben_skript(r"C:\AgriPilot", r"C:\AgriPilot\start_leise.vbs")
         self.assertIn("-RestartCount 999", skript)
-        self.assertIn("-AtLogOn", skript)
+        # Kein Start mit Windows: AgriPilot läuft nur, wenn man es öffnet.
+        self.assertNotIn("Trigger", skript)
         pruefung = ("$e=$null; [void][System.Management.Automation.Language.Parser]::"
                     "ParseInput($env:SKRIPT,[ref]$null,[ref]$e); $e.Count")
         ergebnis = subprocess.run(["powershell", "-NoProfile", "-Command", pruefung],

@@ -1146,6 +1146,34 @@ def create_app(config=None) -> FastAPI:
             send_gga=bool(payload.get("send_gga", cfg.send_gga)),
         )
 
+    def _nur_dieser_rechner(request: Request) -> None:
+        """Beenden darf nur das Fenster auf diesem Rechner - kein Tablet im Netz."""
+        host = request.client.host if request.client else ""
+        if host not in ("127.0.0.1", "::1", "localhost"):
+            raise HTTPException(403, "Beenden geht nur am Rechner selbst")
+
+    @api.get("/api/beenden")
+    async def beenden_pruefen(request: Request):
+        """Was beim Beenden unterbrochen würde - damit das Fenster nachfragen kann."""
+        _nur_dieser_rechner(request)
+        return ok({"lenkung": bool(application.steering.armed), "arbeit": bool(engine.job)})
+
+    @api.post("/api/beenden")
+    async def beenden(request: Request):
+        """Das Programm sauber beenden: Arbeit sichern, Lenkung aus, Dienst zu.
+
+        Endet es so (mit Code 0), startet die Aufgabe es nicht neu - das tut sie
+        nur nach einem Absturz.
+        """
+        _nur_dieser_rechner(request)
+        stopp = getattr(api.state, "beenden", None)
+        if stopp is None:
+            raise HTTPException(503, "So gestartet lässt sich das Programm nicht beenden")
+        application.steering.disarm("Programm wird beendet")
+        engine.note("Programm beendet (Fenster geschlossen)")
+        asyncio.get_running_loop().call_later(0.3, stopp)
+        return ok()
+
     @api.post("/api/ntrip/mountpoints")
     async def ntrip_mountpoints(payload: dict = Body(...)):
         """Die Mountpoint-Liste des Casters - nächste Basis zuerst."""
@@ -1340,13 +1368,18 @@ def main() -> None:  # pragma: no cover - entry point
         # Als Nachfolger nach einer Aktualisierung gestartet: der Vorgänger
         # gibt den Port erst frei, wenn er ganz beendet ist.
         update_module.auf_freien_port_warten(config.server.host, config.server.port)
-    uvicorn.run(
-        create_app(config),
+    app = create_app(config)
+    server = uvicorn.Server(uvicorn.Config(
+        app,
         host=config.server.host,
         port=config.server.port,
         log_level="info",
         **tls,
-    )
+    ))
+    # Sauber beenden, wenn das Fenster zugeht: wie Strg+C, also mit dem
+    # Abschluss in Application.stop() (Arbeit sichern, Ports frei, Datenbank zu).
+    app.state.beenden = lambda: setattr(server, "should_exit", True)
+    server.run()
 
 
 if __name__ == "__main__":  # pragma: no cover
