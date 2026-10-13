@@ -48,6 +48,7 @@ CREATE TABLE IF NOT EXISTS jobs (
     line_id TEXT,
     device_id TEXT NOT NULL,
     vehicle TEXT NOT NULL DEFAULT '',
+    tractor TEXT NOT NULL DEFAULT '',
     operation TEXT NOT NULL DEFAULT '',
     started_at REAL NOT NULL,
     ended_at REAL,
@@ -131,6 +132,9 @@ class Storage:
                                    ("fahrgasse_m", "REAL NOT NULL DEFAULT 0")):
             if spalte not in vorhanden:
                 self.db.execute(f"ALTER TABLE lines ADD COLUMN {spalte} {definition}")
+        # Seit 1.5.7: mit welchem Traktor eine Arbeit gefahren wurde (Gerät steht in vehicle).
+        if "tractor" not in {c[1] for c in self.db.execute("PRAGMA table_info(jobs)")}:
+            self.db.execute("ALTER TABLE jobs ADD COLUMN tractor TEXT NOT NULL DEFAULT ''")
 
     def close(self) -> None:
         if self.vor_schliessen is not None:
@@ -245,21 +249,23 @@ class Storage:
     # -- jobs -------------------------------------------------------------
 
     def start_job(self, field_id: str, device_id: str, vehicle: str = "",
-                  operation: str = "", line_id: Optional[str] = None) -> dict:
+                  operation: str = "", line_id: Optional[str] = None,
+                  tractor: str = "") -> dict:
         job = {
             "id": new_id(),
             "field_id": field_id,
             "line_id": line_id,
             "device_id": device_id,
             "vehicle": vehicle,
+            "tractor": tractor,
             "operation": operation,
             "started_at": time.time(),
             "updated_at": time.time(),
         }
         self.db.execute(
-            """INSERT INTO jobs (id, field_id, line_id, device_id, vehicle, operation,
+            """INSERT INTO jobs (id, field_id, line_id, device_id, vehicle, tractor, operation,
                                  started_at, updated_at)
-               VALUES (:id, :field_id, :line_id, :device_id, :vehicle, :operation,
+               VALUES (:id, :field_id, :line_id, :device_id, :vehicle, :tractor, :operation,
                        :started_at, :updated_at)""",
             job,
         )

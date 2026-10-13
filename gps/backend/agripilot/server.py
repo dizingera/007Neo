@@ -852,6 +852,31 @@ def create_app(config=None) -> FastAPI:
         guard(engine.delete_profile, profile_id)
         return ok()
 
+    # -- Traktoren (getrennt von den Geräten) ------------------------------
+
+    @api.get("/api/traktoren")
+    async def list_traktoren() -> list[dict]:
+        return engine.list_traktoren()
+
+    @api.post("/api/traktoren")
+    async def create_traktor(payload: dict = Body(...)):
+        """Neuer Traktor - Antenne und Lenkung vom gewählten als Vorlage."""
+        return guard(engine.save_traktor_as, payload.get("name", ""), payload.get("werte"))
+
+    @api.post("/api/traktoren/{traktor_id}/select")
+    async def select_traktor(traktor_id: str):
+        return guard(engine.select_traktor, traktor_id)
+
+    @api.delete("/api/traktoren/{traktor_id}")
+    async def delete_traktor(traktor_id: str):
+        guard(engine.delete_traktor, traktor_id)
+        return ok()
+
+    @api.post("/api/traktor")
+    async def update_traktor(payload: dict = Body(...)):
+        """Den gewählten Traktor ändern: Name, Antenne, Lenkung."""
+        return guard(engine.update_traktor, payload)
+
     # -- Geräte -----------------------------------------------------------
 
     @api.get("/api/geraete/suchen")
@@ -977,7 +1002,9 @@ def create_app(config=None) -> FastAPI:
 
     @api.get("/api/update")
     async def update_stand() -> dict:
-        return update_module.stand(VERSION)
+        # als_programm: in der exe gibt es nur das Online-Update und die Setup-Datei -
+        # die Oberfläche blendet Paket, GitHub und Zurückholen dann aus.
+        return {**update_module.stand(VERSION), "als_programm": update_module.als_programm()}
 
     @api.get("/api/update/online")
     async def update_online_pruefen() -> dict:

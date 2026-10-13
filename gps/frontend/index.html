@@ -104,11 +104,11 @@
       <button data-tab="fields" class="tab active">Felder</button>
       <button data-tab="lines" class="tab">Spuren</button>
       <button data-tab="jobs" class="tab">Aufträge</button>
+      <button data-tab="machine" class="tab">Traktor &amp; Gerät</button>
       <button data-tab="headland" class="tab">Vorgewende</button>
-      <button data-tab="machine" class="tab">Maschine</button>
+      <button data-tab="settings" class="tab">Einstellungen</button>
       <button data-tab="system" class="tab">System</button>
       <button data-tab="setup" class="tab">Einbau</button>
-      <button data-tab="settings" class="tab">Einstellungen</button>
     </div>
     <button class="close" id="sheetClose">✕</button>
   </div>
@@ -118,35 +118,36 @@
       <input id="newFieldName" placeholder="Name des Feldes, z.B. Oberes Feld">
       <button id="btnNewField" class="primary">Feld hier anlegen</button>
     </div>
-    <p class="note">Das Feld wird an der aktuellen Position verankert. Danach mit
-      <b>Kontur</b> die Grenze einmal umfahren – daraus kommt die Hektarzahl, und
-      dieselbe Linie ist die Kontur, auf der geführt wird.</p>
     <div class="row">
       <label class="button" for="shpDateien">Shapefile einlesen (.shp, .dbf, .prj)</label>
       <input type="file" id="shpDateien" accept=".shp,.dbf,.prj,.shx,.cpg" multiple hidden>
       <span class="note" id="shpInfo" role="status" aria-atomic="true"></span>
     </div>
-    <p class="note">Aus dem Flächenantrag oder einem anderen Lenksystem: alle drei
-      Dateien zusammen auswählen. Je Fläche entsteht ein Feld, der Name kommt aus
-      der Tabelle. ETRS89/UTM (32N, 33N) und WGS84 werden verstanden; ein Feld
-      gleichen Namens bekommt die neue Grenze, seine Spuren bleiben.</p>
-    <p class="note">Zu jedem Feld gehören seine <b>Spuren</b>. Eine davon kann die
-      <b>Saisonspur</b> sein: mit Fahrgassenabstand gespeichert, wird sie beim Laden
-      des Feldes das ganze Jahr automatisch aktiv – die Fahrgassen vom Säen liegen
-      beim Düngen und Spritzen wieder unter den Rädern.</p>
+    <details class="erklaerung">
+      <summary>Erklärung</summary>
+      <p><b>Feld hier anlegen</b> verankert das Feld an der aktuellen Position. Danach mit
+        <b>Kontur</b> die Grenze einmal umfahren – daraus kommt die Hektarzahl, und dieselbe
+        Linie ist die Kontur, auf der geführt wird.</p>
+      <p><b>Shapefile:</b> aus dem Flächenantrag oder einem anderen Lenksystem alle drei
+        Dateien zusammen auswählen. Je Fläche entsteht ein Feld, der Name kommt aus der
+        Tabelle. ETRS89/UTM (32N, 33N) und WGS84 werden verstanden; ein Feld gleichen Namens
+        bekommt die neue Grenze, seine Spuren bleiben.</p>
+      <p>Zu jedem Feld gehören seine <b>Spuren</b>. Eine davon kann die <b>Saisonspur</b>
+        sein: mit Fahrgassenabstand gespeichert, wird sie beim Laden des Feldes das ganze
+        Jahr automatisch aktiv.</p>
+    </details>
     <div class="list" id="fieldList"></div>
   </section>
 
   <section class="tab-panel" data-panel="lines" hidden>
-    <p class="note"><b>A+</b> (Taste rechts) legt eine Spur durch die aktuelle Position in die
-      Richtung, in die der Traktor gerade fährt – praktisch, wenn kein Platz für einen B-Punkt ist.</p>
-    <p class="note"><b>Kontur</b> (Taste rechts) ist die Feldgrenze selbst: einmal drücken,
-      um das Feld fahren, wieder drücken – die Grenze ist gespeichert und die Kontur
-      aktiv. Sie braucht weder A noch B: Ring 0 ist die Feldgrenze
-      selbst, jeder weitere Ring liegt eine Arbeitsbreite weiter innen. Für das
-      Vorgewende und für krumme Schläge. Die Kontur wird nicht gespeichert –
-      sie entsteht jedes Mal neu aus der aktuellen Grenze und kann ihr deshalb
-      nicht davonlaufen.</p>
+    <details class="erklaerung">
+      <summary>Erklärung</summary>
+      <p><b>A+</b> (Taste rechts) legt eine Spur durch die aktuelle Position in die Richtung,
+        in die der Traktor gerade fährt – praktisch, wenn kein Platz für einen B-Punkt ist.</p>
+      <p><b>Kontur</b> (Taste rechts) ist die Feldgrenze selbst: Ring 0 ist die Grenze, jeder
+        weitere Ring liegt eine Arbeitsbreite weiter innen. Für das Vorgewende und krumme
+        Schläge. Sie wird nicht gespeichert, sondern jedes Mal neu aus der Grenze gebildet.</p>
+    </details>
     <div class="list" id="lineList"></div>
   </section>
 
@@ -160,40 +161,54 @@
       <label class="switch"><input type="checkbox" id="myterraAlle"> auch schon übergebene</label>
     </div>
     <p class="note" id="myterraInfo" role="status" aria-atomic="true">MyTerra: wird geladen …</p>
-    <p class="note">Die Bezeichnung steht später in der Liste und im CSV fürs Büro. Sie
-      wird gemerkt, bis eine andere eingetragen wird. Gestartet wird die Arbeit mit
-      <b>Markieren</b> rechts in der Kabine.</p>
+    <details class="erklaerung">
+      <summary>Erklärung</summary>
+      <p>Die Bezeichnung steht später in der Liste und im CSV fürs Büro. Sie wird gemerkt,
+        bis eine andere eingetragen wird. Gestartet wird die Arbeit mit <b>Markieren</b>
+        rechts in der Kabine. Traktor und Gerät kommen aus <b>Traktor &amp; Gerät</b> und
+        gehen mit nach MyTerra.</p>
+    </details>
     <div class="list" id="jobList"></div>
   </section>
 
   <section class="tab-panel" data-panel="headland" hidden>
-    <div class="grid" id="headlandForm">
-      <label>Vorgewendespuren<input type="number" step="1" min="0" max="12" name="spuren"></label>
-      <label>Breite je Spur (m, 0 = Arbeitsbreite)<input type="number" step="0.1" min="0" max="80" name="breite_m"></label>
-      <label>Alarmabstand (m)<input type="number" step="1" min="1" max="200" name="alarm_abstand_m"></label>
-      <label>Kleinster Wendekreis (m)<input type="number" step="0.5" min="1.5" max="30" name="radius_m"></label>
-      <label>Wiedereinfahrt (Spuren weiter)<input type="number" step="1" min="1" max="8" name="ueberspringen"></label>
-      <label>Wendemuster
-        <select name="muster">
-          <option value="omega">Ω-Wende (weiter Bogen)</option>
-          <option value="u">U-Wende (kompakt)</option>
-        </select>
-      </label>
-      <label>Wenderichtung
-        <select name="richtung">
-          <option value="links">nach links</option>
-          <option value="rechts">nach rechts</option>
-        </select>
-      </label>
-      <label>Arbeitsreihenfolge
-        <select name="reihenfolge">
-          <option value="egal">keine Vorgabe</option>
-          <option value="zuerst">Vorgewende zuerst</option>
-          <option value="zuletzt">Vorgewende zuletzt</option>
-        </select>
-      </label>
+    <div class="karten" id="headlandForm">
+      <section class="karte">
+        <h3>Vorgewende</h3>
+        <div class="formular">
+          <label>Vorgewendespuren<input type="number" step="1" min="0" max="12" name="spuren"></label>
+          <label>Breite je Spur (m, 0 = Arbeitsbreite)<input type="number" step="0.1" min="0" max="80" name="breite_m"></label>
+          <label>Alarmabstand (m)<input type="number" step="1" min="1" max="200" name="alarm_abstand_m"></label>
+          <label>Arbeitsreihenfolge
+            <select name="reihenfolge">
+              <option value="egal">keine Vorgabe</option>
+              <option value="zuerst">Vorgewende zuerst</option>
+              <option value="zuletzt">Vorgewende zuletzt</option>
+            </select>
+          </label>
+        </div>
+      </section>
+      <section class="karte">
+        <h3>Wenden</h3>
+        <div class="formular">
+          <label>Kleinster Wendekreis (m)<input type="number" step="0.5" min="1.5" max="30" name="radius_m"></label>
+          <label>Wiedereinfahrt (Spuren weiter)<input type="number" step="1" min="1" max="8" name="ueberspringen"></label>
+          <label>Wendemuster
+            <select name="muster">
+              <option value="omega">Ω-Wende (weiter Bogen)</option>
+              <option value="u">U-Wende (kompakt)</option>
+            </select>
+          </label>
+          <label>Wenderichtung
+            <select name="richtung">
+              <option value="links">nach links</option>
+              <option value="rechts">nach rechts</option>
+            </select>
+          </label>
+        </div>
+      </section>
     </div>
-    <div class="row" id="headlandSwitches">
+    <div class="schalter" id="headlandSwitches">
       <label class="switch"><input type="checkbox" name="aktiv">
         Vorgewende anzeigen</label>
       <label class="switch"><input type="checkbox" name="alarm_aktiv">
@@ -205,87 +220,121 @@
       <button id="btnSaveHeadland" class="primary">Übernehmen</button>
       <span class="note" id="headlandInfo" role="status" aria-atomic="true"></span>
     </div>
-    <p class="note">Die <b>Tiefe</b> ist die Zahl der Spuren mal der Arbeitsbreite –
-      sie wandert mit dem Gerät mit. Die Restdistanz oben zählt bis zum
-      <i>Beginn</i> des Vorgewendes, nicht bis zur Grenze: dort endet die Arbeit
-      und beginnt die Wende.</p>
-    <p class="note"><b>Arbeitsreihenfolge:</b> das Programm erzwingt nichts, es sieht
-      nur hin. Steht „zuerst" und die Kontur ist noch nicht gefahren, sagt es das,
-      sobald eine AB-Spur aktiv ist. Ob das Vorgewende bearbeitet ist, liest es
-      aus der markierten Fläche – deshalb zählt nur, was mit <b>Markieren</b>
-      gefahren wurde.</p>
-    <p class="note"><b>Ω-Wende</b> holt nach vorn aus und braucht mehr Tiefe, fährt
-      dafür weichere Radien. Die <b>U-Wende</b> kommt mit deutlich weniger Tiefe
-      aus; dafür wächst die Zwischengerade mit dem Spurversatz.</p>
-    <p class="note"><b>Die Wende wird nur gelenkt.</b> Fahrstufe und Gas bleiben
-      beim Fahrer, und rückwärts fährt kein Muster. Die Sicherheitsprüfung
-      verlangt, dass <i>jeder</i> Punkt der Route im Feld liegt – ein einziger
-      draußen genügt zur Ablehnung. Wer sie abschaltet, fährt auf eigene
-      Verantwortung; Not-Aus und Hand am Lenkrad bleiben Bedingung.</p>
+    <details class="erklaerung">
+      <summary>Erklärung</summary>
+      <p>Die <b>Tiefe</b> ist die Zahl der Spuren mal der Arbeitsbreite – sie wandert mit
+        dem Gerät mit. Die Restdistanz oben zählt bis zum <i>Beginn</i> des Vorgewendes,
+        nicht bis zur Grenze: dort endet die Arbeit und beginnt die Wende.</p>
+      <p><b>Arbeitsreihenfolge:</b> das Programm erzwingt nichts, es sieht nur hin. Ob das
+        Vorgewende bearbeitet ist, liest es aus der markierten Fläche – es zählt nur, was
+        mit <b>Markieren</b> gefahren wurde.</p>
+      <p><b>Ω-Wende</b> holt nach vorn aus und braucht mehr Tiefe, fährt dafür weichere
+        Radien. Die <b>U-Wende</b> kommt mit weniger Tiefe aus. Wendekreis für den John Deere
+        rund 4,2 m (kleinster fahrbarer 3,7 m).</p>
+      <p><b>Die Wende wird nur gelenkt.</b> Fahrstufe und Gas bleiben beim Fahrer, rückwärts
+        fährt kein Muster. Die Sicherheitsprüfung verlangt, dass <i>jeder</i> Punkt der Route
+        im Feld liegt. Wer sie abschaltet, fährt auf eigene Verantwortung.</p>
+    </details>
   </section>
 
   <section class="tab-panel" data-panel="machine" hidden>
-    <div class="row">
-      <label>Maschine <select id="profileSelect"></select></label>
-      <button id="btnNewProfile">Neue Maschine</button>
-      <button id="btnDeleteProfile" class="danger">Löschen</button>
+    <p class="note kopfnote">Gefahren wird mit dem Gespann aus <b>Traktor</b> und <b>Gerät</b>.
+      Beide werden getrennt gewählt – ein Traktor zieht viele Geräte, seine Antenne und
+      Lenkung stellst du nur einmal ein.</p>
+    <datalist id="mtTraktoren"></datalist>
+    <datalist id="mtGeraete"></datalist>
+    <div class="karten">
+      <section class="karte" aria-labelledby="kopfTraktor">
+        <h3 id="kopfTraktor">Traktor</h3>
+        <div class="auswahl">
+          <select id="traktorSelect" aria-label="Traktor wählen"></select>
+          <button id="btnNewTraktor">Neuer Traktor</button>
+          <button id="btnDeleteTraktor" class="danger">Löschen</button>
+        </div>
+        <div class="formular" id="traktorForm">
+          <label class="ganz">Name (wie in MyTerra)<input type="text" name="name" list="mtTraktoren" autocomplete="off"></label>
+          <fieldset>
+            <legend>Antenne – gemessen ab Mitte Hinterachse</legend>
+            <label>nach vorn (m)<input type="number" step="0.01" name="antenna_forward_m"></label>
+            <label>nach rechts (m)<input type="number" step="0.01" name="antenna_right_m"></label>
+            <label>Höhe über Boden (m)<input type="number" step="0.01" name="antenna_height_m"></label>
+          </fieldset>
+          <fieldset>
+            <legend>Lenkung</legend>
+            <label>Lenkschärfe<input type="number" step="0.05" name="steer_gain"></label>
+            <label>Radstand (m)<input type="number" step="0.01" name="wheelbase_m"></label>
+            <label>Max. Lenkeinschlag (°)<input type="number" step="1" name="max_steer_deg"></label>
+          </fieldset>
+          <fieldset>
+            <legend>Abstimmung bei Tempo</legend>
+            <label>Absenkung ab (km/h)<input type="number" step="0.5" min="0" name="speed_gain_limit_kmh"></label>
+            <label>Restfaktor<input type="number" step="0.05" min="0.05" max="1" name="speed_gain_rest"></label>
+            <label>Latenz (ms)<input type="number" step="10" min="0" max="2000" name="actuator_latency_ms"></label>
+          </fieldset>
+        </div>
+        <div class="row">
+          <button id="btnSaveTraktor" class="primary">Traktor übernehmen</button>
+        </div>
+        <details class="erklaerung">
+          <summary>Erklärung</summary>
+          <p><b>Antenne:</b> die wichtigsten Werte. Gemessen ab Mitte Hinterachse – stimmen sie
+            nicht, liegt jede Spur um genau diesen Betrag daneben. Die Höhe ist der Maßstab
+            des Hangausgleichs.</p>
+          <p><b>Lenkschärfe:</b> höher zieht härter auf die Spur zurück. <b>Radstand</b> und
+            <b>Lenkeinschlag</b> ergeben den kleinsten Wendekreis.</p>
+          <p><b>Absenkung ab / Restfaktor:</b> dieselbe Einstellung, die im Schritttempo sauber
+            nachführt, schaukelt bei zwölf km/h auf. Ab der Schwelle wird die Lenkung weicher,
+            bei doppelter Schwelle bleibt der Restfaktor stehen (0 = aus). <b>Latenz:</b> Zeit
+            von der Position bis zur Radbewegung; bei Nachlaufen in schnellen Kurven in
+            50-ms-Schritten erhöhen.</p>
+        </details>
+      </section>
+
+      <section class="karte" aria-labelledby="kopfGeraet">
+        <h3 id="kopfGeraet">Gerät</h3>
+        <div class="auswahl">
+          <select id="profileSelect" aria-label="Gerät wählen"></select>
+          <button id="btnNewProfile">Neues Gerät</button>
+          <button id="btnDeleteProfile" class="danger">Löschen</button>
+        </div>
+        <div class="formular" id="profileForm">
+          <label>Bezeichnung<input type="text" name="name"></label>
+          <label>Gerät in MyTerra<input type="text" name="anbaugeraet" list="mtGeraete" autocomplete="off"></label>
+          <fieldset>
+            <legend>Arbeitsbreite und Teilbreiten</legend>
+            <label>Arbeitsbreite (m)<input type="number" step="0.01" name="width_m"></label>
+            <label>Überlappung (m)<input type="number" step="0.01" name="overlap_m"></label>
+            <label>Teilbreiten<input type="number" step="1" min="1" max="24" name="sections"></label>
+            <label>Abschalten ab (Anteil)<input type="number" step="0.05" min="0.05" max="1" name="section_pcc"></label>
+          </fieldset>
+          <fieldset>
+            <legend>Anbau</legend>
+            <label>Gerät hinter Achse (m)<input type="number" step="0.01" name="tool_trailing_m"></label>
+            <label>Gerät seitlich (m)<input type="number" step="0.01" name="tool_offset_m"></label>
+            <label class="switch"><input type="checkbox" name="trailed"> gezogen (Anhängerkinematik)</label>
+            <label>Deichsellänge (m)<input type="number" step="0.1" min="0.5" name="hitch_length_m"></label>
+          </fieldset>
+        </div>
+        <div class="row">
+          <button id="btnSaveProfile" class="primary">Gerät übernehmen</button>
+          <label class="switch"><input type="checkbox" id="autoSections" checked>
+            Teilbreiten automatisch schalten</label>
+        </div>
+        <details class="erklaerung">
+          <summary>Erklärung</summary>
+          <p><b>Arbeitsbreite</b> legt den Spurabstand fest – vor dem Start eintragen.
+            <b>Abschalten ab:</b> eine offene Teilbreite schließt erst, wenn dieser Anteil
+            überdeckt ist; das verhindert Flackern am Fahrspurrand.</p>
+          <p><b>Gerät hinter Achse</b> bestimmt, wo markiert wird. Gelenkt wird immer auf die
+            Hinterachse, nie auf das Gerät.</p>
+          <p><b>Gezogen:</b> ein gezogenes Gerät schwenkt erst ein, während es gezogen wird,
+            und steht in der Kurve innerhalb der Fahrspur. Die <b>Deichsellänge</b> ist der
+            Abstand vom Zugpunkt bis zur Geräteachse.</p>
+          <p><b>Gerät in MyTerra:</b> derselbe Name wie in MyTerra – dann ist das Gerät bei
+            der Freigabe einer Arbeit schon ausgefüllt.</p>
+        </details>
+      </section>
     </div>
-    <p class="note">Jede Maschine ein eigener Satz Maße – Schlepper mit Grubber,
-      Schlepper mit Spritze, der zweite Schlepper. Die Auswahl gilt sofort; die
-      Werte darunter gehören zur gewählten Maschine.</p>
-    <div class="grid" id="profileForm">
-      <label>Arbeitsbreite (m)<input type="number" step="0.01" name="width_m"></label>
-      <label>Überlappung (m)<input type="number" step="0.01" name="overlap_m"></label>
-      <label>Sektionen<input type="number" step="1" min="1" max="24" name="sections"></label>
-      <label>Antenne nach vorn (m)<input type="number" step="0.01" name="antenna_forward_m"></label>
-      <label>Antenne nach rechts (m)<input type="number" step="0.01" name="antenna_right_m"></label>
-      <label>Antennenhöhe über Boden (m)<input type="number" step="0.01" name="antenna_height_m"></label>
-      <label>Gerät hinter Achse (m)<input type="number" step="0.01" name="tool_trailing_m"></label>
-      <label>Gerät seitlich (m)<input type="number" step="0.01" name="tool_offset_m"></label>
-      <label class="switch"><input type="checkbox" name="trailed">
-        Gezogenes Gerät (Anhängerkinematik)</label>
-      <label>Deichsellänge (m)<input type="number" step="0.1" min="0.5" name="hitch_length_m"></label>
-      <label>Radstand (m)<input type="number" step="0.01" name="wheelbase_m"></label>
-      <label>Max. Lenkeinschlag (°)<input type="number" step="1" name="max_steer_deg"></label>
-      <label>Lenkschärfe<input type="number" step="0.05" name="steer_gain"></label>
-      <label>Bezeichnung<input type="text" name="name"></label>
-      <label>Traktor in MyTerra<input type="text" name="traktor" list="mtTraktoren" autocomplete="off"></label>
-      <label>Gerät in MyTerra<input type="text" name="anbaugeraet" list="mtGeraete" autocomplete="off"></label>
-      <datalist id="mtTraktoren"></datalist>
-      <datalist id="mtGeraete"></datalist>
-      <label>Absenkung ab (km/h)<input type="number" step="0.5" min="0" name="speed_gain_limit_kmh"></label>
-      <label>Restfaktor bei Tempo<input type="number" step="0.05" min="0.05" max="1" name="speed_gain_rest"></label>
-      <label>Aktor-/GNSS-Latenz (ms)<input type="number" step="10" min="0" max="2000" name="actuator_latency_ms"></label>
-      <label>Teilbreiten: Abschalten ab<input type="number" step="0.05" min="0.05" max="1" name="section_pcc"></label>
-    </div>
-    <div class="row">
-      <button id="btnSaveProfile" class="primary">Übernehmen</button>
-      <label class="switch"><input type="checkbox" id="autoSections" checked>
-        Sektionen automatisch schalten</label>
-    </div>
-    <p class="note">Die Antennenwerte sind entscheidend: gemessen wird ab Mitte
-      Hinterachse. Stimmen sie nicht, liegt jede Spur um genau diesen Betrag daneben.
-      <b>Gerät hinter Achse</b> bestimmt, wo markiert wird – gelenkt wird immer auf
-      die Hinterachse, nie auf das Gerät (ein Punkt hinter der Achse schwenkt beim
-      Einlenken erst zur falschen Seite und die Führung schaukelt sich auf).</p>
-    <p class="note"><b>Absenkung ab / Restfaktor:</b> dieselbe Einstellung, die im
-      Schritttempo sauber nachführt, schaukelt bei zwölf km/h auf. Ab der Schwelle
-      wird die Lenkung linear weicher, bei doppelter Schwelle bleibt der Restfaktor
-      stehen (0 = aus).<br>
-      <b>Latenz:</b> Zeit von der Position bis zur wirklichen Radbewegung. Bei
-      Nachlaufen in schnell gefahrenen Kurven in 50-ms-Schritten erhöhen und im
-      Stand gegenprüfen.<br>
-      <b>Abschalten ab:</b> ein offenes Teilstück schließt erst, wenn dieser Anteil
-      seiner Breite überdeckt ist – das verhindert Flackern am Fahrspurrand. Die
-      Feldgrenze schaltet unabhängig davon sofort ab.</p>
-    <p class="note"><b>Gezogenes Gerät:</b> ein angebautes Gerät dreht sich mit dem
-      Traktor, ein gezogenes nicht – es schwenkt erst ein, während es gezogen wird,
-      und steht in der Kurve innerhalb der Fahrspur. Mit dieser Option wird die
-      bearbeitete Fläche dort markiert, wo das Gerät wirklich ist. Die
-      <b>Deichsellänge</b> ist der Abstand vom Zugpunkt bis zur Geräteachse: je
-      kürzer, desto schneller folgt es. Geführt wird weiterhin das Fahrzeug –
-      auf ein nachlaufendes Gerät zu führen macht die Lenkung unruhig, nicht
-      genauer.</p>
   </section>
 
   <section class="tab-panel" data-panel="settings" hidden>
@@ -304,9 +353,8 @@
       <span class="note" id="setupCount" role="status" aria-atomic="true"></span>
       <button id="btnSetupReset">Zurücksetzen</button>
     </div>
-    <p class="note">Die Reihenfolge ist keine Förmlichkeit: so findet man einen
-      Fehler dort, wo er entsteht. Was das Programm selbst prüfen kann, prüft es
-      laufend mit – ein Schritt mit rotem Befund lässt sich nicht abhaken.</p>
+    <p class="note">Von oben nach unten abhaken. Was das Programm selbst prüfen kann, prüft
+      es laufend mit – ein Schritt mit rotem Befund lässt sich nicht abhaken.</p>
     <div class="list" id="setupList"></div>
   </section>
 
@@ -316,17 +364,19 @@
       <button id="btnGeraete" class="primary">Geräte suchen</button>
       <span class="note" id="geraeteInfo" role="status" aria-atomic="true"></span>
     </div>
-    <p class="note">Sucht den Empfänger (F9P an USB), den Neigungssensor (Tinkerforge
-      über den Brick Daemon) und die Lenksteuerung (Phidget). Was gefunden wird,
-      lässt sich mit einem Druck in die Einstellungen übernehmen – Empfänger und
-      Sensor werden dann sofort neu verbunden, ohne Neustart.</p>
+    <details class="erklaerung">
+      <summary>Erklärung</summary>
+      <p>Sucht den Empfänger (F9P an USB), den Neigungssensor (Tinkerforge über den Brick
+        Daemon) und die Lenksteuerung (Phidget). Was gefunden wird, lässt sich mit einem Druck
+        in die Einstellungen übernehmen – Empfänger und Sensor werden sofort neu verbunden.</p>
+    </details>
     <div class="list" id="geraeteList"></div>
     <div class="row" id="geraeteRow" hidden>
       <button id="btnGeraeteUebernehmen" class="primary">Gefundene Geräte übernehmen</button>
       <span class="note" id="geraeteVorschlag"></span>
     </div>
 
-    <h3 class="abschnitt">Sensoren und Lenkung</h3>
+    <h3 class="abschnitt">Zustand, Sensoren und Lenkung</h3>
     <div class="row" id="steerRow" hidden>
       <button id="btnCentre">Lenkung: Mitte lernen</button>
       <span class="note" id="steerInfo"></span>
@@ -345,9 +395,8 @@
       <label class="switch"><input type="checkbox" id="compensation" checked>
         Hangausgleich aktiv</label>
     </div>
-    <p class="note" id="imuNote" hidden>Zum Nullen auf ebenem Boden stehen. Der
-      Sensor sitzt nie exakt waagerecht in der Kabine – ein Grad Montagefehler
-      sind bei 3 m Antennenhöhe schon 5 cm Dauerversatz in jeder Spur.</p>
+    <p class="note" id="imuNote" hidden>Zum Nullen auf ebenem Boden stehen – ein Grad
+      Montagefehler sind bei 3 m Antennenhöhe schon 5 cm Dauerversatz.</p>
     <div class="list" id="systemList"></div>
 
     <h3 class="abschnitt">Daten zwischen Master und Arbeitern</h3>
@@ -359,10 +408,12 @@
       <label class="button" for="datenImport">Datenpaket einspielen (.zip)</label>
       <input type="file" id="datenImport" accept=".zip" hidden>
     </div>
-    <p class="note">Das Paket enthält Felder (Umrisse), Spuren und Maschinen. Auf dem Master
-      erstellen, per USB-Stick, Messenger oder Mail zum Tablet bringen und dort einspielen –
-      es überschreibt nichts, was auf dem Tablet neuer ist. Sind beide im selben WLAN, geht es
-      ohne Datei: der Abgleich läuft von selbst (Einstellungen → Rolle).</p>
+    <details class="erklaerung">
+      <summary>Erklärung</summary>
+      <p>Das Paket enthält Felder (Umrisse), Spuren, Traktoren und Geräte. Auf dem Master
+        erstellen, per USB-Stick zum Tablet bringen und dort einspielen – es überschreibt
+        nichts, was auf dem Tablet neuer ist. Mit Netz läuft der Abgleich von selbst.</p>
+    </details>
     <p class="note" id="datenInfo" role="status" aria-atomic="true"></p>
 
     <h3 class="abschnitt">Aktualisierung</h3>
@@ -374,14 +425,14 @@
       <button id="btnUpdateOnline" hidden>Jetzt aktualisieren</button>
     </div>
     <p class="note" id="updateOnlineInfo" role="status" aria-atomic="true"></p>
-    <div class="row">
+    <div class="row" id="updatePaketZeile">
       <label class="button primary" for="updatePaket">Update-Paket einspielen (.zip)</label>
       <input type="file" id="updatePaket" accept=".zip" hidden>
       <button id="btnUpdateGit" hidden>Aus GitHub holen</button>
       <button id="btnUpdateNeustart">Neu starten</button>
       <button id="btnUpdateZurueck" class="danger" hidden>Vorigen Stand zurückholen</button>
     </div>
-    <p class="note">Auf dem PC <code>python scripts/make_update.py</code> aufrufen, die Zip-Datei
+    <p class="note" id="updatePaketNote">Auf dem PC <code>python scripts/make_update.py</code> aufrufen, die Zip-Datei
       aufs Tablet bringen (USB-Stick, WLAN, Messenger) und hier einspielen – dann
       <b>Neu starten</b>. Konfiguration, Datenbank und Python-Umgebung bleiben
       unberührt; der alte Stand liegt als Sicherung bereit und lässt sich mit einem
@@ -395,17 +446,15 @@
       <button id="btnRohdaten" class="primary">Aufzeichnung starten</button>
       <span class="note" id="rohdatenInfo" role="status" aria-atomic="true"></span>
     </div>
-    <p class="note">Zeichnet auf, was <b>hereinkommt</b>: die rohen NMEA-Sätze und
-      die Lagemeldungen des Neigungssensors, mit Zeitstempel. Dieselbe Datei lässt
-      sich mit <b>Abspielen</b> sofort wieder einlesen, ohne Neustart – dann läuft
-      dieselbe Fahrt am Schreibtisch noch einmal durch dieselbe Rechenkette. Die
-      Lenkung geht dabei aus; zurück zum Empfänger über <b>Einstellungen →
-      Empfänger → Quelle</b>. Genau das braucht man, um einen Fehler vom Feld
-      nachzustellen, statt ihn zu erraten.</p>
-    <p class="note">Aufgezeichnet wird das Rohe, nicht das Errechnete: ein
-      Protokoll der Ergebnisse würde jeden Auswertungsfehler mit aufzeichnen, den
-      man gerade sucht. Es ist eine Textdatei – im Notfall genügt ein Texteditor.
-      Rund 7 MB je Stunde; bei 200 MB endet die Aufzeichnung von selbst.</p>
+    <details class="erklaerung">
+      <summary>Erklärung</summary>
+      <p>Zeichnet auf, was <b>hereinkommt</b>: die rohen NMEA-Sätze und die Lagemeldungen
+        des Neigungssensors, mit Zeitstempel. Mit <b>Abspielen</b> läuft dieselbe Fahrt am
+        Schreibtisch noch einmal durch dieselbe Rechenkette – so lässt sich ein Fehler vom
+        Feld nachstellen. Die Lenkung geht dabei aus; zurück zum Empfänger über
+        <b>Einstellungen → Empfänger → Quelle</b>. Rund 7 MB je Stunde, bei 200 MB endet
+        die Aufzeichnung von selbst.</p>
+    </details>
     <div class="list" id="rohdatenList"></div>
     <div class="row" id="simRow" hidden>
       <label>Simulator km/h <input type="range" id="simSpeed" min="0" max="15" step="0.5" value="9"></label>

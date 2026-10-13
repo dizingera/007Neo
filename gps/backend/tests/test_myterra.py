@@ -155,24 +155,27 @@ class MaschinenUebernahmeTests(unittest.TestCase):
         config.server.data_dir = ordner
         return TestClient(create_app(config))
 
-    def test_one_machine_per_implement_with_tractor_and_known_width(self):
+    def test_tractors_become_tractors_and_implements_machines(self):
         with tempfile.TemporaryDirectory() as ordner, self._client(ordner) as c:
             vorher = next(p for p in c.get("/api/profiles").json() if p["aktiv"])
+            traktor_vorher = next(t for t in c.get("/api/traktoren").json() if t["aktiv"])
             antwort = c.post("/api/myterra/maschinen", json={
                 "maschinen": MYTERRA_LISTE, "traktor": "John Deere 7530 Premium"}).json()["data"]
             self.assertEqual(antwort["neu"], ["Scheibenegge 3 m", "Grubber 2,50 m",
                                               "Güttler Großfederzahnegge", "Claas Dominator 98 SL"])
             self.assertEqual(antwort["ohne_breite"], ["Güttler Großfederzahnegge", "Claas Dominator 98 SL"])
+            self.assertEqual(antwort["traktoren_neu"], ["IHC 956 XL", "John Deere 7530 Premium"])
             profile = {p["name"]: p for p in c.get("/api/profiles").json()}
             self.assertEqual(profile["Grubber 2,50 m"]["width_m"], 2.5)
-            self.assertEqual(profile["Grubber 2,50 m"]["traktor"], "John Deere 7530 Premium")
             self.assertEqual(profile["Grubber 2,50 m"]["anbaugeraet"], "Grubber 2,50 m")
-            # Der Mähdrescher fährt selbst - kein Traktor davor.
-            self.assertEqual(profile["Claas Dominator 98 SL"]["traktor"], "")
             self.assertNotIn("Alte Drille", profile)                 # außer Betrieb
-            self.assertNotIn("IHC 956 XL", profile)                   # Traktoren sind keine Gespanne
-            # Die gewählte Maschine bleibt gewählt.
+            self.assertNotIn("IHC 956 XL", profile)                   # ein Traktor ist keine Maschine
+            traktoren = {t["name"]: t for t in c.get("/api/traktoren").json()}
+            self.assertIn("IHC 956 XL", traktoren)
+            self.assertNotIn("Grubber 2,50 m", traktoren)
+            # Gewählte Maschine und gewählter Traktor bleiben gewählt.
             self.assertTrue(profile[vorher["name"]]["aktiv"])
+            self.assertTrue(traktoren[traktor_vorher["name"]]["aktiv"])
             katalog = c.get("/api/myterra/maschinen").json()
             self.assertEqual(katalog["traktoren"], ["IHC 956 XL", "John Deere 7530 Premium"])
             self.assertIn("Claas Dominator 98 SL", katalog["geraete"])

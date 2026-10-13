@@ -1051,28 +1051,28 @@ function fillProfileFrom(profile) {
 
 el('profileSelect').onchange = async (event) => {
   const antwort = await api('POST', `/api/profiles/${event.target.value}/select`);
-  if (antwort) { fillProfileFrom(antwort.data); toast(`Maschine: ${antwort.data.name}`); }
+  if (antwort) { fillProfileFrom(antwort.data); toast(`Gerät: ${antwort.data.name}`); }
 };
 
 el('btnNewProfile').onclick = async () => {
-  const name = prompt('Bezeichnung der neuen Maschine (die aktuellen Werte werden übernommen)', '');
+  const name = prompt('Bezeichnung des neuen Geräts, am besten wie in MyTerra (die aktuellen Werte werden übernommen)', '');
   if (name === null || !name.trim()) return;
   const antwort = await api('POST', '/api/profiles', { name: name.trim() });
   if (antwort) {
     fillProfileFrom(antwort.data);
     renderProfiles(await (await fetch('/api/profiles')).json());
-    toast(`Maschine "${antwort.data.name}" angelegt und gewählt`);
+    toast(`Gerät "${antwort.data.name}" angelegt und gewählt`);
   }
 };
 
 el('btnDeleteProfile').onclick = async () => {
   const select = el('profileSelect');
   const option = select.options[select.selectedIndex];
-  if (!option || !confirm(`Maschine "${option.textContent}" löschen?`)) return;
+  if (!option || !confirm(`Gerät "${option.textContent}" löschen?`)) return;
   if (await api('DELETE', `/api/profiles/${option.value}`)) {
     renderProfiles(await (await fetch('/api/profiles')).json());
     setTimeout(fillProfile, 300);
-    toast('Maschine gelöscht');
+    toast('Gerät gelöscht');
   }
 };
 
@@ -1082,7 +1082,65 @@ el('btnSaveProfile').onclick = async () => {
     payload[input.name] = input.type === 'checkbox' ? input.checked
       : input.type === 'number' ? parseFloat(input.value) : input.value;
   });
-  if (await api('POST', '/api/profile', payload)) toast('Maschine übernommen');
+  if (await api('POST', '/api/profile', payload)) {
+    toast('Gerät übernommen');
+    renderProfiles(await (await fetch('/api/profiles')).json());
+  }
+};
+
+/* Traktoren: getrennt vom Gerät gewählt. Antenne und Lenkung gehören dem Traktor -
+   einmal eingestellt, gelten sie für jedes Gerät, das er zieht. */
+let traktorenListe = [];
+
+function fillTraktorForm(traktor) {
+  if (!traktor) return;
+  document.querySelectorAll('#traktorForm input').forEach((input) => {
+    if (traktor[input.name] !== undefined) input.value = traktor[input.name];
+  });
+}
+
+async function renderTraktoren() {
+  const liste = await fetch('/api/traktoren').then((r) => r.json()).catch(() => null);
+  if (!Array.isArray(liste)) return;
+  traktorenListe = liste;
+  const select = el('traktorSelect');
+  select.replaceChildren(...liste.map((t) => Object.assign(document.createElement('option'), {
+    value: t.id, textContent: t.name, selected: !!t.aktiv,
+  })));
+  el('btnDeleteTraktor').disabled = liste.length <= 1;
+  fillTraktorForm(liste.find((t) => t.aktiv));
+}
+
+el('traktorSelect').onchange = async (event) => {
+  const antwort = await api('POST', `/api/traktoren/${event.target.value}/select`);
+  if (antwort) { await renderTraktoren(); toast(`Traktor: ${antwort.data.name}`); }
+};
+
+el('btnNewTraktor').onclick = async () => {
+  const name = prompt('Name des Traktors, am besten wie in MyTerra (Antenne und Lenkung des gewählten werden übernommen)', '');
+  if (name === null || !name.trim()) return;
+  const antwort = await api('POST', '/api/traktoren', { name: name.trim() });
+  if (antwort) { await renderTraktoren(); toast(`Traktor "${antwort.data.name}" angelegt und gewählt`); }
+};
+
+el('btnDeleteTraktor').onclick = async () => {
+  const option = el('traktorSelect').selectedOptions[0];
+  if (!option || !confirm(`Traktor "${option.textContent}" löschen?`)) return;
+  if (await api('DELETE', `/api/traktoren/${option.value}`)) {
+    await renderTraktoren();
+    toast('Traktor gelöscht');
+  }
+};
+
+el('btnSaveTraktor').onclick = async () => {
+  const payload = {};
+  document.querySelectorAll('#traktorForm input').forEach((input) => {
+    payload[input.name] = input.type === 'number' ? parseFloat(input.value) : input.value;
+  });
+  if (await api('POST', '/api/traktor', payload)) {
+    await renderTraktoren();
+    toast('Traktor übernommen');
+  }
 };
 
 /* ------------------------------------------------------------ Vorgewende */
@@ -1129,6 +1187,9 @@ async function renderUpdate() {
       (stand.git ? ' · aus Git-Klon' : '') + ` · ${stand.wurzel}`;
     el('btnUpdateGit').hidden = !stand.git;
     el('btnUpdateZurueck').hidden = !(stand.sicherungen && stand.sicherungen.length);
+    // Im installierten Programm gibt es nur das Online-Update und die Setup-Datei.
+    el('updatePaketZeile').hidden = !!stand.als_programm;
+    el('updatePaketNote').hidden = !!stand.als_programm;
     if (stand.sicherungen && stand.sicherungen.length) {
       el('btnUpdateZurueck').textContent = `Vorigen Stand zurückholen (${stand.sicherungen[0].replace('sicherung-', '')})`;
     }
@@ -1389,7 +1450,11 @@ async function refreshLists() {
       fetch('/api/jobs').then((r) => r.json()), fetch('/api/fields').then((r) => r.json())]);
     renderJobs(jobs, fields);
   }
-  if (active === 'machine') { fillProfile(); renderProfiles(await (await fetch('/api/profiles')).json()); }
+  if (active === 'machine') {
+    fillProfile();
+    renderProfiles(await (await fetch('/api/profiles')).json());
+    renderTraktoren();
+  }
   if (active === 'headland') fillHeadland();
   if (active === 'system') { renderSystem(); renderRohdaten(); renderUpdate(); }
   if (active === 'setup') renderSetup(await (await fetch('/api/checklist')).json());

@@ -122,7 +122,10 @@ def bericht_aus_arbeit(store: Storage, job: dict, felder: dict[str, dict],
         "strecke_km": round(float(job.get("distance_m") or 0.0) / 1000.0, 2),
         "taetigkeit": taetigkeit_aus(job.get("operation", "")),
         "taetigkeit_text": job.get("operation", ""),
-        "maschine": (maschine.get("traktor") or "").strip() or job.get("vehicle", ""),
+        # Der Traktor, mit dem gefahren wurde (seit 1.5.7 an der Arbeit); bei älteren
+        # Arbeiten der, der bei der Maschine eingetragen war.
+        "maschine": ((job.get("tractor") or "").strip() or (maschine.get("traktor") or "").strip()
+                     or job.get("vehicle", "")),
         "anbaugeraet": (maschine.get("anbaugeraet") or "").strip(),
         "agripilot_maschine": job.get("vehicle", ""),
         "geraet": geraete.get(job.get("device_id", ""), job.get("device_id", "")),
@@ -142,12 +145,11 @@ def _ist_traktor(eintrag: dict) -> bool:
 def maschinen_uebernehmen(engine, liste: list[dict], traktor: str = "") -> dict:
     """Die Maschinenliste von MyTerra übernehmen.
 
-    In MyTerra sind Traktor und Gerät getrennt, in AgriPilot ist eine Maschine das
-    Gespann (die Arbeitsbreite gehört zum Gerät, Antenne und Radstand zum Traktor).
-    Deshalb wird je Gerät (und je Mähdrescher) eine AgriPilot-Maschine angelegt, mit
-    ``traktor`` als Zugmaschine; Traktoren selbst stehen in der Auswahl. Eine Maschine,
-    die es für dieses Gerät schon gibt, bleibt unverändert - was dort eingestellt ist,
-    hat jemand gemessen. Die gerade gewählte Maschine bleibt gewählt.
+    Wie in MyTerra sind Traktoren und Geräte getrennt: jeder MyTerra-Traktor wird ein
+    AgriPilot-Traktor (Antenne und Lenkung vom gewählten als Vorlage), jedes Gerät und
+    jeder Mähdrescher eine Maschine. Was es schon gibt, bleibt unverändert - was dort
+    eingestellt ist, hat jemand gemessen. Gewählter Traktor und gewählte Maschine bleiben
+    gewählt. ``traktor`` ist seit 1.5.7 ohne Wirkung (nur noch geprüft).
     """
     aktive = [e for e in liste if isinstance(e, dict) and (e.get("name") or "").strip()
               and e.get("active", True) is not False]
@@ -172,8 +174,7 @@ def maschinen_uebernehmen(engine, liste: list[dict], traktor: str = "") -> dict:
         if _glatt(name) in belegt:
             ergebnis["vorhanden"].append(name)
             continue
-        maehdrescher = "mahdrescher" in _glatt(eintrag.get("type") or "")
-        werte = {**basis, "anbaugeraet": name, "traktor": "" if maehdrescher else traktor}
+        werte ={**basis, "anbaugeraet": name, "traktor": ""}
         try:
             breite = float(eintrag.get("widthM") or 0.0)
         except (TypeError, ValueError):
@@ -187,9 +188,20 @@ def maschinen_uebernehmen(engine, liste: list[dict], traktor: str = "") -> dict:
         ergebnis["neu"].append(name)
     if zuvor and ergebnis["neu"]:
         engine.select_profile(zuvor["id"])
-    engine.note(f"Maschinen aus MyTerra: {len(ergebnis['neu'])} neu, "
-                f"{len(ergebnis['vorhanden'])} schon da")
-    return {**ergebnis, "traktoren": traktoren}
+    # Die Traktoren: was es unter diesem Namen noch nicht gibt, kommt dazu.
+    traktor_zuvor = engine.aktiver_traktor()["id"]
+    bekannt = {_glatt(t["name"]) for t in engine.list_traktoren()}
+    traktoren_neu = []
+    for name in traktoren:
+        if _glatt(name) not in bekannt:
+            engine.save_traktor_as(name)
+            bekannt.add(_glatt(name))
+            traktoren_neu.append(name)
+    if traktoren_neu:
+        engine.select_traktor(traktor_zuvor)
+    engine.note(f"Aus MyTerra: {len(ergebnis['neu'])} Maschinen und {len(traktoren_neu)} "
+                f"Traktoren neu, {len(ergebnis['vorhanden'])} Maschinen schon da")
+    return {**ergebnis, "traktoren": traktoren, "traktoren_neu": traktoren_neu}
 
 
 def arbeiten(store: Storage) -> list[dict]:

@@ -31,6 +31,7 @@ from .guidance import (
     GuidanceState,
     HeadingFilter,
     ImplementHeading,
+    TRAKTOR_FELDER,
     VehicleProfile,
 )
 from .imu import terrain_offset
@@ -71,6 +72,9 @@ class Engine:
         self.store = store
 
         self.profile = self._load_profile()
+        # Antenne und Lenkung vom gewählten Traktor (legt die Traktorliste beim ersten
+        # Start aus dem bisherigen Gespann an).
+        self.profile = VehicleProfile(**{**asdict(self.profile), **self._traktor_werte()})
         self.sections: list[Section] = build_sections(
             self.profile.width_m, self.profile.sections
         )
@@ -207,8 +211,11 @@ class Engine:
         # Von den Grundwerten aus, nicht von der vorher gewählten Maschine: einer Maschine aus
         # einer älteren Version fehlen neuere Felder, und die erbte sie sonst vom Vorgänger
         # (so bekam "SuperMax" das MyTerra-Gerät der zuletzt angelegten Maschine).
+        # Antenne und Lenkung kommen vom gewählten Traktor, nicht aus dem Gerät.
         werte = {**asdict(VehicleProfile()),
-                 **{k: v for k, v in eintrag.items() if k in VehicleProfile.__dataclass_fields__}}
+                 **{k: v for k, v in eintrag.items()
+                    if k in VehicleProfile.__dataclass_fields__ and k not in TRAKTOR_FELDER},
+                 **self._traktor_werte()}
         self.update_profile(werte, stempeln=False)    # Auswählen ändert die Maschine nicht
         self.note(f"Maschine: {self.profile.name}")
         return self.profile
@@ -232,12 +239,16 @@ class Engine:
             self.select_profile(rest[0]["id"])
 
     def update_profile(self, values: dict, stempeln: bool = True) -> VehicleProfile:
+        """Das Gespann ändern. Antenne und Lenkung gehen an den gewählten Traktor, der Rest
+        an die gewählte Maschine (das Gerät)."""
         fields = VehicleProfile.__dataclass_fields__
+        self.list_profiles()          # legt auf einem frischen Gerät die erste Maschine an
         current = asdict(self.profile)
         current.update({k: v for k, v in values.items() if k in fields})
         self.profile = VehicleProfile(**current)
         self.store.set_setting("vehicle_profile", current)
-        # ... und in der Maschinenliste die aktive mitziehen.
+        # ... und in der Maschinenliste die aktive mitziehen. Die Traktorwerte stehen dort
+        # weiter mit drin, damit ein Tablet mit älterer Version das Gespann noch versteht.
         profile = self.store.get_setting("vehicle_profiles") or []
         aktiv = self.store.get_setting("vehicle_profile_active") or ""
         if profile and any(p["id"] == aktiv for p in profile):
@@ -245,6 +256,7 @@ class Engine:
             self.store.set_setting("vehicle_profiles", [
                 {**p, **current, "id": aktiv, **stand} if p["id"] == aktiv else p
                 for p in profile])
+        self._traktor_schreiben({k: current[k] for k in TRAKTOR_FELDER}, stempeln)
         self.sections = build_sections(self.profile.width_m, self.profile.sections)
         if self.line is not None:
             # Changing the working width changes the pass spacing, and with it
@@ -256,17 +268,177 @@ class Engine:
         self.implement_heading.reset(self.heading)
         return self.profile
 
+    # -- Traktoren ----------------------------------------------------------
+    # Ein Traktor zieht viele Geräte. Wo seine Antenne sitzt und wie er lenkt, stellt
+    # man einmal ein (TRAKTOR_FELDER); gewählt wird er getrennt vom Gerät. Gerechnet
+    # wird mit dem Gespann: self.profile = Gerät + Traktor.
+
+    @staticmethod
+    def traktor_kennung(name: str) -> str:
+        """Feste Kennung aus dem Namen: Master und Tablets legen beim ersten Start
+        dieselben Traktoren an - mit zufälligen Kennungen gäbe es sie nach dem Abgleich doppelt."""
+        import re
+        import unicodedata
+        glatt = unicodedata.normalize("NFKD", name.lower()).encode("ascii", "ignore").decode()
+        return "traktor-" + (re.sub(r"[^a-z0-9]+", "-", glatt).strip("-") or "ohne-name")
+
+    def _erste_traktoren(self) -> list[dict]:
+        """Beim ersten Start mit Traktorliste: aus dem, was es schon gibt.
+
+        Die Werte kommen aus dem gerade gewählten Gespann - dort stehen die gemessenen
+        Antennenmaße. Die Namen aus den Maschinen (1.5.6) und der Liste aus MyTerra.
+        Stand 0: ein Traktor, den irgendwo schon jemand eingestellt hat, gewinnt.
+        """
+        werte = {k: getattr(self.profile, k) for k in TRAKTOR_FELDER}
+        namen: list[str] = []
+        katalog = (self.store.get_setting("myterra_maschinen") or {}).get("traktoren") or []
+        maschinen = self.store.get_setting("vehicle_profiles") or []
+        for name in [self.profile.traktor, *[p.get("traktor") for p in maschinen], *katalog]:
+            name = (name or "").strip()
+            if name and name not in namen:
+                namen.append(name)
+        return [{"id": self.traktor_kennung(n), "name": n, **werte, "stand": 0.0}
+                for n in (namen or ["Traktor"])]
+
+    def list_traktoren(self) -> list[dict]:
+        liste = self.store.get_setting("traktoren") or []
+        aktiv = self.store.get_setting("traktor_aktiv") or ""
+        if not liste:
+            liste = self._erste_traktoren()
+            self.store.set_setting("traktoren", liste)
+        if not any(t["id"] == aktiv for t in liste):
+            aktiv = liste[0]["id"]
+            self.store.set_setting("traktor_aktiv", aktiv)
+        return [{**t, "aktiv": t["id"] == aktiv} for t in liste]
+
+    def aktiver_traktor(self) -> dict:
+        return next(t for t in self.list_traktoren() if t["aktiv"])
+
+    def _traktor_werte(self) -> dict:
+        basis = asdict(VehicleProfile())
+        traktor = self.aktiver_traktor()
+        return {k: traktor.get(k, basis[k]) for k in TRAKTOR_FELDER}
+
+    def _traktor_schreiben(self, werte: dict, stempeln: bool) -> None:
+        """Die Traktorwerte des Gespanns in den gewählten Traktor zurückschreiben."""
+        liste = [dict(t) for t in self.list_traktoren()]
+        for t in liste:
+            aktiv = t.pop("aktiv")
+            if aktiv and any(t.get(k) != v for k, v in werte.items()):
+                t.update(werte)
+                if stempeln:
+                    t["stand"] = time.time()
+        self.store.set_setting("traktoren", liste)
+
+    def select_traktor(self, traktor_id: str) -> dict:
+        if not any(t["id"] == traktor_id for t in self.list_traktoren()):
+            raise KeyError("Traktor nicht gefunden")
+        self.store.set_setting("traktor_aktiv", traktor_id)
+        self.update_profile(self._traktor_werte(), stempeln=False)
+        traktor = self.aktiver_traktor()
+        self.note(f"Traktor: {traktor['name']}")
+        return traktor
+
+    def save_traktor_as(self, name: str, values: dict | None = None) -> dict:
+        """Einen weiteren Traktor anlegen - mit den Werten des gewählten als Vorlage."""
+        name = (name or "").strip()
+        if not name:
+            raise ValueError("Der Traktor braucht einen Namen")
+        liste = [dict(t) for t in self.list_traktoren()]
+        if any(t["name"].lower() == name.lower() for t in liste):
+            raise ValueError(f"Einen Traktor „{name}“ gibt es schon")
+        werte = self._traktor_werte()
+        werte.update({k: v for k, v in (values or {}).items() if k in TRAKTOR_FELDER})
+        kennung = self.traktor_kennung(name)
+        if any(t["id"] == kennung for t in liste):
+            kennung = storage.new_id()
+        for t in liste:
+            t.pop("aktiv", None)
+        liste.append({"id": kennung, "name": name, **werte, "stand": time.time()})
+        self.store.set_setting("traktoren", liste)
+        return self.select_traktor(kennung)
+
+    def update_traktor(self, values: dict) -> dict:
+        """Den gewählten Traktor ändern: Name, Antenne, Lenkung."""
+        liste = [dict(t) for t in self.list_traktoren()]
+        name = (values.get("name") or "").strip() if "name" in values else None
+        for t in liste:
+            if t.pop("aktiv"):
+                if name is not None:
+                    if not name:
+                        raise ValueError("Der Traktor braucht einen Namen")
+                    t["name"] = name
+                t.update({k: v for k, v in values.items() if k in TRAKTOR_FELDER})
+                t["stand"] = time.time()
+        self.store.set_setting("traktoren", liste)
+        self.update_profile(self._traktor_werte(), stempeln=False)
+        return self.aktiver_traktor()
+
+    def delete_traktor(self, traktor_id: str) -> None:
+        liste = self.list_traktoren()
+        if len(liste) <= 1:
+            raise ValueError("Der letzte Traktor bleibt - einer muss es geben")
+        rest = [dict(t) for t in liste if t["id"] != traktor_id]
+        if len(rest) == len(liste):
+            raise KeyError("Traktor nicht gefunden")
+        war_aktiv = any(t["id"] == traktor_id and t["aktiv"] for t in liste)
+        for t in rest:
+            t.pop("aktiv", None)
+        self.store.set_setting("traktoren", rest)
+        grab = dict(self.store.get_setting("traktoren_geloescht") or {})
+        grab[traktor_id] = time.time()
+        self.store.set_setting("traktoren_geloescht", grab)
+        if war_aktiv:
+            self.select_traktor(rest[0]["id"])
+
+    def _traktoren_mergen(self, eingang: dict) -> None:
+        """Traktoren eines anderen Geräts übernehmen: je Traktor gilt der neuere."""
+        if not isinstance(eingang.get("traktoren"), list):
+            return                                   # ein Gerät mit älterer Version
+        lokal = {t["id"]: {k: v for k, v in t.items() if k != "aktiv"}
+                 for t in self.list_traktoren()}
+        grab = dict(self.store.get_setting("traktoren_geloescht") or {})
+        for kennung, zeit in (eingang.get("traktoren_geloescht") or {}).items():
+            grab[kennung] = max(float(zeit or 0.0), float(grab.get(kennung, 0.0)))
+        for t in eingang["traktoren"]:
+            if not isinstance(t, dict) or not t.get("id") or not (t.get("name") or "").strip():
+                continue
+            stand = float(t.get("stand") or 0.0)
+            if t["id"] in grab and float(grab[t["id"]]) >= stand:
+                continue
+            sauber = {"id": str(t["id"]), "name": str(t["name"]).strip(), "stand": stand,
+                      **{k: v for k, v in t.items() if k in TRAKTOR_FELDER}}
+            alt = lokal.get(t["id"])
+            if alt is None or stand > float(alt.get("stand") or 0.0):
+                lokal[t["id"]] = sauber
+        for kennung, zeit in grab.items():
+            alt = lokal.get(kennung)
+            if alt is not None and float(alt.get("stand") or 0.0) <= float(zeit) and len(lokal) > 1:
+                del lokal[kennung]
+        self.store.set_setting("traktoren", list(lokal.values()))
+        self.store.set_setting("traktoren_geloescht", grab)
+        werte = self._traktor_werte()
+        if any(getattr(self.profile, k) != v for k, v in werte.items()):
+            self.update_profile(werte, stempeln=False)
+
     # -- Maschinen zwischen Geräten teilen ---------------------------------
 
     def profile_export(self) -> dict:
-        """Die Maschinenliste für den Abgleich mit anderen Geräten (Master/Arbeiter, Datenpaket)."""
+        """Maschinen und Traktoren für den Abgleich mit anderen Geräten (Master/Arbeiter, Datenpaket)."""
         maschinen = []
         for p in self.list_profiles():
             p = dict(p)
             p.pop("aktiv", None)
             maschinen.append(p)
+        traktoren = []
+        for t in self.list_traktoren():
+            t = dict(t)
+            t.pop("aktiv", None)
+            traktoren.append(t)
         return {"maschinen": maschinen,
-                "geloescht": dict(self.store.get_setting("vehicle_profiles_deleted") or {})}
+                "geloescht": dict(self.store.get_setting("vehicle_profiles_deleted") or {}),
+                "traktoren": traktoren,
+                "traktoren_geloescht": dict(self.store.get_setting("traktoren_geloescht") or {})}
 
     def profile_merge(self, eingang: dict) -> dict:
         """Maschinen eines anderen Geräts übernehmen: je Maschine gilt die neuere.
@@ -275,6 +447,7 @@ class Engine:
         verschwinden - aber nie die letzte, und die gerade gewählte Maschine
         bleibt gewählt (ihre Werte werden neu geladen, falls sie sich geändert haben).
         """
+        self._traktoren_mergen(eingang)
         felder = VehicleProfile.__dataclass_fields__
         lokal = {}
         for p in self.list_profiles():
@@ -315,9 +488,10 @@ class Engine:
             aktiv = liste[0]["id"]
         self.store.set_setting("vehicle_profile_active", aktiv)
         # Die gewählte Maschine neu laden: ihre Werte können sich geändert haben.
+        # Antenne und Lenkung bleiben beim gewählten Traktor.
         eintrag = lokal[aktiv]
-        werte = {k: v for k, v in eintrag.items() if k in felder}
-        if werte != {k: v for k, v in asdict(self.profile).items() if k in felder}:
+        werte = {k: v for k, v in eintrag.items() if k in felder and k not in TRAKTOR_FELDER}
+        if werte != {k: v for k, v in asdict(self.profile).items() if k in werte}:
             self.update_profile(werte, stempeln=False)
         return zaehler
 
@@ -953,6 +1127,7 @@ class Engine:
             self.field["id"], self.config.network.device_id,
             self.profile.name, operation,
             self.line.id if self.line else None,
+            tractor=self.aktiver_traktor()["name"],
         )
         self.distance_m = 0.0
         self.working_time_s = 0.0
@@ -1341,6 +1516,7 @@ class Engine:
                             if self.position is not None and len(self.field["boundary"]) >= 3 else None),
             } if self.field else None,
             "profile": asdict(self.profile),
+            "traktor": self.aktiver_traktor()["name"],
             "sections": [asdict(s) for s in self.sections],
             "auto_sections": self.auto_sections,
             "job": {

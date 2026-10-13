@@ -93,6 +93,8 @@ class VehicleProfile:
 
     # Wie MyTerra Traktor und Gerät dieser Maschine nennt. Damit kommen beide beim
     # Einlesen einer Arbeit in MyTerra von selbst richtig an (Freigabe braucht beide).
+    # Seit 1.5.7 kommt der Traktor aus der Traktorliste; "traktor" bleibt nur für
+    # Maschinen aus 1.5.6 lesbar, die ihn noch selbst tragen.
     traktor: str = ""
     anbaugeraet: str = ""
 
@@ -173,6 +175,17 @@ class VehicleProfile:
             hitch[0] - forward[0] * laenge + right[0] * self.tool_offset_m,
             hitch[1] - forward[1] * laenge + right[1] * self.tool_offset_m,
         )
+
+
+# Was zum Traktor gehört und nicht zum Gerät: wo die Antenne sitzt und wie er lenkt.
+# Ein Traktor zieht viele Geräte - diese Werte misst und stellt man einmal je Traktor
+# ein, nicht für jedes Gerät neu. Der Rest der VehicleProfile gehört zum Gerät.
+TRAKTOR_FELDER = (
+    "antenna_forward_m", "antenna_right_m", "antenna_height_m",
+    "wheelbase_m", "max_steer_deg", "max_steer_rate_deg_s",
+    "steer_gain", "steer_softening", "speed_gain_limit_kmh", "speed_gain_rest",
+    "actuator_latency_ms",
+)
 
 
 @dataclass
