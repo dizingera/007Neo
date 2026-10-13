@@ -942,7 +942,22 @@ function touchDistance(event) {
 
 /* -------------------------------------------------------------- Menü */
 
-el('btnMenu').onclick = () => { el('sheet').hidden = false; refreshLists(); };
+function menueOeffnen() {
+  el('sheet').hidden = false;
+  refreshLists();
+  // Fokus ins Menü: wer mit der Tastatur bedient, landet beim aktiven Reiter.
+  document.querySelector('.tab.active').focus({ preventScroll: true });
+}
+
+function menueSchliessen() {
+  el('sheet').hidden = true;
+  el('btnMenu').focus({ preventScroll: true });
+}
+
+el('btnMenu').onclick = menueOeffnen;
+document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape' && !el('sheet').hidden) menueSchliessen();
+});
 
 /* Ein Reiter lässt sich direkt ansteuern: /#menu=setup öffnet die Inbetriebnahme.
  * Für ein Lesezeichen auf dem Tablet - und für Bildschirmfotos der Doku. */
@@ -955,15 +970,30 @@ function menueAusAdresse() {
   tab.onclick();
 }
 window.addEventListener('hashchange', menueAusAdresse);
-el('sheetClose').onclick = () => { el('sheet').hidden = true; };
-document.querySelectorAll('.tab').forEach((tab) => {
+el('sheetClose').onclick = menueSchliessen;
+const reiter = [...document.querySelectorAll('.tab')];
+reiter.forEach((tab, index) => {
   tab.onclick = () => {
-    document.querySelectorAll('.tab').forEach((t) => t.classList.remove('active'));
-    tab.classList.add('active');
+    reiter.forEach((t) => {
+      t.classList.toggle('active', t === tab);
+      t.setAttribute('aria-selected', String(t === tab));
+      t.tabIndex = t === tab ? 0 : -1;
+    });
     document.querySelectorAll('.tab-panel').forEach((panel) => {
       panel.hidden = panel.dataset.panel !== tab.dataset.tab;
     });
+    // Auf schmalen Geräten scrollt die Leiste: den gewählten Reiter in Sicht holen.
+    tab.scrollIntoView({ block: 'nearest', inline: 'nearest' });
     refreshLists();
+  };
+  // Pfeiltasten wechseln den Reiter, wie bei jeder Reiterleiste.
+  tab.onkeydown = (event) => {
+    const schritt = { ArrowRight: 1, ArrowLeft: -1 }[event.key];
+    if (!schritt) return;
+    event.preventDefault();
+    const ziel = reiter[(index + schritt + reiter.length) % reiter.length];
+    ziel.focus();
+    ziel.onclick();
   };
 });
 
@@ -1014,6 +1044,31 @@ el('arbeitName').onchange = (event) => {
   toast(`Nächste Arbeit: ${name}`);
 };
 
+/* Ungespeicherte Eingaben: das Menü frischt sich alle 5 s auf. Ein Formular, in dem
+   gerade getippt wurde, darf dabei nicht überschrieben werden - sonst ist die
+   eingetippte Arbeitsbreite still weg, und man hält den alten Wert für gespeichert.
+   Geänderte Felder bleiben markiert, bis übernommen oder neu gewählt wird. */
+const FORMULARE = ['traktorForm', 'profileForm', 'headlandForm', 'headlandSwitches'];
+
+function formularOffen(id) { return el(id).dataset.geaendert === '1'; }
+
+function formularSauber(id) {
+  const form = el(id);
+  form.dataset.geaendert = '';
+  form.querySelectorAll('.geaendert').forEach((feld) => feld.classList.remove('geaendert'));
+}
+
+FORMULARE.forEach((id) => {
+  const form = el(id);
+  const merken = (event) => {
+    if (!event.target.matches('input, select')) return;
+    form.dataset.geaendert = '1';
+    event.target.classList.add('geaendert');
+  };
+  form.addEventListener('input', merken);
+  form.addEventListener('change', merken);
+});
+
 /* Mehrere Maschinen: die Liste oben wählt, das Formular darunter gehört zur
  * gewählten. "Neue Maschine" kopiert die aktuellen Werte unter neuem Namen. */
 function renderProfiles(profile) {
@@ -1042,6 +1097,7 @@ async function myterraAuswahlLaden() {
 }
 
 function fillProfileFrom(profile) {
+  formularSauber('profileForm');
   document.querySelectorAll('#profileForm input').forEach((input) => {
     if (profile[input.name] === undefined) return;
     if (input.type === 'checkbox') input.checked = !!profile[input.name];
@@ -1083,6 +1139,7 @@ el('btnSaveProfile').onclick = async () => {
       : input.type === 'number' ? parseFloat(input.value) : input.value;
   });
   if (await api('POST', '/api/profile', payload)) {
+    formularSauber('profileForm');
     toast('Gerät übernommen');
     renderProfiles(await (await fetch('/api/profiles')).json());
   }
@@ -1092,8 +1149,9 @@ el('btnSaveProfile').onclick = async () => {
    einmal eingestellt, gelten sie für jedes Gerät, das er zieht. */
 let traktorenListe = [];
 
-function fillTraktorForm(traktor) {
-  if (!traktor) return;
+function fillTraktorForm(traktor, erzwingen = false) {
+  if (!traktor || (formularOffen('traktorForm') && !erzwingen)) return;
+  formularSauber('traktorForm');
   document.querySelectorAll('#traktorForm input').forEach((input) => {
     if (traktor[input.name] !== undefined) input.value = traktor[input.name];
   });
@@ -1113,14 +1171,14 @@ async function renderTraktoren() {
 
 el('traktorSelect').onchange = async (event) => {
   const antwort = await api('POST', `/api/traktoren/${event.target.value}/select`);
-  if (antwort) { await renderTraktoren(); toast(`Traktor: ${antwort.data.name}`); }
+  if (antwort) { formularSauber('traktorForm'); await renderTraktoren(); toast(`Traktor: ${antwort.data.name}`); }
 };
 
 el('btnNewTraktor').onclick = async () => {
   const name = prompt('Name des Traktors, am besten wie in MyTerra (Antenne und Lenkung des gewählten werden übernommen)', '');
   if (name === null || !name.trim()) return;
   const antwort = await api('POST', '/api/traktoren', { name: name.trim() });
-  if (antwort) { await renderTraktoren(); toast(`Traktor "${antwort.data.name}" angelegt und gewählt`); }
+  if (antwort) { formularSauber('traktorForm'); await renderTraktoren(); toast(`Traktor "${antwort.data.name}" angelegt und gewählt`); }
 };
 
 el('btnDeleteTraktor').onclick = async () => {
@@ -1138,6 +1196,7 @@ el('btnSaveTraktor').onclick = async () => {
     payload[input.name] = input.type === 'number' ? parseFloat(input.value) : input.value;
   });
   if (await api('POST', '/api/traktor', payload)) {
+    formularSauber('traktorForm');
     await renderTraktoren();
     toast('Traktor übernommen');
   }
@@ -1148,7 +1207,8 @@ el('btnSaveTraktor').onclick = async () => {
 function fillHeadland() {
   const headland = state.live && state.live.headland;
   if (!headland) return;
-  document.querySelectorAll('#headlandForm input, #headlandForm select, ' +
+  const offen = formularOffen('headlandForm') || formularOffen('headlandSwitches');
+  if (!offen) document.querySelectorAll('#headlandForm input, #headlandForm select, ' +
                             '#headlandSwitches input').forEach((input) => {
     const wert = headland[input.name];
     if (wert === undefined) return;
@@ -1169,7 +1229,11 @@ el('btnSaveHeadland').onclick = async () => {
     payload[input.name] = input.type === 'checkbox' ? input.checked
       : input.type === 'number' ? parseFloat(input.value) : input.value;
   });
-  if (await api('POST', '/api/headland', payload)) toast('Vorgewende übernommen');
+  if (await api('POST', '/api/headland', payload)) {
+    formularSauber('headlandForm');
+    formularSauber('headlandSwitches');
+    toast('Vorgewende übernommen');
+  }
 };
 
 el('autoSections').onchange = (event) =>
@@ -1689,12 +1753,13 @@ function jobZeile(job) {
 function fillProfile() {
   const profile = state.live && state.live.profile;
   if (!profile) return;
+  el('autoSections').checked = !!(state.live && state.live.auto_sections);
+  if (formularOffen('profileForm')) return;
   document.querySelectorAll('#profileForm input').forEach((input) => {
     if (profile[input.name] === undefined) return;
     if (input.type === 'checkbox') input.checked = !!profile[input.name];
     else input.value = profile[input.name];
   });
-  el('autoSections').checked = !!(state.live && state.live.auto_sections);
 }
 
 async function renderBackup() {
@@ -2217,6 +2282,10 @@ function item({ active, title, sub, actions }) {
     const button = document.createElement('button');
     button.textContent = label;
     button.onclick = handler;
+    // Laden ist der Handgriff im Feld; Löschen steht rot und abgesetzt am Ende,
+    // damit es mit dem Handschuh auf dem rüttelnden Sitz nicht getroffen wird.
+    if (label === 'Laden') button.classList.add('primary');
+    if (label === 'Löschen') button.classList.add('danger', 'abgesetzt');
     box.appendChild(button);
   });
   row.append(main, box);

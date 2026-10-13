@@ -98,19 +98,21 @@
 </main>
 
 <!-- Menü-Ebenen -->
-<div class="sheet" id="sheet" hidden>
+<div class="sheet" id="sheet" role="dialog" aria-modal="true" aria-label="Menü" hidden>
   <div class="sheet-head">
-    <div class="tabs">
-      <button data-tab="fields" class="tab active">Felder</button>
-      <button data-tab="lines" class="tab">Spuren</button>
-      <button data-tab="jobs" class="tab">Aufträge</button>
-      <button data-tab="machine" class="tab">Traktor &amp; Gerät</button>
-      <button data-tab="headland" class="tab">Vorgewende</button>
-      <button data-tab="settings" class="tab">Einstellungen</button>
-      <button data-tab="system" class="tab">System</button>
-      <button data-tab="setup" class="tab">Einbau</button>
+    <!-- Vorn, was der Fahrer im Feld braucht; hinter dem Trenner die Werkstatt. -->
+    <div class="tabs" role="tablist" aria-label="Menü-Reiter">
+      <button data-tab="fields" class="tab active" role="tab" aria-selected="true">Felder</button>
+      <button data-tab="lines" class="tab" role="tab" aria-selected="false" tabindex="-1">Spuren</button>
+      <button data-tab="jobs" class="tab" role="tab" aria-selected="false" tabindex="-1">Arbeiten</button>
+      <button data-tab="machine" class="tab" role="tab" aria-selected="false" tabindex="-1">Traktor &amp; Gerät</button>
+      <button data-tab="headland" class="tab" role="tab" aria-selected="false" tabindex="-1">Vorgewende</button>
+      <span class="tab-trenner" aria-hidden="true">Werkstatt</span>
+      <button data-tab="settings" class="tab werkstatt" role="tab" aria-selected="false" tabindex="-1">Einstellungen</button>
+      <button data-tab="system" class="tab werkstatt" role="tab" aria-selected="false" tabindex="-1">System</button>
+      <button data-tab="setup" class="tab werkstatt" role="tab" aria-selected="false" tabindex="-1">Einbau</button>
     </div>
-    <button class="close" id="sheetClose">✕</button>
+    <button class="close" id="sheetClose" aria-label="Menü schließen"><span aria-hidden="true">✕</span> Schließen</button>
   </div>
 
   <section class="tab-panel" data-panel="fields">
@@ -351,32 +353,28 @@
       <!-- Eine Statusmeldung, nicht zwei: der Balken zeigt dasselbe wie der
            Text daneben und bleibt deshalb für Vorlesehilfen stumm. -->
       <span class="note" id="setupCount" role="status" aria-atomic="true"></span>
-      <button id="btnSetupReset">Zurücksetzen</button>
     </div>
     <p class="note">Von oben nach unten abhaken. Was das Programm selbst prüfen kann, prüft
       es laufend mit – ein Schritt mit rotem Befund lässt sich nicht abhaken.</p>
     <div class="list" id="setupList"></div>
+    <div class="row ende">
+      <button id="btnSetupReset" class="danger">Alle Bestätigungen zurücksetzen</button>
+    </div>
   </section>
 
   <section class="tab-panel" data-panel="system" hidden>
-    <h3 class="abschnitt">Angeschlossene Geräte</h3>
-    <div class="row">
-      <button id="btnGeraete" class="primary">Geräte suchen</button>
-      <span class="note" id="geraeteInfo" role="status" aria-atomic="true"></span>
-    </div>
-    <details class="erklaerung">
-      <summary>Erklärung</summary>
-      <p>Sucht den Empfänger (F9P an USB), den Neigungssensor (Tinkerforge über den Brick
-        Daemon) und die Lenksteuerung (Phidget). Was gefunden wird, lässt sich mit einem Druck
-        in die Einstellungen übernehmen – Empfänger und Sensor werden sofort neu verbunden.</p>
-    </details>
-    <div class="list" id="geraeteList"></div>
-    <div class="row" id="geraeteRow" hidden>
-      <button id="btnGeraeteUebernehmen" class="primary">Gefundene Geräte übernehmen</button>
-      <span class="note" id="geraeteVorschlag"></span>
-    </div>
+    <!-- Zuerst der Zustand: der eigentliche Grund, diesen Reiter zu öffnen. -->
+    <h3 class="abschnitt">Zustand</h3>
+    <div class="list" id="systemList"></div>
 
-    <h3 class="abschnitt">Zustand, Sensoren und Lenkung</h3>
+    <h3 class="abschnitt">Sensoren und Lenkung</h3>
+    <div class="row" id="imuRow" hidden>
+      <button id="btnLevel" class="primary">Neigungssensor nullen</button>
+      <label class="switch"><input type="checkbox" id="compensation" checked>
+        Hangausgleich aktiv</label>
+    </div>
+    <p class="note" id="imuNote" hidden>Zum Nullen auf ebenem Boden stehen – ein Grad
+      Montagefehler sind bei 3 m Antennenhöhe schon 5 cm Dauerversatz.</p>
     <div class="row" id="steerRow" hidden>
       <button id="btnCentre">Lenkung: Mitte lernen</button>
       <span class="note" id="steerInfo"></span>
@@ -390,14 +388,23 @@
       <button id="btnBackup">Jetzt sichern</button>
       <span class="note" id="backupInfo">Sicherung: wird geladen …</span>
     </div>
-    <div class="row" id="imuRow" hidden>
-      <button id="btnLevel" class="primary">Neigungssensor nullen</button>
-      <label class="switch"><input type="checkbox" id="compensation" checked>
-        Hangausgleich aktiv</label>
+
+    <h3 class="abschnitt">Angeschlossene Geräte</h3>
+    <div class="row">
+      <button id="btnGeraete" class="primary">Geräte suchen</button>
+      <span class="note" id="geraeteInfo" role="status" aria-atomic="true"></span>
     </div>
-    <p class="note" id="imuNote" hidden>Zum Nullen auf ebenem Boden stehen – ein Grad
-      Montagefehler sind bei 3 m Antennenhöhe schon 5 cm Dauerversatz.</p>
-    <div class="list" id="systemList"></div>
+    <div class="list" id="geraeteList"></div>
+    <div class="row" id="geraeteRow" hidden>
+      <button id="btnGeraeteUebernehmen" class="primary">Gefundene Geräte übernehmen</button>
+      <span class="note" id="geraeteVorschlag"></span>
+    </div>
+    <details class="erklaerung">
+      <summary>Erklärung</summary>
+      <p>Sucht den Empfänger (F9P an USB), den Neigungssensor (Tinkerforge über den Brick
+        Daemon) und die Lenksteuerung (Phidget). Was gefunden wird, lässt sich mit einem Druck
+        in die Einstellungen übernehmen – Empfänger und Sensor werden sofort neu verbunden.</p>
+    </details>
 
     <h3 class="abschnitt">Daten zwischen Master und Arbeitern</h3>
     <p class="note" id="datenRolle"></p>
@@ -408,54 +415,57 @@
       <label class="button" for="datenImport">Datenpaket einspielen (.zip)</label>
       <input type="file" id="datenImport" accept=".zip" hidden>
     </div>
+    <p class="note" id="datenInfo" role="status" aria-atomic="true"></p>
     <details class="erklaerung">
       <summary>Erklärung</summary>
       <p>Das Paket enthält Felder (Umrisse), Spuren, Traktoren und Geräte. Auf dem Master
         erstellen, per USB-Stick zum Tablet bringen und dort einspielen – es überschreibt
         nichts, was auf dem Tablet neuer ist. Mit Netz läuft der Abgleich von selbst.</p>
     </details>
-    <p class="note" id="datenInfo" role="status" aria-atomic="true"></p>
 
-    <h3 class="abschnitt">Aktualisierung</h3>
-    <div class="row">
-      <span class="note" id="updateStand" role="status" aria-atomic="true">–</span>
-    </div>
-    <div class="row" id="updateOnlineZeile">
-      <button id="btnUpdateSuchen" class="primary">Online nach neuer Version suchen</button>
-      <button id="btnUpdateOnline" hidden>Jetzt aktualisieren</button>
-    </div>
-    <p class="note" id="updateOnlineInfo" role="status" aria-atomic="true"></p>
-    <div class="row" id="updatePaketZeile">
-      <label class="button primary" for="updatePaket">Update-Paket einspielen (.zip)</label>
-      <input type="file" id="updatePaket" accept=".zip" hidden>
-      <button id="btnUpdateGit" hidden>Aus GitHub holen</button>
-      <button id="btnUpdateNeustart">Neu starten</button>
-      <button id="btnUpdateZurueck" class="danger" hidden>Vorigen Stand zurückholen</button>
-    </div>
-    <p class="note" id="updatePaketNote">Auf dem PC <code>python scripts/make_update.py</code> aufrufen, die Zip-Datei
-      aufs Tablet bringen (USB-Stick, WLAN, Messenger) und hier einspielen – dann
-      <b>Neu starten</b>. Konfiguration, Datenbank und Python-Umgebung bleiben
-      unberührt; der alte Stand liegt als Sicherung bereit und lässt sich mit einem
-      Druck zurückholen. Läuft das Programm aus einem Git-Klon und hat Netz, geht es
-      auch mit <b>Aus GitHub holen</b>. Die Lenkung geht dabei aus, eine laufende
-      Arbeit wird gesichert.</p>
-    <p class="note" id="updateInfo" role="status" aria-atomic="true"></p>
-
-    <h3 class="abschnitt">Rohdaten</h3>
-    <div class="row">
-      <button id="btnRohdaten" class="primary">Aufzeichnung starten</button>
-      <span class="note" id="rohdatenInfo" role="status" aria-atomic="true"></span>
-    </div>
-    <details class="erklaerung">
-      <summary>Erklärung</summary>
-      <p>Zeichnet auf, was <b>hereinkommt</b>: die rohen NMEA-Sätze und die Lagemeldungen
-        des Neigungssensors, mit Zeitstempel. Mit <b>Abspielen</b> läuft dieselbe Fahrt am
-        Schreibtisch noch einmal durch dieselbe Rechenkette – so lässt sich ein Fehler vom
-        Feld nachstellen. Die Lenkung geht dabei aus; zurück zum Empfänger über
-        <b>Einstellungen → Empfänger → Quelle</b>. Rund 7 MB je Stunde, bei 200 MB endet
-        die Aufzeichnung von selbst.</p>
+    <!-- Selten gebraucht: zugeklappt, damit der Reiter nicht sieben Bildschirme lang ist. -->
+    <details class="setting-group werkzeug">
+      <summary>Aktualisierung <span class="note inline" id="updateStand" role="status" aria-atomic="true">–</span></summary>
+      <div class="werkzeug-inhalt">
+        <div class="row" id="updateOnlineZeile">
+          <button id="btnUpdateSuchen" class="primary">Online nach neuer Version suchen</button>
+          <button id="btnUpdateOnline" hidden>Jetzt aktualisieren</button>
+        </div>
+        <p class="note" id="updateOnlineInfo" role="status" aria-atomic="true"></p>
+        <div class="row" id="updatePaketZeile">
+          <label class="button" for="updatePaket">Update-Paket einspielen (.zip)</label>
+          <input type="file" id="updatePaket" accept=".zip" hidden>
+          <button id="btnUpdateGit" hidden>Aus GitHub holen</button>
+          <button id="btnUpdateNeustart">Neu starten</button>
+          <button id="btnUpdateZurueck" class="danger" hidden>Vorigen Stand zurückholen</button>
+        </div>
+        <p class="note" id="updatePaketNote">Auf dem PC <code>python scripts/make_update.py</code>
+          aufrufen, die Zip-Datei aufs Tablet bringen und hier einspielen – dann <b>Neu starten</b>.
+          Der alte Stand liegt als Sicherung bereit. Die Lenkung geht dabei aus, eine laufende
+          Arbeit wird gesichert.</p>
+        <p class="note" id="updateInfo" role="status" aria-atomic="true"></p>
+      </div>
     </details>
-    <div class="list" id="rohdatenList"></div>
+
+    <details class="setting-group werkzeug">
+      <summary>Rohdaten aufzeichnen <span class="note inline" id="rohdatenInfo" role="status" aria-atomic="true"></span></summary>
+      <div class="werkzeug-inhalt">
+        <div class="row">
+          <button id="btnRohdaten" class="primary">Aufzeichnung starten</button>
+        </div>
+        <details class="erklaerung">
+          <summary>Erklärung</summary>
+          <p>Zeichnet auf, was <b>hereinkommt</b>: die rohen NMEA-Sätze und die Lagemeldungen
+            des Neigungssensors, mit Zeitstempel. Mit <b>Abspielen</b> läuft dieselbe Fahrt am
+            Schreibtisch noch einmal durch dieselbe Rechenkette – so lässt sich ein Fehler vom
+            Feld nachstellen. Die Lenkung geht dabei aus; zurück zum Empfänger über
+            <b>Einstellungen → Empfänger → Quelle</b>. Rund 7 MB je Stunde, bei 200 MB endet
+            die Aufzeichnung von selbst.</p>
+        </details>
+        <div class="list" id="rohdatenList"></div>
+      </div>
+    </details>
+
     <div class="row" id="simRow" hidden>
       <label>Simulator km/h <input type="range" id="simSpeed" min="0" max="15" step="0.5" value="9"></label>
       <label>Lenken <input type="range" id="simSteer" min="-30" max="30" step="1" value="0"></label>
@@ -477,7 +487,18 @@
      ausschliesslich in sicherem Kontext zu (HTTPS oder localhost) - ueber
      http://192.168.x.x passiert hier bewusst nichts, statt einer Fehlermeldung
      in der Kabine. */
-  if ('serviceWorker' in navigator && window.isSecureContext) {
+  /* Im eigenen Windows-Fenster (?fenster=1) keinen: der Dienst laeuft auf demselben
+     Rechner, und ein Service Worker lieferte nach einem Update beim ersten Oeffnen
+     noch das alte app.js zur neuen Seite. Einen frueher angelegten wieder abmelden. */
+  var imFenster = new URLSearchParams(location.search).has('fenster');
+  if ('serviceWorker' in navigator && imFenster) {
+    navigator.serviceWorker.getRegistrations()
+      .then(function (alle) { alle.forEach(function (r) { r.unregister(); }); })
+      .catch(function () {});
+    if (window.caches) caches.keys().then(function (namen) {
+      namen.forEach(function (n) { caches.delete(n); });
+    }).catch(function () {});
+  } else if ('serviceWorker' in navigator && window.isSecureContext) {
     window.addEventListener('load', () => {
       navigator.serviceWorker.register('sw.js').catch(() => {});
     });

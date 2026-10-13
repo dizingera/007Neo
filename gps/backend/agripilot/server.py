@@ -61,6 +61,21 @@ FRONTEND_DIR = (Path(getattr(sys, "_MEIPASS", "")) / "frontend"
                 else Path(__file__).resolve().parents[2] / "frontend")
 
 
+class OberflaecheDateien(StaticFiles):
+    """Die Oberfläche mit "Cache-Control: no-cache".
+
+    Ohne diese Angabe hält der Browser (auch WebView2 im eigenen Fenster) style.css
+    und app.js nach eigenem Ermessen für frisch - nach einem Update lief dann die neue
+    Seite mit dem alten Stil oder Programm. So fragt er jedes Mal nach; eine unveränderte
+    Datei kostet nur ein "304, unverändert".
+    """
+
+    def file_response(self, *args, **kwargs):
+        antwort = super().file_response(*args, **kwargs)
+        antwort.headers["Cache-Control"] = "no-cache"
+        return antwort
+
+
 class Application:
     """Owns every long-running part and the shared engine."""
 
@@ -1398,7 +1413,7 @@ def create_app(config=None) -> FastAPI:
     # Mounted last so every /api route above wins; everything else is the
     # cab display, served straight from disk.
     if FRONTEND_DIR.exists():
-        api.mount("/", StaticFiles(directory=FRONTEND_DIR, html=True), name="app")
+        api.mount("/", OberflaecheDateien(directory=FRONTEND_DIR, html=True), name="app")
 
     return api
 

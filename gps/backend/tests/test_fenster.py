@@ -143,7 +143,7 @@ class FensterTests(unittest.TestCase):
         webview, _, starten, _ = self._oeffnen(bereit=True)
         starten.assert_not_called()
         args, kwargs = webview.create_window.call_args
-        self.assertEqual(args[:2], ("AgriPilot", "http://localhost:8080"))
+        self.assertEqual(args[:2], ("AgriPilot", "http://localhost:8080/?fenster=1"))  # ohne Service Worker
         self.assertTrue(kwargs["maximized"])
         # Einstellungen der Oberfläche bleiben über Neustarts erhalten.
         self.assertEqual(webview.start.call_args.kwargs,
@@ -183,7 +183,7 @@ class FensterTests(unittest.TestCase):
     def test_the_waiting_page_polls_and_explains_after_a_minute(self):
         seite = fenster.warteseite("http://localhost:8080")
         self.assertIn("'http://localhost:8080'", seite)
-        self.assertIn("location.replace(ziel)", seite)
+        self.assertIn("location.replace(ziel + '/?fenster=1')", seite)
         self.assertIn("60000", seite)
         self.assertIn("agripilot.log", seite)
 
@@ -248,3 +248,21 @@ class BeendenTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ZwischenspeicherTests(unittest.TestCase):
+    def test_the_interface_is_always_revalidated(self):
+        # Sonst lief nach einem Update die neue Seite mit altem Stil oder Programm.
+        import warnings
+        from fastapi.testclient import TestClient
+        from agripilot import config as config_module
+        from agripilot.server import create_app
+        warnings.filterwarnings("ignore")
+        with tempfile.TemporaryDirectory() as ordner:
+            config = config_module.load("/kein-solcher-pfad.yaml")
+            config.server.data_dir = ordner
+            with TestClient(create_app(config)) as c:
+                for pfad in ("/", "/app.js", "/style.css"):
+                    antwort = c.get(pfad)
+                    self.assertEqual(antwort.status_code, 200, pfad)
+                    self.assertEqual(antwort.headers.get("cache-control"), "no-cache", pfad)

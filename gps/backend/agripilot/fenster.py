@@ -24,6 +24,9 @@ from pathlib import Path
 from typing import Optional
 
 TITEL = "AgriPilot"
+# Die Seite weiß damit, dass sie im eigenen Fenster läuft: dort kein Service Worker,
+# der nach einem Update beim ersten Öffnen noch das alte Programm zur neuen Seite gäbe.
+FENSTER_PFAD = "/?fenster=1"
 MUTEX = "Local\\AgriPilotFenster"
 AUFGABE = "AgriPilot"
 OHNE_KONSOLE = 0x08000000      # CREATE_NO_WINDOW: schtasks ohne aufblitzendes Fenster
@@ -123,7 +126,7 @@ const beginn = Date.now();
 async function pruefen() {{
   try {{
     await fetch(ziel + '/api/system', {{ mode: 'no-cors', cache: 'no-store' }});
-    location.replace(ziel);
+    location.replace(ziel + {FENSTER_PFAD!r});
     return;
   }} catch (e) {{}}
   if (Date.now() - beginn > 60000) {{
@@ -220,8 +223,8 @@ def oeffnen(port: int) -> int:
         return 0
     bruecke = _Bruecke()
     if bereit:
-        fenster = webview.create_window(TITEL, url, maximized=True, min_size=(800, 500),
-                                        text_select=False, js_api=bruecke)
+        fenster = webview.create_window(TITEL, url + FENSTER_PFAD, maximized=True,
+                                        min_size=(800, 500), text_select=False, js_api=bruecke)
     else:
         fenster = webview.create_window(TITEL, html=warteseite(url), maximized=True,
                                         min_size=(800, 500), text_select=False, js_api=bruecke)
