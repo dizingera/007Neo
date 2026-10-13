@@ -66,7 +66,7 @@ class Umriss:
             "datum_lon": lon0,
             "boundary": [[round(x, 3), round(y, 3)] for x, y in lokal],
             "area_ha": geo.polygon_area(lokal) / 10_000.0,
-            "note": "aus Shapefile",
+            "note": self.attribute.get("_hinweis") or "aus Shapefile",
         }
 
 

@@ -239,6 +239,100 @@ class MaschineImBerichtTests(BerichtTests):
         self.assertEqual(b["anbaugeraet"], "")
 
 
+def _rechteck(lat, lon, breite_m=100.0, laenge_m=200.0):
+    """Ein Schlag als GeoJSON-Ring (lon, lat), etwa breite x laenge Meter."""
+    dlat = laenge_m / 111_320.0
+    import math as _m
+    dlon = breite_m / (111_320.0 * _m.cos(_m.radians(lat)))
+    return [[lon, lat], [lon + dlon, lat], [lon + dlon, lat + dlat], [lon, lat + dlat], [lon, lat]]
+
+
+def _schlag(name, lat=48.41, lon=9.60, flik="DEBWLI00D2RZVSMW", **extra):
+    return {"name": name, "flik": flik, "flaeche": 2.0,
+            "geo": {"type": "Polygon", "coordinates": [_rechteck(lat, lon)]}, **extra}
+
+
+class SchlagUebernahmeTests(unittest.TestCase):
+    def _client(self, ordner):
+        from fastapi.testclient import TestClient
+        from agripilot.server import create_app
+        warnings.filterwarnings("ignore")
+        config = config_module.load("/kein-solcher-pfad.yaml")
+        config.server.data_dir = ordner
+        return TestClient(create_app(config))
+
+    def test_fields_come_with_the_myterra_name_outline_and_flik(self):
+        with tempfile.TemporaryDirectory() as ordner, self._client(ordner) as c:
+            antwort = c.post("/api/myterra/schlaege", json={"schlaege": [
+                _schlag("Roggenäcker / Nr. 1"),
+                _schlag("Hinterm Hof / Nr. 2", lat=48.42),
+                {"name": "Ohne Umriss / Nr. 3", "geo": None},
+            ]}).json()["data"]
+            self.assertEqual(antwort["neu"], ["Roggenäcker / Nr. 1", "Hinterm Hof / Nr. 2"])
+            self.assertEqual(antwort["ohne_umriss"], ["Ohne Umriss / Nr. 3"])
+            felder = {f["name"]: f for f in c.get("/api/fields").json()}
+            roggen = felder["Roggenäcker / Nr. 1"]
+            self.assertAlmostEqual(roggen["area_ha"], 2.0, delta=0.05)
+            self.assertEqual(roggen["note"], "aus MyTerra · FLIK DEBWLI00D2RZVSMW")
+            self.assertGreaterEqual(len(roggen["boundary"]), 4)
+
+    def test_a_field_in_two_parts_becomes_two_fields(self):
+        with tempfile.TemporaryDirectory() as ordner, self._client(ordner) as c:
+            zwei = {"name": "Talwiese", "geo": {"type": "MultiPolygon", "coordinates": [
+                [_rechteck(48.41, 9.60)], [_rechteck(48.415, 9.61)]]}}
+            antwort = c.post("/api/myterra/schlaege", json={"schlaege": [zwei]}).json()["data"]
+            self.assertEqual(antwort["neu"], ["Talwiese (1)", "Talwiese (2)"])
+
+    def test_the_same_field_under_an_old_name_is_renamed_not_doubled(self):
+        with tempfile.TemporaryDirectory() as ordner, self._client(ordner) as c:
+            from agripilot.shapefile import Umriss
+            engine = c.app.state.app.engine
+            ring = [(lat, lon) for lon, lat in _rechteck(48.41, 9.60)]
+            alt = engine.import_fields([Umriss("AuingerBaum1", ring)])[0]
+            weit_weg = engine.import_fields([Umriss("Anderswo", [(lat, lon + 0.01) for lat, lon in ring])])[0]
+            antwort = c.post("/api/myterra/schlaege", json={"schlaege": [
+                _schlag("Auinger Baum 1 / Nr. 11")]}).json()["data"]
+            self.assertEqual(antwort["umbenannt"], ["AuingerBaum1 → Auinger Baum 1 / Nr. 11"])
+            self.assertEqual(antwort["neu"], [])
+            felder = {f["name"]: f for f in c.get("/api/fields").json()}
+            self.assertNotIn("AuingerBaum1", felder)
+            self.assertEqual(felder["Auinger Baum 1 / Nr. 11"]["id"], alt["id"])   # Spuren bleiben dran
+            self.assertEqual(felder["Anderswo"]["id"], weit_weg["id"])          # nicht angefasst
+
+    def test_a_coarse_old_outline_is_still_recognised(self):
+        # Echter Fall: "AuingerBaum1" kam als grober Umriss (wenige Ecken, ungleich verteilt),
+        # MyTerra hat denselben Schlag fein - der Durchschnitt der Ecken liegt weit auseinander.
+        with tempfile.TemporaryDirectory() as ordner, self._client(ordner) as c:
+            from agripilot.shapefile import Umriss
+            engine = c.app.state.app.engine
+            fein = _rechteck(48.41, 9.60, 100.0, 400.0)
+            # Viele Punkte auf der Nordkante: zieht den Eckendurchschnitt nach Norden.
+            west, ost, nord = fein[0][0], fein[1][0], fein[2][1]
+            nordkante = [[ost - (ost - west) * i / 40, nord] for i in range(41)]
+            fein_ring = [fein[0], fein[1]] + nordkante + [fein[0]]
+            grob = [(lat, lon) for lon, lat in fein]
+            alt = engine.import_fields([Umriss("AuingerBaum1", grob)])[0]
+            antwort = c.post("/api/myterra/schlaege", json={"schlaege": [
+                {"name": "Auinger Baum 1 / Nr. 11", "geo": {"type": "Polygon", "coordinates": [fein_ring]}}]}).json()["data"]
+            self.assertEqual(antwort["umbenannt"], ["AuingerBaum1 → Auinger Baum 1 / Nr. 11"])
+            felder = c.get("/api/fields").json()
+            self.assertEqual([(f["name"], f["id"]) for f in felder], [("Auinger Baum 1 / Nr. 11", alt["id"])])
+
+    def test_running_it_again_updates_instead_of_doubling(self):
+        with tempfile.TemporaryDirectory() as ordner, self._client(ordner) as c:
+            liste = {"schlaege": [_schlag("Roggenäcker / Nr. 1")]}
+            erstes = c.post("/api/myterra/schlaege", json=liste).json()["data"]
+            zweites = c.post("/api/myterra/schlaege", json=liste).json()["data"]
+            self.assertEqual(erstes["neu"], ["Roggenäcker / Nr. 1"])
+            self.assertEqual(zweites["neu"], [])
+            self.assertEqual(zweites["aktualisiert"], ["Roggenäcker / Nr. 1"])
+            self.assertEqual(len(c.get("/api/fields").json()), 1)
+
+    def test_missing_list_is_refused(self):
+        with tempfile.TemporaryDirectory() as ordner, self._client(ordner) as c:
+            self.assertEqual(c.post("/api/myterra/schlaege", json={}).status_code, 400)
+
+
 class ServerTests(unittest.TestCase):
     def test_the_file_comes_through_the_interface(self):
         from fastapi.testclient import TestClient

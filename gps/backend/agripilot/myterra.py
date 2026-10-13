@@ -204,6 +204,117 @@ def maschinen_uebernehmen(engine, liste: list[dict], traktor: str = "") -> dict:
     return {**ergebnis, "traktoren": traktoren, "traktoren_neu": traktoren_neu}
 
 
+# --------------------------------------------------- Schläge aus MyTerra
+
+def schlag_umrisse(schlaege: list[dict]) -> tuple[list, list[str]]:
+    """MyTerra-Schläge (Umriss als GeoJSON in WGS84) als Umrisse für AgriPilot.
+
+    Der Name bleibt genau der aus MyTerra - dann ordnet MyTerra die Arbeiten später ohne
+    Rückfrage zu. Ein Schlag aus mehreren Teilen wird zu "Name (1)", "Name (2)" wie beim
+    Shapefile; Löcher (ein Teich) werden weggelassen. Ohne Umriss: nur gemeldet.
+    """
+    from .shapefile import Umriss
+    umrisse, ohne = [], []
+    for schlag in schlaege:
+        if not isinstance(schlag, dict):
+            continue
+        name = str(schlag.get("name") or "").strip()
+        geo_daten = schlag.get("geo") or {}
+        art = geo_daten.get("type") if isinstance(geo_daten, dict) else None
+        if art == "Polygon":
+            teile = [geo_daten.get("coordinates") or []]
+        elif art == "MultiPolygon":
+            teile = geo_daten.get("coordinates") or []
+        else:
+            teile = []
+        ringe = []
+        for teil in teile:
+            if not teil or len(teil[0]) < 3:
+                continue
+            try:
+                ringe.append([(float(p[1]), float(p[0])) for p in teil[0]])
+            except (TypeError, ValueError, IndexError):
+                continue
+        if not name or not ringe:
+            if name:
+                ohne.append(name)
+            continue
+        flik = str(schlag.get("flik") or "").strip()
+        hinweis = "aus MyTerra" + (f" · FLIK {flik}" if flik else "")
+        for nummer, ring in enumerate(ringe, 1):
+            teilname = name if len(ringe) == 1 else f"{name} ({nummer})"
+            umrisse.append(Umriss(teilname, ring, {"_hinweis": hinweis}))
+    return umrisse, ohne
+
+
+def _schwerpunkt(punkte: list) -> Optional[tuple[float, float]]:
+    """Flächenschwerpunkt. Der Durchschnitt der Ecken taugt nicht: ein grob vereinfachter
+    Umriss und ein feiner von derselben Fläche haben ihn an ganz verschiedenen Stellen."""
+    if len(punkte) < 3:
+        return None
+    a = cx = cy = 0.0
+    for (x0, y0), (x1, y1) in zip(punkte, punkte[1:] + punkte[:1]):
+        k = x0 * y1 - x1 * y0
+        a += k
+        cx += (x0 + x1) * k
+        cy += (y0 + y1) * k
+    if abs(a) < 1e-9:
+        return None
+    return cx / (3 * a), cy / (3 * a)
+
+
+def _gleiche_flaeche(alt: dict, umriss) -> bool:
+    """Liegt der Schwerpunkt des neuen Umrisses im alten Feld - und umgekehrt - bei
+    ähnlicher Größe (±25 %)? Dann ist es derselbe Schlag unter anderem Namen."""
+    from . import geo
+    grenze = [tuple(p) for p in (alt.get("boundary") or [])]
+    flaeche_alt = float(alt.get("area_ha") or 0.0)
+    if len(grenze) < 3 or flaeche_alt <= 0:
+        return False
+    ebene = geo.LocalPlane(alt["datum_lat"], alt["datum_lon"])
+    neu = [ebene.to_local(lat, lon) for lat, lon in umriss.ring]
+    flaeche_neu = geo.polygon_area(neu) / 10_000.0
+    if not 0.8 <= flaeche_neu / flaeche_alt <= 1.25:
+        return False
+    mitte_neu, mitte_alt = _schwerpunkt(neu), _schwerpunkt(grenze)
+    return (mitte_neu is not None and mitte_alt is not None
+            and geo.point_in_polygon(mitte_neu, grenze) and geo.point_in_polygon(mitte_alt, neu))
+
+
+def schlaege_uebernehmen(engine, schlaege: list[dict]) -> dict:
+    """Schläge mit Umriss aus MyTerra als Felder übernehmen.
+
+    Gleicher Name: neue Grenze, Spuren und Arbeiten bleiben (wie beim Shapefile).
+    Anderer Name, aber dieselbe Fläche - etwa "AuingerBaum1" aus dem Shapefile gegen
+    "Auinger Baum 1 / Nr. 11" in MyTerra: das Feld wird umbenannt statt verdoppelt,
+    erkannt an den Schwerpunkten (jeder liegt im anderen Umriss) und der Größe (±25 %).
+    """
+    umrisse, ohne = schlag_umrisse(schlaege)
+    vorhandene = engine.store.list_fields()
+    namen = {f["name"] for f in vorhandene}
+    ziel_namen = {u.name for u in umrisse}
+    umbenannt = []
+    for umriss in umrisse:
+        if umriss.name in namen:
+            continue
+        for alt in vorhandene:
+            if alt["name"] in ziel_namen:
+                continue                         # trägt schon einen MyTerra-Namen
+            if _gleiche_flaeche(alt, umriss):
+                engine.store.save_field({**alt, "name": umriss.name})
+                umbenannt.append(f"{alt['name']} → {umriss.name}")
+                namen.discard(alt["name"])
+                namen.add(umriss.name)
+                alt["name"] = umriss.name
+                break
+    vorher = {f["name"] for f in engine.store.list_fields()}
+    felder = engine.import_fields(umrisse)
+    neu = [f["name"] for f in felder if f["name"] not in vorher]
+    engine.note(f"Aus MyTerra: {len(neu)} Schläge neu, {len(felder) - len(neu)} aktualisiert")
+    return {"neu": neu, "aktualisiert": [f["name"] for f in felder if f["name"] in vorher],
+            "umbenannt": umbenannt, "ohne_umriss": ohne}
+
+
 def arbeiten(store: Storage) -> list[dict]:
     """Alle fertigen Arbeiten mit Fläche, neueste zuerst, mit Übergabestand und erkannter Tätigkeit."""
     uebergeben = store.get_setting(SETTING) or {}

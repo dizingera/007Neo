@@ -1333,6 +1333,14 @@ def create_app(config=None) -> FastAPI:
         return guard(myterra_module.maschinen_uebernehmen, engine, liste,
                      str(payload.get("traktor") or ""))
 
+    @api.post("/api/myterra/schlaege")
+    async def myterra_schlaege_uebernehmen(payload: dict = Body(...)):
+        """Schläge mit Umriss aus MyTerra als Felder übernehmen (Name wie in MyTerra)."""
+        schlaege = payload.get("schlaege")
+        if not isinstance(schlaege, list):
+            raise HTTPException(400, "Keine Schlagliste übergeben")
+        return guard(myterra_module.schlaege_uebernehmen, engine, schlaege)
+
     @api.get("/api/myterra/export")
     async def myterra_export(ids: str = "", alle: int = 0):
         """Arbeitsberichte als Datei für den Prüfeingang von MyTerra.
