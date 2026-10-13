@@ -188,6 +188,30 @@ class FensterTests(unittest.TestCase):
         self.assertIn("agripilot.log", seite)
 
 
+class BrueckenTests(unittest.TestCase):
+    def test_the_bridge_shows_pywebview_nothing_but_its_function(self):
+        # pywebview durchsucht jedes öffentliche Attribut rekursiv. Ein öffentlicher
+        # Verweis auf das Fenster kostete 25 GB Speicher in 20 Minuten.
+        bruecke = fenster._Bruecke()
+        bruecke._fenster = mock.Mock()
+        oeffentlich = [n for n in dir(bruecke) if not n.startswith("_")]
+        self.assertEqual(oeffentlich, ["vollbild"])
+        bruecke.vollbild()
+        bruecke._fenster.toggle_fullscreen.assert_called_once()
+
+    def test_window_is_handed_to_the_bridge_privately(self):
+        webview, fenster_obj = _webview()
+        with mock.patch.object(fenster, "schon_offen", return_value=False), \
+                mock.patch.object(fenster, "dienst_bereit", return_value=True), \
+                mock.patch.object(fenster, "speicherort", return_value="x"), \
+                mock.patch.object(fenster, "dienst_beenden"), \
+                mock.patch.dict(sys.modules, {"webview": webview}):
+            fenster.oeffnen(8080)
+        bruecke = webview.create_window.call_args.kwargs["js_api"]
+        self.assertIs(bruecke._fenster, fenster_obj)
+        self.assertEqual([n for n in dir(bruecke) if not n.startswith("_")], ["vollbild"])
+
+
 class BeendenTests(unittest.TestCase):
     def test_closing_asks_only_when_steering_or_a_job_would_be_cut(self):
         fragen = mock.Mock(return_value=False)

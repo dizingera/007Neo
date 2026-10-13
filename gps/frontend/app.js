@@ -99,6 +99,7 @@ function connect() {
 function onState(data) {
   const previous = state.live;
   state.live = data;
+  zeichnenAnfordern();
   // Hörbar machen, was der Fahrer nicht selbst ausgelöst hat (alerts.js).
   if (previous && window.Warnungen) {
     window.Warnungen.pruefen(previous, data, state.connected).forEach((e) => toast(e.text, e.stufe === 'alarm'));
@@ -401,8 +402,13 @@ function resize() {
   // Grundmaßstab: 1 m ist knapp ein Prozent der Leinwandbreite - genug, um
   // die Nachbarspuren zu sehen, nah genug für Zentimeter auf der eigenen.
   if (!state.view.scale) state.view.scale = canvas.clientWidth / 155;
+  zeichnenAnfordern();
 }
 window.addEventListener('resize', resize);
+// Jede Bedienung der Karte zeichnet sofort - Verschieben und Zoomen bleiben flüssig.
+['pointerdown', 'pointermove', 'pointerup', 'wheel', 'touchstart', 'touchmove', 'touchend']
+  .forEach((art) => canvas.addEventListener(art, zeichnenAnfordern, { passive: true }));
+document.addEventListener('click', zeichnenAnfordern, { passive: true });
 
 function viewCentre() {
   const s = state.live;
@@ -437,7 +443,23 @@ function screenToWorld(x, y) {
   return [cx + rx / scale, cy - ry / scale];
 }
 
+/* Gezeichnet wird nur, wenn sich etwas geändert hat: neue Daten (10-mal je
+   Sekunde), Verschieben/Zoomen, Größe, Ansicht. Vorher lief jedes Bild des
+   Bildschirms durch (60-144 je Sekunde), obwohl zwischen zwei Datenpaketen
+   dasselbe Bild herauskam - das hielt Grafikkarte und Prozessor ständig wach. */
+let neuZeichnen = true;
+function zeichnenAnfordern() { neuZeichnen = true; }
+setInterval(zeichnenAnfordern, 1000);   // falls irgendwo eine Änderung nicht Bescheid sagt
+
 function render() {
+  if (neuZeichnen && document.visibilityState === 'visible') {
+    neuZeichnen = false;
+    zeichnen();
+  }
+  requestAnimationFrame(render);
+}
+
+function zeichnen() {
   const width = canvas.clientWidth, height = canvas.clientHeight;
   ctx.save();
   ctx.fillStyle = F.boden;
@@ -457,7 +479,6 @@ function render() {
   ctx.restore();
 
   ctx.restore();
-  requestAnimationFrame(render);
 }
 
 /* Ein Raster als Boden: ohne Bezug wirkt eine leere Fläche wie Stillstand. */

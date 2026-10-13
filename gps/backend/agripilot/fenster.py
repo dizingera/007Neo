@@ -169,14 +169,20 @@ def schon_offen() -> bool:
 
 
 class _Bruecke:
-    """Was die Oberfläche im Fenster vom Fenster selbst braucht."""
+    """Was die Oberfläche im Fenster vom Fenster selbst braucht.
+
+    Nur Methoden ohne Unterstrich sind für die Oberfläche. pywebview durchsucht
+    alle anderen öffentlichen Attribute rekursiv nach Funktionen - ein öffentlicher
+    Verweis auf das Fenster ließ es endlos durch den .NET-Objektbaum laufen
+    (25 GB Speicher nach 20 Minuten, ein Kern dauerbelegt). Deshalb `_fenster`.
+    """
 
     def __init__(self) -> None:
-        self.fenster = None
+        self._fenster = None
 
     def vollbild(self) -> bool:
-        if self.fenster is not None:
-            self.fenster.toggle_fullscreen()
+        if self._fenster is not None:
+            self._fenster.toggle_fullscreen()
         return True
 
 
@@ -219,7 +225,7 @@ def oeffnen(port: int) -> int:
     else:
         fenster = webview.create_window(TITEL, html=warteseite(url), maximized=True,
                                         min_size=(800, 500), text_select=False, js_api=bruecke)
-    bruecke.fenster = fenster
+    bruecke._fenster = fenster
     # False hält das Fenster offen: wer bei der Rückfrage "Nein" sagt, arbeitet weiter.
     fenster.events.closing += lambda: beenden_erlaubt(url)
     try:
