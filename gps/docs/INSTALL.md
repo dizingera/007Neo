@@ -152,7 +152,11 @@ Empfänger, Neigungssensor und Motorsteuerung, Bildschirm und Akku.
 Entpacken. Auf das Tablet kopieren, doppelklicken, die Rückfrage nach
 Administratorrechten bestätigen. Sie richtet alles ein (Programm nach
 `C:\AgriPilot`, Firewall, Start beim Anmelden mit Neustart nach Absturz,
-Symbol auf dem Desktop) und öffnet die Anzeige. Wiederholbar: ein zweiter Lauf
+Symbol auf Desktop und im Startmenü) und öffnet die Anzeige. Ab 1.5.3 ist die
+Anzeige ein **eigenes Fenster** (WebView2, ohne Browser und Adresszeile; F11 =
+Vollbild). Schließen beendet nur die Anzeige – das Programm lenkt und zeichnet im
+Hintergrund weiter. Auf einem Arbeiter-Tablet öffnet sich das Fenster beim
+Anmelden von selbst. Wiederholbar: ein zweiter Lauf
 mit einer neueren Datei **ist** die Aktualisierung, Einstellungen, Felder und
 Aufträge bleiben. Windows SmartScreen fragt beim ersten Start, weil die Datei
 nicht signiert ist: „Weitere Informationen“ → „Trotzdem ausführen“. Das Protokoll

@@ -2149,6 +2149,15 @@ document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible' && wachSperre === null) bildschirmWachhalten();
 });
 
+/* Im eigenen Fenster (Windows): F11 schaltet auf Vollbild, wie man es kennt. Im
+   Browser macht das der Browser selbst - dort ist window.pywebview nicht da. */
+document.addEventListener('keydown', (event) => {
+  if (event.key === 'F11' && window.pywebview && window.pywebview.api) {
+    event.preventDefault();
+    window.pywebview.api.vollbild();
+  }
+});
+
 /* ------------------------------------------------------------------ Start */
 
 farbenLesen();

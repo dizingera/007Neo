@@ -7,11 +7,17 @@ Braucht eine Build-Umgebung mit PyInstaller und allen Paketen (siehe unten);
 die Entwicklungsumgebung backend/.venv hat sie nicht. Einmalig:
 
     python -m venv .buildvenv
-    .buildvenv/Scripts/python -m pip install pyinstaller -r backend/requirements.txt phidget22 tinkerforge
+    .buildvenv/Scripts/python -m pip install pyinstaller -r backend/requirements.txt phidget22 tinkerforge pywebview pillow
 
-Ergebnis: gps/AgriPilot-Setup.exe. Doppelklick = Installation, ``--dienst`` = Programm.
+Ergebnis: gps/AgriPilot-Setup.exe. Doppelklick = Installation, ``--dienst`` = Programm,
+``--fenster`` = Anzeige im eigenen Fenster (pywebview mit WebView2; pillow macht aus
+dem App-Bild das Symbol der exe).
 Die Datei ist nicht signiert: Windows SmartScreen fragt beim ersten Start nach
 ("Weitere Informationen" -> "Trotzdem ausführen").
+
+Ohne Administrator-Manifest: sonst fragte Windows bei jedem Öffnen des Fensters
+nach. Die Einrichtung fordert die Rechte selbst an (exe.installieren), Dienst und
+Online-Update laufen als Aufgaben mit höchsten Rechten.
 """
 
 import shutil
@@ -23,8 +29,7 @@ GPS = Path(__file__).resolve().parent.parent
 
 
 def main() -> int:
-    # --test: ohne Administrator-Manifest, damit sich die Datei aus einer normalen
-    # Shell starten lässt (zum Prüfen). Die ausgelieferte Datei verlangt Admin.
+    # --test: dieselbe Datei unter anderem Namen, zum Prüfen neben der ausgelieferten.
     test = "--test" in sys.argv
     arbeit = GPS / ("build-exe-test" if test else "build-exe")
     if arbeit.exists():
@@ -32,7 +37,7 @@ def main() -> int:
     befehl = [
         sys.executable, "-m", "PyInstaller", "--noconfirm", "--clean", "--onefile",
         "--name", "AgriPilot-Setup",
-        *([] if test else ["--uac-admin"]),
+        "--icon", str(GPS / "frontend" / "icon-512.png"),
         "--distpath", str(arbeit / "dist"), "--workpath", str(arbeit / "work"),
         "--specpath", str(arbeit),
         "--paths", str(GPS / "backend"),
@@ -43,6 +48,10 @@ def main() -> int:
         "--collect-submodules", "websockets",
         "--collect-submodules", "Phidget22",
         "--collect-submodules", "tinkerforge",
+        # Das eigene Fenster: pywebview mit WebView2 über WinForms (pythonnet).
+        "--collect-all", "webview",
+        "--collect-all", "clr_loader",
+        "--collect-all", "pythonnet",
         "--hidden-import", "yaml",
         "--hidden-import", "httpx",
         str(GPS / "scripts" / "exe_start.py"),

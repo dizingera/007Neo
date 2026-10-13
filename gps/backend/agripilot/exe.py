@@ -5,6 +5,7 @@
 * **Doppelklick** richtet AgriPilot auf diesem Rechner ein (Installation,
   Erst- und Wiederholungslauf; Konfiguration und Daten bleiben erhalten),
 * ``--dienst`` ist das laufende Programm - so startet es Windows beim Anmelden.
+* ``--fenster`` ist die Anzeige in einem eigenen Fenster (Symbol auf dem Desktop).
 
 Gebaut wird sie mit ``scripts/build_exe.py`` (PyInstaller). Was die Installation
 tut, steht als Liste von Schritten in ``plan()``; ``--trocken`` zeigt sie nur an.
@@ -102,6 +103,55 @@ def start_vbs(exe: str) -> str:
     )
 
 
+def fenster_vbs(exe: str) -> str:
+    """Öffnet die Anzeige ohne das schwarze Konsolenfenster daneben.
+
+    Die exe ist ein Konsolenprogramm (sie richtet auch ein und fragt dabei nach);
+    versteckt wird nur die Konsole, das Anzeigefenster erscheint normal.
+    """
+    return (
+        'Set shell = CreateObject("WScript.Shell")\r\n'
+        f'shell.Run """{exe}"" --fenster", 0, False\r\n'
+    )
+
+
+def verknuepfung_skript(lnk: str, vbs: str, symbol: str, ordner: str) -> tuple[str, dict]:
+    """PowerShell für eine Verknüpfung, die das Fenster öffnet - mit dem Programmsymbol.
+
+    Die Pfade gehen als Umgebungsvariablen hinein, nicht in den Befehlstext: so
+    stören weder Leerzeichen noch Anführungszeichen in einem Pfad.
+    """
+    return (
+        "$s = (New-Object -ComObject WScript.Shell).CreateShortcut($env:LNK); "
+        '$s.TargetPath = "$env:SystemRoot\\System32\\wscript.exe"; '
+        "$s.Arguments = '\"' + $env:VBS + '\"'; "
+        "$s.IconLocation = $env:SYMBOL + ',0'; "
+        "$s.WorkingDirectory = $env:ORDNER; "
+        "$s.Description = 'AgriPilot - Spurführung'; "
+        "$s.Save()"
+    ), {"LNK": lnk, "VBS": vbs, "SYMBOL": symbol, "ORDNER": ordner}
+
+
+def verknuepfung_anlegen(lnk: Path, vbs: Path, symbol: Path, ordner: Path) -> None:
+    skript, umgebung = verknuepfung_skript(str(lnk), str(vbs), str(symbol), str(ordner))
+    ergebnis = subprocess.run(["powershell", "-NoProfile", "-Command", skript],
+                              capture_output=True, text=True, errors="replace",
+                              env={**os.environ, **umgebung})
+    if ergebnis.returncode != 0:
+        raise RuntimeError(f"Verknüpfung {lnk.name}: "
+                           f"{(ergebnis.stderr or ergebnis.stdout).strip()[:300]}")
+
+
+def ist_arbeiter(konfig: Path) -> bool:
+    """Steht in der vorhandenen Konfiguration die Rolle Arbeiter? (bei einer Aktualisierung)"""
+    try:
+        text = konfig.read_text(encoding="utf-8")
+    except OSError:
+        return False
+    import re
+    return re.search(r"^\s+role:\s*['\"]?client\b", text, re.MULTILINE) is not None
+
+
 def aufgaben_skript(ziel: str, vbs: str) -> str:
     """PowerShell, das die Aufgabe "AgriPilot" einträgt: Start beim Anmelden,
     Neustart nach Absturz, keine Zeitbegrenzung, auch im Akkubetrieb."""
@@ -151,6 +201,7 @@ def plan(ziel: str, port: int = 8080, quelle: Optional[str] = None,
     zielpfad = Path(ziel)
     exe = zielpfad / EXE_NAME
     vbs = zielpfad / "start_leise.vbs"
+    vbs_fenster = zielpfad / "fenster.vbs"
     konfig = daten_ordner / "config.yaml"
 
     def stoppen() -> None:
@@ -201,16 +252,28 @@ def plan(ziel: str, port: int = 8080, quelle: Optional[str] = None,
 
     def starter() -> None:
         vbs.write_text(start_vbs(str(exe)), encoding="ascii")
+        vbs_fenster.write_text(fenster_vbs(str(exe)), encoding="ascii")
 
     def aufgabe() -> None:
         _lauf(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command",
                aufgaben_skript(str(zielpfad), str(vbs))])
 
     def symbol() -> None:
+        # Für alle Benutzer: Desktop und Startmenü, und auf dem Tablet im Traktor
+        # öffnet sich die Anzeige gleich beim Anmelden.
         desktop = Path(os.environ.get("PUBLIC", r"C:\Users\Public")) / "Desktop"
-        if desktop.is_dir():
-            (desktop / "AgriPilot.url").write_text(
-                f"[InternetShortcut]\r\nURL=http://localhost:{port}\r\n", encoding="ascii")
+        programme = (Path(os.environ.get("PROGRAMDATA", r"C:\ProgramData"))
+                     / "Microsoft" / "Windows" / "Start Menu" / "Programs")
+        orte = [desktop, programme]
+        if rolle == "client" or ist_arbeiter(konfig):
+            orte.append(programme / "StartUp")
+        for ort in orte:
+            if ort.is_dir():
+                verknuepfung_anlegen(ort / "AgriPilot.lnk", vbs_fenster, exe, zielpfad)
+        # Das alte Symbol öffnete den Browser.
+        alt_symbol = desktop / "AgriPilot.url"
+        if alt_symbol.exists():
+            alt_symbol.unlink()
 
     def starten() -> None:
         _lauf(["schtasks", "/Run", "/TN", AUFGABE])
@@ -231,7 +294,9 @@ def plan(ziel: str, port: int = 8080, quelle: Optional[str] = None,
             raise RuntimeError(f"Das neue Programm meldet sich nach 60 Sekunden nicht.{zurueck} "
                                f"Protokoll: {daten_ordner / 'agripilot.log'}")
         if not still:
-            os.startfile(f"http://localhost:{port}")  # type: ignore[attr-defined]
+            # Über den Explorer, damit das Fenster als normaler Benutzer läuft und
+            # nicht mit den Administratorrechten der Installation.
+            subprocess.Popen(["explorer.exe", str(vbs_fenster)])
 
     def aufraeumen() -> None:
         _lauf(["schtasks", "/Delete", "/TN", UPDATE_AUFGABE, "/F"], ok_codes=None)
@@ -243,8 +308,9 @@ def plan(ziel: str, port: int = 8080, quelle: Optional[str] = None,
         Schritt(f"Firewall: Port {port} für das Android-Tablet freigeben", firewall),
         Schritt("Startdatei ohne Fenster anlegen", starter),
         Schritt("Automatischen Start beim Anmelden eintragen (mit Neustart nach Absturz)", aufgabe),
-        Schritt("Symbol 'AgriPilot' auf den Desktop legen", symbol),
-        Schritt("Programm starten und Anzeige öffnen", starten),
+        Schritt("Symbol 'AgriPilot' auf Desktop und Startmenü legen "
+                "(beim Arbeiter öffnet die Anzeige beim Anmelden)", symbol),
+        Schritt("Programm starten und Anzeige im eigenen Fenster öffnen", starten),
         Schritt("Aufräumen", aufraeumen),
     ]
 
@@ -298,10 +364,14 @@ def installieren(ziel: str, port: int, trocken: bool, still: bool = False,
         print("Die Installation gibt es nur für Windows.")
         return 1
     if not ist_admin():
+        # Die exe verlangt Adminrechte nicht schon beim Start (sonst fragte Windows
+        # auch bei jedem Öffnen des Anzeigefensters) - nur die Einrichtung holt sie sich.
         import ctypes
         print("Administratorrechte werden angefordert ...")
         ctypes.windll.shell32.ShellExecuteW(  # type: ignore[attr-defined]
             None, "runas", sys.executable, " ".join(f'"{a}"' for a in sys.argv[1:]), None, 1)
+        global _WEITERGEREICHT
+        _WEITERGEREICHT = True
         return 0
     if rolle is None and not still:
         daten_ordner = Path(os.environ.get("PROGRAMDATA", r"C:\ProgramData")) / "AgriPilot"
@@ -316,8 +386,23 @@ def installieren(ziel: str, port: int, trocken: bool, still: bool = False,
             print(f"\nFEHLER: {exc}")
             return 1
     print("\nFertig. AgriPilot läuft und startet künftig beim Anmelden von selbst.")
-    print(f"Anzeige: http://localhost:{port}  (Symbol 'AgriPilot' auf dem Desktop)")
+    print("Anzeige: Symbol 'AgriPilot' auf dem Desktop oder im Startmenü "
+          f"(im Netz auch http://<dieser Rechner>:{port})")
     return 0
+
+
+_WEITERGEREICHT = False   # die Einrichtung läuft in einem neuen Fenster mit Adminrechten
+
+
+def fenster(port: int) -> int:
+    """Die Anzeige im eigenen Fenster; der Port kommt aus der Konfiguration."""
+    from . import config as config_module
+    from . import fenster as fenster_module
+    try:
+        port = config_module.load().server.port
+    except Exception:  # noqa: BLE001 - ohne lesbare Konfiguration der übliche Port
+        pass
+    return fenster_module.oeffnen(port)
 
 
 def dienst() -> int:
@@ -350,6 +435,8 @@ def main(argv: Optional[list[str]] = None) -> int:
     parser.add_argument("--code", default="", help="Arbeitercode vom Master (für --arbeiter)")
     parser.add_argument("--still", action="store_true",
                         help="ohne Rückfragen und ohne Browser (Aktualisierung über das Netz)")
+    parser.add_argument("--fenster", action="store_true",
+                        help="die Anzeige im eigenen Fenster öffnen (so startet sie das Desktop-Symbol)")
     parser.add_argument("--version", action="store_true")
     args = parser.parse_args(argv)
     if args.version:
@@ -358,6 +445,8 @@ def main(argv: Optional[list[str]] = None) -> int:
         return 0
     if args.dienst:
         return dienst()
+    if args.fenster:
+        return fenster(args.port)
     if args.still:
         # Gestartet vom laufenden Programm, ohne Fenster: Ausgabe in eine Datei.
         from . import config as config_module
@@ -370,6 +459,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     if master_url and not master_url.startswith("http"):
         master_url = "http://" + master_url
     code = installieren(args.ziel, args.port, args.trocken, args.still, rolle, master_url, args.code)
-    if getattr(sys, "frozen", False) and not args.trocken and not args.still:
+    if (getattr(sys, "frozen", False) and not args.trocken and not args.still
+            and not _WEITERGEREICHT):
         input("\nEnter zum Schließen ... ")
     return code
