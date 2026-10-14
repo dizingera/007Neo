@@ -1524,6 +1524,40 @@ el('btnSimInsFeld').onclick = async () => {
   }
 };
 
+/* Simulator mit den Pfeiltasten fahren: links/rechts gedrückt halten lenkt,
+   loslassen stellt die Räder wieder gerade; hoch/runter ändert das Tempo. */
+const SIM_LENK_SCHRITT = 4;
+const SIM_LENK_MAX = 30;
+function simulatorLaeuft() {
+  const system = state.live && state.live.system;
+  return Boolean(system && system.gnss && system.gnss.source === 'simulator');
+}
+function simulatorTasteErlaubt(event) {
+  if (!simulatorLaeuft() || !el('sheet').hidden) return false;
+  const ziel = event.target;
+  return !(ziel && (ziel.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(ziel.tagName)));
+}
+function simulatorLenken(grad) {
+  el('simSteer').value = grad;
+  api('POST', '/api/simulator', { steer_deg: grad });
+}
+document.addEventListener('keydown', (event) => {
+  if (!simulatorTasteErlaubt(event)) return;
+  const lenkung = parseFloat(el('simSteer').value) || 0;
+  const tempo = parseFloat(el('simSpeed').value) || 0;
+  if (event.key === 'ArrowLeft') simulatorLenken(Math.max(-SIM_LENK_MAX, Math.min(0, lenkung) - SIM_LENK_SCHRITT));
+  else if (event.key === 'ArrowRight') simulatorLenken(Math.min(SIM_LENK_MAX, Math.max(0, lenkung) + SIM_LENK_SCHRITT));
+  else if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
+    const neu = Math.max(0, Math.min(15, tempo + (event.key === 'ArrowUp' ? 1 : -1)));
+    el('simSpeed').value = neu;
+    api('POST', '/api/simulator', { speed_kmh: neu });
+  } else return;
+  event.preventDefault();
+});
+document.addEventListener('keyup', (event) => {
+  if ((event.key === 'ArrowLeft' || event.key === 'ArrowRight') && simulatorLaeuft()) simulatorLenken(0);
+});
+
 async function refreshLists() {
   if (el('sheet').hidden) return;
   const active = document.querySelector('.tab.active').dataset.tab;

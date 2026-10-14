@@ -755,6 +755,8 @@ class Engine:
         self.load_line(record["id"])
         return record
 
+    SIM_SPUR_MAX_ABSTAND_M = 3000.0
+
     def startpunkt_im_feld(self) -> Optional[tuple[float, float, float]]:
         """Ost, Nord, Kurs für einen Neuanfang im Feld - für den Simulator.
 
@@ -763,17 +765,27 @@ class Engine:
         """
         if self.field is None:
             return None
+        grenze = self.field.get("boundary") or []
+        mitte = ((sum(p[0] for p in grenze) / len(grenze),
+                  sum(p[1] for p in grenze) / len(grenze)) if len(grenze) >= 3 else (0.0, 0.0))
         if self.line is not None and self.line.mode == "ab" and len(self.line.points) >= 2:
             a, b = self.line.points[0], self.line.points[-1]
-            kurs = geo.heading_deg(a, b)
-            rx, ry = math.cos(math.radians(kurs)), -math.sin(math.radians(kurs))
-            versatz = self.line.nudge_m
-            return a[0] + rx * versatz, a[1] + ry * versatz, kurs
-        grenze = self.field.get("boundary") or []
-        if len(grenze) >= 3:
-            return (sum(p[0] for p in grenze) / len(grenze),
-                    sum(p[1] for p in grenze) / len(grenze), 0.0)
-        return 0.0, 0.0, 0.0
+            # Eine Spur, die weit weg vom Feld liegt (im Simulator an anderem Ort
+            # angelegt), taugt nicht als Startpunkt - dann die Feldmitte.
+            if math.dist(a, mitte) <= self.SIM_SPUR_MAX_ABSTAND_M:
+                kurs = geo.heading_deg(a, b)
+                rx, ry = math.cos(math.radians(kurs)), -math.sin(math.radians(kurs))
+                versatz = self.line.nudge_m
+                return a[0] + rx * versatz, a[1] + ry * versatz, kurs
+        return mitte[0], mitte[1], 0.0
+
+    def startpunkt_wgs(self) -> Optional[tuple[float, float, float]]:
+        """Wie startpunkt_im_feld, aber als Breite, Länge, Kurs."""
+        ziel = self.startpunkt_im_feld()
+        if ziel is None or self.plane is None:
+            return None
+        lat, lon = self.plane.to_wgs(ziel[0], ziel[1])
+        return lat, lon, ziel[2]
 
     def nudge(self, metres: float) -> float:
         """Trim the whole pattern sideways.

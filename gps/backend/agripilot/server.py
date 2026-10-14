@@ -177,7 +177,18 @@ class Application:
         quelle = self.corrections or self.rtcm_client
         return quelle.adresse if quelle is not None and quelle.adresse else "aus"
 
+    def simulator_ins_feld(self) -> bool:
+        """Den virtuellen Traktor ins geladene Feld setzen - nur im Simulator."""
+        simulator_source = self.engine.simulator
+        ziel = self.engine.startpunkt_wgs()
+        if simulator_source is None or ziel is None:
+            return False
+        simulator_source.versetzen(*ziel)
+        return True
+
     def _quellen_starten(self) -> None:
+        # Im Simulator steht der Traktor gleich im zuletzt geladenen Feld.
+        self.simulator_ins_feld()
         self._quellen_tasks = [asyncio.create_task(self.source.run())]
         if self.imu is not None:
             self._quellen_tasks.append(asyncio.create_task(self.imu.run()))
@@ -623,6 +634,9 @@ def create_app(config=None) -> FastAPI:
             # another tractor synced over - that is the point of the master.
             merged = sync.merge_field_coverage(store, field_id, max_age_s=86_400)
             engine.coverage.merge(merged)
+        # Im Simulator fährt der Traktor zum gewählten Schlag mit - sonst steht
+        # er irgendwo anders und der Schlag ist nicht auf dem Bildschirm.
+        application.simulator_ins_feld()
         return result
 
     @api.delete("/api/fields/{field_id}")
@@ -1258,11 +1272,8 @@ def create_app(config=None) -> FastAPI:
             # Zurück ins Feld: auf die aktive Spur (Anfang, in ihrer Richtung),
             # sonst in die Mitte der Grenze. Der virtuelle Traktor fährt ohne
             # Lenkung geradeaus davon - nach einer Minute ist er außerhalb.
-            ziel = engine.startpunkt_im_feld()
-            if ziel is None:
+            if not application.simulator_ins_feld():
                 raise HTTPException(400, "Kein Feld geladen")
-            simulator_source.teleport(*ziel)
-            simulator_source.set_steer(0.0)
         return ok({"speed_kmh": simulator_source.speed_ms * 3.6,
                    "steer_deg": simulator_source.steer_deg})
 

@@ -233,6 +233,18 @@ class SimulatorSource(GnssSource):
     def teleport(self, east: float, north: float, heading: float) -> None:
         self.east, self.north, self.heading = east, north, heading
 
+    def versetzen(self, lat: float, lon: float, heading: float) -> None:
+        """Den virtuellen Traktor an einen Ort auf der Erde setzen.
+
+        Die Ebene zieht mit: Felder liegen in ihrer eigenen Ebene (Feldbezug),
+        der Simulator in seiner. Ein Ost/Nord aus der Feldebene in die
+        Simulatorebene zu übernehmen, landete 100 km daneben.
+        """
+        self.plane = LocalPlane(lat, lon)
+        self.east = self.north = 0.0
+        self.heading = heading
+        self.steer_deg = 0.0
+
     async def run(self) -> None:
         self.running = True
         self.status = "Simulator"
