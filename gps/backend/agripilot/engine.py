@@ -22,7 +22,7 @@ import time
 from dataclasses import asdict
 from typing import Any, Optional
 
-from . import geo, headland as headland_module, storage
+from . import geo, headland as headland_module, randspuren as randspuren_module, storage
 from .actuators import SteerContext
 from .config import Config
 from .coverage import CoverageMap, Section, build_sections
@@ -527,8 +527,19 @@ class Engine:
         # jemand daran denken muss. Sonst die zuletzt benutzte Spur.
         saison = self.store.season_line(field_id, time.localtime().tm_year)
         lines = self.store.list_lines(field_id)
+        # Randspuren (aus der Grenze erzeugt) gehen nicht vor: sie sind alle
+        # gleichzeitig entstanden, "zuletzt benutzt" hieße sonst "zufällig eine
+        # davon". Gibt es keine eigene Spur, die längste gerade Kante - an ihr
+        # fährt man üblicherweise die erste Spur.
+        eigene = [l for l in lines if not randspuren_module.ist_randspur(l["name"])]
+        rand_ab = [l for l in lines if randspuren_module.ist_randspur(l["name"]) and l["mode"] == "ab"]
         if saison is not None:
             self.load_line(saison["id"])
+        elif eigene:
+            self.load_line(eigene[0]["id"])
+        elif rand_ab:
+            laengste = max(rand_ab, key=lambda l: geo.distance(tuple(l["points"][0]), tuple(l["points"][-1])))
+            self.load_line(laengste["id"])
         elif lines:
             self.load_line(lines[0]["id"])
         self.note(f"Feld geladen: {field['name']}")
@@ -621,6 +632,47 @@ class Engine:
         self.line = None
         self.guidance = GuidanceState()
         self._remember_session()
+
+    def randspuren_anlegen(self, field_id: str) -> dict:
+        """Aus der Feldgrenze Spuren machen: gerade Kanten ab 20 m als AB-Spur,
+        gebogene Ränder ab 20 m als Kurvenspur (siehe randspuren.py).
+
+        Wiederholbar: eine Randspur mit gleichem Namen wird aktualisiert (ihr
+        Versatz bleibt), Randspuren, die es nach einer neuen Grenze nicht mehr
+        gibt, verschwinden. Selbst angelegte Spuren werden nie angefasst.
+        """
+        feld = self.store.get_field(field_id)
+        if feld is None:
+            raise KeyError("Feld nicht gefunden")
+        grenze = [tuple(p) for p in (feld.get("boundary") or [])]
+        if len(grenze) < 3:
+            return {"feld": feld["name"], "angelegt": [], "hinweis": "keine Grenze"}
+        vorhanden = {l["name"]: l for l in self.store.list_lines(field_id)
+                     if randspuren_module.ist_randspur(l["name"])}
+        neu: list[str] = []
+        namen_gesehen: dict[str, int] = {}
+        for kante in randspuren_module.kanten(grenze):
+            name = randspuren_module.benennen(kante, grenze)
+            namen_gesehen[name] = namen_gesehen.get(name, 0) + 1
+            if namen_gesehen[name] > 1:
+                name = f"{name} ({namen_gesehen[name]})"
+            alt = vorhanden.pop(name, None)
+            self.store.save_line({
+                **({"id": alt["id"], "nudge_m": alt.get("nudge_m", 0.0),
+                    "saison": alt.get("saison", 0), "fahrgasse_m": alt.get("fahrgasse_m", 0.0)}
+                   if alt else {}),
+                "field_id": field_id,
+                "name": name,
+                "mode": kante["mode"],
+                "points": randspuren_module.runden(kante["points"]),
+                "spacing_m": self.profile.spacing_m,
+            })
+            neu.append(name)
+        for veraltet in vorhanden.values():
+            self.store.delete_line(veraltet["id"])
+            if self.line is not None and self.line.id == veraltet["id"]:
+                self.clear_line()
+        return {"feld": feld["name"], "angelegt": neu}
 
     def use_contour(self) -> dict:
         """Die Feldgrenze selbst als Spurmuster nehmen.

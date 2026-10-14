@@ -649,6 +649,17 @@ def create_app(config=None) -> FastAPI:
         application.simulator_ins_feld()
         return result
 
+    @api.post("/api/fields/{field_id}/randspuren")
+    async def randspuren_eines_feldes(field_id: str):
+        """AB- und Kurvenspuren an den Kanten der Feldgrenze anlegen (ab 20 m)."""
+        return guard(engine.randspuren_anlegen, field_id)
+
+    @api.post("/api/randspuren")
+    async def randspuren_aller_felder():
+        ergebnisse = [engine.randspuren_anlegen(f["id"]) for f in store.list_fields()]
+        return ok({"felder": ergebnisse,
+                   "spuren": sum(len(e["angelegt"]) for e in ergebnisse)})
+
     @api.delete("/api/fields/{field_id}")
     async def delete_field(field_id: str):
         store.delete_field(field_id)

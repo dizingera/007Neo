@@ -1835,6 +1835,15 @@ async function refreshLists() {
   if (active === 'settings' && !settings.geladen) loadSettings();
 }
 
+el('btnRandspurenAlle').onclick = async () => {
+  el('randspurenInfo').textContent = 'Lege an …';
+  const antwort = await api('POST', '/api/randspuren');
+  if (!antwort) { el('randspurenInfo').textContent = ''; return; }
+  const mitGrenze = antwort.data.felder.filter((f) => f.angelegt.length).length;
+  el('randspurenInfo').textContent = `${antwort.data.spuren} Spuren an ${mitGrenze} Feldern`;
+  refreshLists();
+};
+
 const aufgeklappt = new Set();   // Felder, deren Spuren gerade offen sind
 
 function renderFields(fields, lines) {
@@ -1865,6 +1874,14 @@ function renderFields(fields, lines) {
           if (offen) aufgeklappt.delete(field.id); else aufgeklappt.add(field.id);
           refreshLists();
         }],
+        ...(field.boundary.length >= 3 ? [['Randspuren anlegen', async () => {
+          const antwort = await api('POST', `/api/fields/${field.id}/randspuren`);
+          if (antwort) {
+            toast(`${field.name}: ${antwort.data.angelegt.length} Spuren an den Rändern`);
+            aufgeklappt.add(field.id);
+            refreshLists();
+          }
+        }]] : []),
         [field.boundary.length ? 'Grenze neu abfahren' : 'Grenze abfahren', async () => {
           if (field.boundary.length && !confirm(`Die Grenze von "${field.name}" neu abfahren? ` +
               'Die alte wird beim Abschließen ersetzt.')) return;

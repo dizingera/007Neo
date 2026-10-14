@@ -16,4 +16,4 @@ Die Module lassen sich einzeln benutzen und prüfen:
     server     Weboberfläche und Schnittstelle
 """
 
-__version__ = "1.5.15"
+__version__ = "1.5.16"
