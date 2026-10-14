@@ -1103,8 +1103,17 @@ el('btnRichtung').onclick = async () => {
   const antwort = await api('POST', '/api/richtung/umkehren');
   if (antwort) toast(antwort.data.rueckwaerts ? 'Fahrtrichtung: rückwärts' : 'Fahrtrichtung: vorwärts');
 };
-el('btnNudgeLeft').onclick = () => api('POST', '/api/guidance/nudge', { metres: -0.10 });
-el('btnNudgeRight').onclick = () => api('POST', '/api/guidance/nudge', { metres: 0.10 });
+/* "› 10 cm" schiebt die Spur dorthin, wo auf dem Bildschirm rechts ist - in
+   jeder Ansicht, auch "Norden oben". Mitgeschickt wird deshalb die Richtung
+   "rechts auf dem Bildschirm" in Weltkoordinaten (Ost, Nord). */
+function bildschirmRechts() {
+  const y = ankerY(), x = canvas.clientWidth / 2;
+  const a = screenToWorld(x, y), b = screenToWorld(x + 100, y);
+  const laenge = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1;
+  return [(b[0] - a[0]) / laenge, (b[1] - a[1]) / laenge];
+}
+el('btnNudgeLeft').onclick = () => api('POST', '/api/guidance/nudge', { metres: -0.10, bildschirm_rechts: bildschirmRechts() });
+el('btnNudgeRight').onclick = () => api('POST', '/api/guidance/nudge', { metres: 0.10, bildschirm_rechts: bildschirmRechts() });
 
 /* Markieren an/aus - das ist der Auftrag. Die Bezeichnung (Grubbern, Säen...)
  * steht unter Menü → Aufträge und wird für den nächsten Start gemerkt. */

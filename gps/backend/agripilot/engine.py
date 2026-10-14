@@ -787,7 +787,7 @@ class Engine:
         lat, lon = self.plane.to_wgs(ziel[0], ziel[1])
         return lat, lon, ziel[2]
 
-    def nudge(self, metres: float) -> float:
+    def nudge(self, metres: float, bildschirm_rechts: Optional[list] = None) -> float:
         """Trim the whole pattern sideways.
 
         Real fields drift: a slightly different antenna position between
@@ -800,7 +800,20 @@ class Engine:
         # AB-Spur und auf dem Ring gegen den Uhrzeigersinn liegt rechts vom
         # Fahrer links vom Muster - die Führung weiß das (right_sign), also
         # wird der Wunsch des Fahrers hier in die Sprache des Musters übersetzt.
-        if self.guidance.active:
+        #
+        # Kommt die Richtung "rechts auf dem Bildschirm" mit (Weltvektor), gilt
+        # die: der Fahrer sieht die Spur, und "›" soll sie dorthin schieben,
+        # wohin er schaut - in jeder Ansicht, auch "Norden oben", und auch dann,
+        # wenn die Anlage vorwärts und rückwärts verwechselt hat. Vorher hing
+        # es am errechneten Kurs; fuhr man in "Norden oben" nach Süden, sprang
+        # die Spur auf dem Bildschirm zur falschen Seite.
+        punkt = self._lenkpunkt()
+        if bildschirm_rechts is not None and punkt is not None and len(bildschirm_rechts) == 2:
+            muster = self.line.versatz_richtung(punkt)
+            skalar = muster[0] * float(bildschirm_rechts[0]) + muster[1] * float(bildschirm_rechts[1])
+            if abs(skalar) > 1e-6:
+                metres = metres if skalar > 0 else -metres
+        elif self.guidance.active:
             metres *= self.guidance.right_sign
         self.line.nudge_m += metres
         if self.line.derived:

@@ -232,3 +232,45 @@ class SimulatorAntenneTests(unittest.TestCase):
         self.assertAlmostEqual(ost, 11.85, places=6)
         self.assertAlmostEqual(nord, 19.8, places=6)
         self.assertEqual(sim.wheelbase, 2.8)
+
+
+class VersatzBildschirmTests(unittest.TestCase):
+    """„› 10 cm“ schiebt die Spur dorthin, wo auf dem Bildschirm rechts ist -
+    auch in „Norden oben“ und auch, wenn der errechnete Kurs falsch herum steht."""
+
+    def _motor(self, mode, punkte):
+        from agripilot.guidance import GuidanceLine
+        ordner = tempfile.TemporaryDirectory()
+        self.addCleanup(ordner.cleanup)
+        store = Storage(os.path.join(ordner.name, "v.db"))
+        self.addCleanup(store.close)
+        motor = Engine(config_module.load("/kein-solcher-pfad.yaml"), store)
+        feld = store.save_field({"name": "F", "datum_lat": 48.0, "datum_lon": 9.6,
+                                 "boundary": [(-100.0, -100.0), (100.0, -100.0), (100.0, 100.0), (-100.0, 100.0)]})
+        motor.load_field(feld["id"])
+        motor.line = GuidanceLine(mode=mode, points=punkte, spacing=6.0)
+        motor.line.derived = True              # nicht speichern
+        motor.tool_position = (-2.0, 0.0)
+        return motor
+
+    def _verschiebung(self, motor, rechts):
+        punkt = motor._lenkpunkt()
+        vorher = motor.line.solve(punkt, 0.0, 2.0, motor.profile).cross_track_m
+        motor.nudge(0.1, rechts)
+        richtung = motor.line.versatz_richtung(punkt)
+        return motor.line.nudge_m * (richtung[0] * rechts[0] + richtung[1] * rechts[1]), vorher
+
+    def test_the_line_moves_to_screen_right_whatever_the_line_direction(self):
+        for punkte in ([(0.0, -50.0), (0.0, 50.0)], [(0.0, 50.0), (0.0, -50.0)]):
+            for rechts in ([1.0, 0.0], [-1.0, 0.0]):     # Bildschirm rechts = Osten / = Westen
+                motor = self._motor("ab", punkte)
+                schub, _ = self._verschiebung(motor, rechts)
+                self.assertAlmostEqual(schub, 0.1, places=6, msg=f"{punkte} {rechts}")
+
+    def test_the_contour_too(self):
+        ring = [(-100.0, -100.0), (100.0, -100.0), (100.0, 100.0), (-100.0, 100.0)]
+        for rechts in ([1.0, 0.0], [-1.0, 0.0]):
+            motor = self._motor("contour", ring)
+            motor.tool_position = (-97.0, 0.0)          # an der Westkante
+            schub, _ = self._verschiebung(motor, rechts)
+            self.assertAlmostEqual(schub, 0.1, places=6, msg=str(rechts))

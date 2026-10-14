@@ -366,6 +366,16 @@ class GuidanceLine:
             ecke = (ecke + schritt) % n
         return None
 
+    def versatz_richtung(self, position: Point) -> Point:
+        """In welche Richtung (Ost, Nord) ein positiver Versatz das Muster hier schiebt."""
+        if self.mode == "contour":
+            return self._contour_lateral(position)[3]
+        if self.mode == "ab":
+            _, kurs, _ = self._ab_lateral(position)
+        else:
+            _, kurs, _ = self._curve_lateral(position)
+        return _right_vector(kurs)
+
     def solve(self, position: Point, vehicle_heading: float,
               speed_ms: float, profile: VehicleProfile) -> GuidanceState:
         """Compute the guidance state for a tool position and heading."""

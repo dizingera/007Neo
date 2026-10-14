@@ -707,7 +707,9 @@ def create_app(config=None) -> FastAPI:
 
     @api.post("/api/guidance/nudge")
     async def nudge(payload: dict = Body(...)):
-        return guard(engine.nudge, float(payload.get("metres", 0.0)))
+        rechts = payload.get("bildschirm_rechts")
+        return guard(engine.nudge, float(payload.get("metres", 0.0)),
+                     [float(v) for v in rechts] if isinstance(rechts, list) else None)
 
     @api.post("/api/guidance/clear")
     async def clear_line():
