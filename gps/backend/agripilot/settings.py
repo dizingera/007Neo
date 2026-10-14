@@ -235,6 +235,13 @@ GRUPPEN: list[Gruppe] = [
         felder=[
             Feld("phidget.serial_number", "Seriennummer", "ganzzahl", minimum=-1,
                  hilfe="−1 = erstes gefundenes Gerät."),
+            Feld("phidget.bibliothek", "Phidget-Treiber", "auswahl", auswahl=(
+                ("auto", "Automatisch (Phidget22, sonst Phidget21)"),
+                ("phidget22", "Phidget22"),
+                ("phidget21", "Phidget21 (ältere Platinen, z. B. MotorControl 1065)"),
+            ), hilfe="Welcher Treiber auf dem Rechner installiert ist. Mit Phidget21 regelt "
+                     "immer AgriPilot selbst (eigener Regelkreis); die Platine hat dort keinen "
+                     "Failsafe und keine einstellbare Stromgrenze - Not-Aus ist Pflicht."),
             Feld("phidget.motor_channel", "Motorkanal", "ganzzahl", minimum=0, maximum=7),
             Feld("phidget.invert_motor", "Drehrichtung umkehren", "schalter",
                  hilfe="Wenn die Lenkung in die falsche Richtung zieht."),

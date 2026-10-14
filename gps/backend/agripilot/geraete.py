@@ -75,6 +75,55 @@ def serielle_anschluesse() -> tuple[list[Fund], dict, list[str]]:
 
 
 def phidget_kanaele() -> tuple[list[Fund], dict, list[str]]:
+    """Erst Phidget22, und wenn dort kein Motor auftaucht, Phidget21.
+
+    Am Traktor-Tablet ist der ältere Phidget21-Treiber installiert, und die
+    MotorControl 1065 hängt direkt am USB (kein COM-Port). Phidget22 sieht sie
+    dann nicht - also wird sie über Phidget21 gesucht.
+    """
+    funde22, vorschlag22, probleme22 = _phidget22_kanaele()
+    if any(f.details.get("klasse") == "PhidgetDCMotor" for f in funde22):
+        return funde22, vorschlag22, probleme22
+    funde21, vorschlag21, probleme21 = phidget21_kanaele()
+    if funde21:
+        return funde21, vorschlag21, []
+    return funde22, vorschlag22, probleme22 + probleme21
+
+
+def phidget21_kanaele() -> tuple[list[Fund], dict, list[str]]:
+    from . import phidget21
+    nutzbar, problem = phidget21.verfuegbar()
+    if not nutzbar:
+        return [], {}, [f"Phidget21: {problem}"]
+    try:
+        gefunden = phidget21.suchen(int(WARTEZEIT_S * 1000))
+    except Exception as exc:  # noqa: BLE001
+        return [], {}, [f"Phidget21: {exc}"]
+    if gefunden is None:
+        return [], {}, ["Phidget21: keine MotorControl gefunden - ist das AgriPilot Terminal "
+                        "noch offen? Es hält die Platine fest."]
+    seriennummer = gefunden["seriennummer"]
+    fund = Fund("phidget", f"{seriennummer}/0",
+                f"{gefunden['name']} (Phidget21) - {gefunden['motoren']} Motor, "
+                f"{gefunden['drehgeber']} Drehgeber, {gefunden['sensoren']} Analogeingänge",
+                "die Lenkmotorsteuerung",
+                {"seriennummer": seriennummer, "kanal": 0, "klasse": "PhidgetDCMotor",
+                 "bibliothek": "phidget21"})
+    vorschlag: dict[str, Any] = {
+        "steering.output": "phidget",
+        "phidget.bibliothek": "phidget21",
+        "phidget.serial_number": seriennummer,
+        "phidget.motor_channel": 0,
+        # Ohne Positionsregler auf der Platine regelt AgriPilot selbst.
+        "phidget.control": "velocity",
+        "phidget.feedback": "encoder" if gefunden["drehgeber"] else "yaw_rate",
+    }
+    if gefunden["drehgeber"]:
+        vorschlag["phidget.encoder_channel"] = 0
+    return [fund], vorschlag, []
+
+
+def _phidget22_kanaele() -> tuple[list[Fund], dict, list[str]]:
     from .actuators import phidget_available
     nutzbar, problem = phidget_available()
     if not nutzbar:

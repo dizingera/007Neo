@@ -147,6 +147,9 @@ class PhidgetConfig:
     serial_number: int = -1      # -1 = erstes gefundenes Gerät
     motor_channel: int = 0
     invert_motor: bool = False
+    # Welche Phidget-Bibliothek: "auto" nimmt Phidget22, wenn dessen Treiber da
+    # ist, sonst Phidget21 (z. B. MotorControl 1065 mit dem älteren Treiber).
+    bibliothek: str = "auto"
 
     # Regelungsart:
     #   "position" - Positionsregler der Phidget-Steuerung. Der Sollwinkel geht

@@ -390,6 +390,29 @@ der andere schon bearbeitet hat – und die Sektionen schalten entsprechend ab.
 Ohne Verbindung arbeitet jeder Traktor vollständig weiter. Der Abgleich holt
 alles nach, sobald der Master wieder erreichbar ist.
 
+## Lenkmotor mit Phidget21 (MotorControl 1065)
+
+Ist auf dem Tablet der ältere **Phidget21**-Treiber installiert (so läuft die
+MotorControl 1065 auch mit dem AgriPilot Terminal), spricht AgriPilot die
+Platine direkt über USB an – kein COM-Port, kein Phidget22 nötig.
+**Menü → System → Geräte suchen** findet sie über Phidget21 („… (Phidget21) –
+1 Motor, 1 Drehgeber, 2 Analogeingänge“), **Gefundene Geräte übernehmen** stellt
+Phidget-Treiber „Phidget21“, die Seriennummer, den eigenen Regelkreis und den
+Drehgeber als Rückmeldung ein. Einstellbar unter **Einstellungen → Lenkmotor →
+Phidget-Treiber** (automatisch / Phidget22 / Phidget21).
+
+Unter Phidget21 kann die 1065 weniger als neuere Platinen:
+
+* **kein Failsafe** – die Platine hält den Motor nicht selbst an, wenn das
+  Programm verstummt. Beim Beenden setzt AgriPilot die Geschwindigkeit auf null;
+  gegen einen harten Absturz hilft nur der **Not-Aus. Der ist Pflicht.**
+* **keine einstellbare Stromgrenze**,
+* **kein Positionsregler** – AgriPilot regelt selbst (50-mal je Sekunde).
+
+Wichtig: **das AgriPilot Terminal vorher schließen.** Solange es die Platine
+offen hat, findet AgriPilot sie nicht. Die Zählwerte des Drehgebers je Grad
+Radeinschlag (**Drehgeber: Zählwerte je Grad**) einmal ausmessen, nicht schätzen.
+
 ## Neigungssensor nullen
 
 Einmal beim Einbau und danach, wenn der Sensor bewegt wurde: auf **ebenem**

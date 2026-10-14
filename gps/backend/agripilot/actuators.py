@@ -92,6 +92,28 @@ def phidget_available() -> tuple[bool, str]:
     return True, ""
 
 
+def phidget_bibliothek(config) -> tuple[Optional[str], str]:
+    """Welche Phidget-Bibliothek benutzt wird: ("phidget22"|"phidget21"|None, Problem).
+
+    "auto" nimmt Phidget22, wenn dessen Treiber da ist, sonst Phidget21 - auf
+    dem Tablet am Traktor ist der ältere Treiber installiert, mit dem die
+    MotorControl 1065 schon unter dem AgriPilot Terminal läuft.
+    """
+    from . import phidget21
+    wahl = (getattr(config, "bibliothek", "auto") or "auto").lower()
+    ok22, problem22 = phidget_available() if wahl in ("auto", "phidget22") else (False, "")
+    if wahl == "phidget22":
+        return ("phidget22", "") if ok22 else (None, problem22)
+    if ok22 and wahl == "auto":
+        return "phidget22", ""
+    ok21, problem21 = phidget21.verfuegbar()
+    if ok21:
+        return "phidget21", ""
+    if wahl == "phidget21":
+        return None, problem21
+    return None, f"{problem22} - und {problem21}"
+
+
 class SteerOutput:
     """Gemeinsame Schnittstelle."""
 
@@ -241,6 +263,8 @@ class PhidgetOutput(SteerOutput):
         self.was = None
         self.encoder = None
         self.mode = config.feedback
+        self.bibliothek = "phidget22"
+        self._geraet21 = None
 
         self._target_angle = 0.0
         self._engaged = False
@@ -255,22 +279,17 @@ class PhidgetOutput(SteerOutput):
     # -- Aufbau -----------------------------------------------------------
 
     async def start(self) -> None:
-        usable, problem = phidget_available()
-        if not usable:
+        bibliothek, problem = phidget_bibliothek(self.config)
+        if bibliothek is None:
             self.status = problem
             self.last_error_text = problem
             return
-        from Phidget22.Devices.DCMotor import DCMotor
+        self.bibliothek = bibliothek
         try:
-            # Der native Treiber des Herstellers wird erst hier geladen, nicht
-            # beim Import. Ohne ihn kommt ein OSError - der darf den Start des
-            # Systems nicht mitreißen, sondern gehört als Klartext auf die
-            # Systemseite.
-            self.motor = DCMotor()
-            if self.config.serial_number >= 0:
-                self.motor.setDeviceSerialNumber(self.config.serial_number)
-            self.motor.setChannel(self.config.motor_channel)
-            self.motor.openWaitForAttachment(5000)
+            if bibliothek == "phidget21":
+                self._oeffnen21()
+            else:
+                self._oeffnen22()
             self.motor.setAcceleration(
                 _clamp(self.config.acceleration,
                        self.motor.getMinAcceleration(), self.motor.getMaxAcceleration()))
@@ -282,7 +301,7 @@ class PhidgetOutput(SteerOutput):
             self._open_feedback()
             self.ready = True
             self.status = (f"Motor {self.motor.getDeviceSerialNumber()}"
-                           f"/{self.config.motor_channel}, Rückmeldung: {self.mode}")
+                           f"/{self.config.motor_channel} ({bibliothek}), Rückmeldung: {self.mode}")
         except OSError as exc:
             self.status = f"{_TREIBER_FEHLT} ({exc})"
             self.last_error_text = _TREIBER_FEHLT
@@ -297,6 +316,25 @@ class PhidgetOutput(SteerOutput):
         self.running = True
         asyncio.create_task(self._control_loop())
 
+    def _oeffnen22(self) -> None:
+        # Der native Treiber des Herstellers wird erst hier geladen, nicht beim
+        # Import. Ohne ihn kommt ein OSError - der darf den Start des Systems
+        # nicht mitreißen, sondern gehört als Klartext auf die Systemseite.
+        from Phidget22.Devices.DCMotor import DCMotor
+        self.motor = DCMotor()
+        if self.config.serial_number >= 0:
+            self.motor.setDeviceSerialNumber(self.config.serial_number)
+        self.motor.setChannel(self.config.motor_channel)
+        self.motor.openWaitForAttachment(5000)
+
+    def _oeffnen21(self) -> None:
+        """MotorControl über Phidget21 (z. B. 1065): ein Gerät, Motor, Drehgeber
+        und Analogeingänge darin - alles über dieselbe Verbindung."""
+        from . import phidget21
+        self._geraet21 = phidget21.MotorControl21()
+        self._geraet21.oeffnen(self.config.serial_number)
+        self.motor = phidget21.Motor(self._geraet21, self.config.motor_channel)
+
     def _enable_failsafe(self) -> None:
         try:
             self.motor.enableFailsafe(int(self.config.failsafe_ms))
@@ -307,6 +345,14 @@ class PhidgetOutput(SteerOutput):
     def _open_feedback(self) -> None:
         """Rückmeldegerät öffnen. Fehlt es, bleibt der Regelkreis offen -
         deshalb wird hier nichts stillschweigend übersprungen."""
+        if self.bibliothek == "phidget21":
+            from . import phidget21
+            if self.mode == "was":
+                self.was = phidget21.Spannungsverhaeltnis(self._geraet21, self.config.was_channel)
+            elif self.mode == "encoder":
+                self.encoder = phidget21.Drehgeber(self._geraet21, self.config.encoder_channel)
+                self._encoder_centre = self.encoder.getPosition()
+            return
         if self.mode == "was":
             from Phidget22.Devices.VoltageRatioInput import VoltageRatioInput
             self.was = VoltageRatioInput()
@@ -339,6 +385,9 @@ class PhidgetOutput(SteerOutput):
                 device.close()
             except Exception:  # noqa: BLE001
                 pass
+        if self._geraet21 is not None:
+            self._geraet21.schliessen()      # hält den Motor an, auch wenn das Öffnen mittendrin scheiterte
+            self._geraet21 = None
         self.motor = self.was = self.encoder = None
 
     # -- Betrieb ----------------------------------------------------------
@@ -679,7 +728,10 @@ def build_output(config, imu=None) -> SteerOutput:
     if kind == "phidget":
         # Mit Drehgeber und bekanntem Zählwert je Grad regelt die Platine
         # selbst - das ist der ruhigere Weg und deshalb die Voreinstellung.
-        if (config.phidget.control or "position").lower() == "position":
+        # Unter Phidget21 gibt es keinen Positionsregler auf der Platine: dann
+        # regelt immer AgriPilot selbst.
+        if (config.phidget.control or "position").lower() == "position" \
+                and phidget_bibliothek(config.phidget)[0] != "phidget21":
             return PhidgetPositionOutput(config.phidget)
         return PhidgetOutput(config.phidget, imu)
     if kind == "udp":
