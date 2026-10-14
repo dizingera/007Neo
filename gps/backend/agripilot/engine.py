@@ -682,12 +682,26 @@ class Engine:
                      if randspuren_module.ist_randspur(l["name"])}
         neu: list[str] = []
         namen_gesehen: dict[str, int] = {}
+        benannt = []
         for kante in randspuren_module.kanten(grenze):
             name = randspuren_module.benennen(kante, grenze)
             namen_gesehen[name] = namen_gesehen.get(name, 0) + 1
             if namen_gesehen[name] > 1:
                 name = f"{name} ({namen_gesehen[name]})"
-            alt = vorhanden.pop(name, None)
+            benannt.append((name, kante))
+        # Erst nach Namen zuordnen, dann was übrig ist nach Lage: eine Randspur,
+        # die nur anders heißt (länger geworden, anders zerlegt), behält ihre
+        # Kennung, ihren Versatz und ihre Saison.
+        vorgaenger = {name: vorhanden.pop(name) for name, _ in benannt if name in vorhanden}
+        for name, kante in benannt:
+            if name in vorgaenger or not vorhanden:
+                continue
+            beste = max(vorhanden.values(),
+                        key=lambda l: randspuren_module.deckung(l["points"], kante["points"]))
+            if randspuren_module.deckung(beste["points"], kante["points"]) >= 0.5:
+                vorgaenger[name] = vorhanden.pop(beste["name"])
+        for name, kante in benannt:
+            alt = vorgaenger.get(name)
             self.store.save_line({
                 **({"id": alt["id"], "nudge_m": alt.get("nudge_m", 0.0),
                     "saison": alt.get("saison", 0), "fahrgasse_m": alt.get("fahrgasse_m", 0.0)}
@@ -699,6 +713,9 @@ class Engine:
                 "spacing_m": self.profile.spacing_m,
             })
             neu.append(name)
+            # Die aktive Spur hat jetzt eine neue Form: neu laden.
+            if alt is not None and self.line is not None and self.line.id == alt["id"]:
+                self.load_line(alt["id"])
         for veraltet in vorhanden.values():
             self.store.delete_line(veraltet["id"])
             if self.line is not None and self.line.id == veraltet["id"]:

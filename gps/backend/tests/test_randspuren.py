@@ -54,6 +54,35 @@ class KantenTests(unittest.TestCase):
         self.assertEqual(len(kurven), 1)
         self.assertAlmostEqual(kurven[0]["laenge_m"], 170.0, delta=1.0)
 
+    @staticmethod
+    def _rand(stuecke, schluss):
+        """Ring aus (Länge, Knick in Grad) und einer Rückkehr über `schluss`."""
+        punkte, x, y, kurs = [(0.0, 0.0)], 0.0, 0.0, 90.0
+        for laenge, knick in stuecke:
+            kurs -= knick
+            x += laenge * math.sin(math.radians(kurs)); y += laenge * math.cos(math.radians(kurs))
+            punkte.append((x, y))
+        return punkte + schluss(x, y)
+
+    def test_a_straight_edge_running_into_a_gentle_bend_is_one_curve(self):
+        # Wie Brünnele Süd: 244 m gerade, dann 15 m mit 6 Grad, 59 m mit 9 Grad, dann die Ecke.
+        ring = self._rand([(244.0, 0.0), (15.0, 6.0), (59.0, 9.0)],
+                          lambda x, y: [(x, y - 150.0), (0.0, -150.0)])
+        kanten = randspuren.kanten(ring)
+        kurven = [k for k in kanten if k["mode"] == "curve"]
+        self.assertEqual(len(kurven), 1)
+        self.assertAlmostEqual(kurven[0]["laenge_m"], 318.0, delta=1.0)
+        self.assertEqual([round(p, 1) for p in kurven[0]["points"][0]], [0.0, 0.0])
+
+    def test_a_rounded_corner_still_separates_two_edges(self):
+        # 100 m, abgerundete 90-Grad-Ecke aus sechs 4-m-Sehnen, 80 m: zwei
+        # Kanten, keine L-förmige Kurvenspur um die Ecke.
+        ring = self._rand([(100.0, 0.0)] + [(4.0, 15.0)] * 6 + [(80.0, 0.0)],
+                          lambda x, y: [(-30.0, y), (-30.0, 0.0)])
+        kanten = randspuren.kanten(ring)
+        self.assertEqual([k["mode"] for k in kanten], ["ab"] * 4)
+        self.assertEqual(sorted(round(k["laenge_m"]) for k in kanten), [84, 97, 130, 143])
+
 
 class EngineTests(unittest.TestCase):
     def setUp(self):
@@ -77,6 +106,18 @@ class EngineTests(unittest.TestCase):
         danach = self.store.list_lines(self.feld["id"])
         self.assertEqual(len(danach), 4)
         self.assertEqual(next(l for l in danach if l["id"] == sued["id"])["nudge_m"], 0.3)
+
+    def test_a_renamed_edge_keeps_id_offset_and_season_of_its_predecessor(self):
+        alt = self.store.save_line({"field_id": self.feld["id"], "name": "Rand Süd 90 m", "mode": "ab",
+                                    "points": [[5, 0], [95, 0]], "spacing_m": 6.0, "nudge_m": 1.0,
+                                    "saison": 2026, "fahrgasse_m": 21.0})
+        self.motor.randspuren_anlegen(self.feld["id"])
+        linien = self.store.list_lines(self.feld["id"])
+        nachfolger = next(l for l in linien if l["id"] == alt["id"])
+        self.assertEqual(nachfolger["name"], "Rand Süd 100 m")
+        self.assertEqual((nachfolger["nudge_m"], nachfolger["saison"], nachfolger["fahrgasse_m"]),
+                         (1.0, 2026, 21.0))
+        self.assertEqual(len([l for l in linien if l["name"].startswith("Rand ")]), 4)
 
     def test_own_lines_are_never_touched(self):
         eigene = self.store.save_line({"field_id": self.feld["id"], "name": "AB 07:30", "mode": "ab",
