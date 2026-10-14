@@ -18,7 +18,7 @@
   --f-boden: #0a1216; --f-raster: rgba(255,255,255,.035); --f-grenze: #ffb020;
   --f-vg: rgba(255,77,77,.85); --f-pass: rgba(255,255,255,.16); --f-aktiv: #5dff8e;
   --f-flaeche: rgba(93,255,142,.22); --f-wende: #6cb8ff; --f-spur: rgba(108,184,255,.5); --f-traktor: #eef3f0;
-  --f-fahrgasse: rgba(255,92,92,.75);
+  --f-fahrgasse: rgba(255,92,92,.75); --f-konflikt: #ffb020;
   --f-doppelt: rgba(255,170,40,.6); --f-traktor-rand: #0a1216; --f-geraet: #4c5a55;
   --f-lack: #3d8c34; --f-lack-hell: #6fc25f; --f-lack-dunkel: #1f4f1b; --f-akzent: #f4c400; --f-reifen: #1a1d1c; --f-kabine: #0e1a22;
   /* Menü */
@@ -35,7 +35,7 @@ body.tag {
   --f-boden: #cfd9c9; --f-raster: rgba(20,32,26,.05); --f-grenze: #b57c0e;
   --f-vg: rgba(216,54,47,.8); --f-pass: rgba(20,32,26,.16); --f-aktiv: #15a350;
   --f-flaeche: rgba(21,163,80,.28); --f-wende: #1f63d6; --f-spur: rgba(31,99,214,.45); --f-traktor: #14201a;
-  --f-fahrgasse: rgba(216,54,47,.75);
+  --f-fahrgasse: rgba(216,54,47,.75); --f-konflikt: #b86400;
   --f-doppelt: rgba(214,110,0,.55); --f-traktor-rand: #5b6a61; --f-geraet: #9aa69e;
   --f-lack: #2f7a29; --f-lack-hell: #5cae4e; --f-lack-dunkel: #1a4416; --f-akzent: #e0b400; --f-reifen: #222624; --f-kabine: #1b2a33;
   --bg: #eef1ec; --panel: #ffffff; --panel-2: #f1f4ee; --line: #d3d9d1;
@@ -590,3 +590,11 @@ label.button { display: inline-flex; align-items: center; cursor: pointer; }
 }
 .vorschlag[hidden] { display: none; }
 
+
+/* Saatplan */
+.formular label.breit { grid-column: 1 / -1; }
+.saat-konflikt { border-left: 4px solid var(--amber); background: color-mix(in srgb, var(--amber) 12%, transparent);
+  border-radius: 8px; padding: 10px 12px; margin: 10px 0; }
+.saat-konflikt p { margin: 0 0 6px; }
+.saat-konflikt ul { margin: 0; padding-left: 20px; }
+.saat-ok { border-left: 4px solid var(--leucht); padding: 8px 12px; margin: 10px 0; }

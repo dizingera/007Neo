@@ -49,13 +49,13 @@ class SimulatorFeldTests(unittest.TestCase):
         """So eine Spur entsteht, wenn der Simulator an anderem Ort fuhr - der
         Traktor landete dann 146 km neben dem Schlag."""
         from types import SimpleNamespace
-        self.motor.line = SimpleNamespace(mode="ab", nudge_m=0.0,
+        self.motor.line = SimpleNamespace(mode="ab", nudge_m=0.0, raster_versatz=lambda: 0.0,
                                           points=[(146876.0, -30320.0), (146876.0, -30000.0)])
         self.assertEqual(self.motor.startpunkt_im_feld(), (0.0, 0.0, 0.0))
 
     def test_a_line_inside_the_field_is_the_start(self):
         from types import SimpleNamespace
-        self.motor.line = SimpleNamespace(mode="ab", nudge_m=0.0, points=[(-50.0, -90.0), (-50.0, 90.0)])
+        self.motor.line = SimpleNamespace(mode="ab", nudge_m=0.0, raster_versatz=lambda: 0.0, points=[(-50.0, -90.0), (-50.0, 90.0)])
         ost, nord, kurs = self.motor.startpunkt_im_feld()
         self.assertEqual((ost, nord), (-50.0, -90.0))
         self.assertAlmostEqual(kurs, 0.0)

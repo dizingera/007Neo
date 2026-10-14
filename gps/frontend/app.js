@@ -35,7 +35,7 @@ let F = {};
 function farbenLesen() {
   const cs = getComputedStyle(document.body);
   F = Object.fromEntries(['boden', 'raster', 'grenze', 'vg', 'pass', 'aktiv', 'flaeche', 'doppelt', 'wende', 'spur',
-    'traktor', 'traktor-rand', 'geraet', 'fahrgasse', 'lack', 'lack-hell', 'lack-dunkel', 'akzent', 'reifen', 'kabine']
+    'traktor', 'traktor-rand', 'geraet', 'fahrgasse', 'konflikt', 'lack', 'lack-hell', 'lack-dunkel', 'akzent', 'reifen', 'kabine']
     .map((k) => [k, cs.getPropertyValue('--f-' + k).trim()]));
   flaeche.farbenSetzen(F.flaeche, F.doppelt);
 }
@@ -573,6 +573,7 @@ function zeichnen() {
   drawCoverage();
   drawBoundary();
   drawHeadland();
+  drawSaatplan();
   drawPasses();
   drawTrail();
   drawRecording();
@@ -637,6 +638,90 @@ function drawHeadland() {
   ctx.restore();
 }
 
+/* Saatplan: der vorab geplante Schlag. Säspuren dünn, Fahrgassen rot mit ihrem
+ * Abstand, Vorgewende-Runden gestrichelt, Ränder mit Konflikt bernsteinfarben.
+ * Der Plan gehört zum Feld und wird nachgeladen, sobald ein anderes Feld kommt. */
+const saat = { feld: null, plan: null, zeigen: true, laedt: false };
+
+async function saatplanLaden(feldId) {
+  saat.laedt = true;
+  try {
+    const antwort = await (await fetch(`/api/fields/${feldId}/saatplan`)).json();
+    saat.feld = feldId;
+    saat.plan = antwort.data ? antwort.data.plan : null;
+    zeichnenAnfordern();
+    return antwort.data;
+  } catch (fehler) {
+    saat.feld = feldId; saat.plan = null;
+    return null;
+  } finally {
+    saat.laedt = false;
+  }
+}
+
+function weltText(text, x, y, farbe) {
+  const p = ctx.getTransform().transformPoint(new DOMPoint(x, y));
+  const k = window.devicePixelRatio || 1;
+  ctx.save();
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.font = `700 ${Math.round(13 * k)}px system-ui, sans-serif`;
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.lineWidth = 3 * k; ctx.strokeStyle = F.boden; ctx.strokeText(text, p.x, p.y);
+  ctx.fillStyle = farbe; ctx.fillText(text, p.x, p.y);
+  ctx.restore();
+}
+
+function drawSaatplan() {
+  const feld = state.live && state.live.field;
+  if (!feld) return;
+  if (saat.feld !== feld.id) { if (!saat.laedt) saatplanLaden(feld.id); return; }
+  const plan = saat.plan;
+  if (!plan || !saat.zeigen) return;
+  const px = 1 / state.view.scale;
+  ctx.save();
+  plan.ringe.forEach((runde) => {
+    polyline(runde.punkte, true);
+    ctx.setLineDash(runde.fahrgasse ? [10 * px, 5 * px] : [4 * px, 5 * px]);
+    ctx.strokeStyle = runde.fahrgasse ? F.fahrgasse : F.pass;
+    ctx.lineWidth = (runde.fahrgasse ? 2.6 : 1.2) * px;
+    ctx.stroke();
+  });
+  ctx.setLineDash([]);
+  plan.spuren.forEach((spur) => {
+    ctx.beginPath();
+    spur.stuecke.forEach(([a, b]) => { ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); });
+    ctx.strokeStyle = spur.fahrgasse ? F.fahrgasse : F.pass;
+    ctx.lineWidth = (spur.fahrgasse ? 3 : 1.2) * px;
+    ctx.stroke();
+  });
+  plan.konflikte.forEach((k) => {
+    if (!k.punkte) return;
+    polyline(k.punkte);
+    ctx.strokeStyle = F.konflikt; ctx.globalAlpha = 0.85;
+    ctx.lineWidth = 6 * px; ctx.stroke(); ctx.globalAlpha = 1;
+  });
+  // Abstand zwischen zwei Fahrgassen - auf halbem Weg, in der Mitte der Spur.
+  // Weit herausgezoomt lägen die Schriften übereinander: dann nur die Linien.
+  const gassen = plan.spuren.filter((s) => s.fahrgasse);
+  if (plan.fahrgasse_m * state.view.scale < 44) { ctx.restore(); return; }
+  gassen.forEach((gasse, i) => {
+    const naechste = gassen[i + 1];
+    const [a, b] = gasse.stuecke.reduce((l, s) =>
+      Math.hypot(s[1][0] - s[0][0], s[1][1] - s[0][1]) > Math.hypot(l[1][0] - l[0][0], l[1][1] - l[0][1]) ? s : l);
+    const mx = (a[0] + b[0]) / 2, my = (a[1] + b[1]) / 2;
+    weltText(`FG ${i + 1}`, mx, my, F.fahrgasse);
+    if (naechste) {
+      const d = naechste.versatz_m - gasse.versatz_m;
+      const ex = b[0] - a[0], ey = b[1] - a[1], l = Math.hypot(ex, ey) || 1;
+      // Normale zur Spur, in Richtung der nächsten Fahrgasse.
+      const nx = -ey / l, ny = ex / l;
+      const vz = (naechste.stuecke[0][0][0] - a[0]) * nx + (naechste.stuecke[0][0][1] - a[1]) * ny > 0 ? 1 : -1;
+      weltText(`${d.toLocaleString('de-DE')} m`, mx + nx * vz * d / 2 + ex / l * 25, my + ny * vz * d / 2 + ey / l * 25, F.fahrgasse);
+    }
+  });
+  ctx.restore();
+}
+
 /* Die geplante oder laufende Wende. Geplant gestrichelt, gefahren durchgezogen –
  * damit auf einen Blick klar ist, ob die Maschine der Route schon folgt. */
 function drawTurn() {
@@ -658,14 +743,17 @@ function drawTurn() {
 }
 
 /* Wie GuidanceLine.ist_fahrgasse: Fahrgassen liegen fest alle fahrgasse_m ab
- * Spur 0, Fahrgasse ist die Spur, in deren Streifen eine fällt. So liegen sie
- * bei jeder Arbeitsbreite an derselben Stelle. */
+ * der Bezugslinie (am Rand ab halber Fahrgassenweite, Spur 0 bei halber
+ * Arbeitsbreite), Fahrgasse ist die Spur, in deren Streifen eine fällt. So
+ * liegen sie bei jeder Arbeitsbreite an derselben Stelle. */
 function istFahrgasse(line, spur) {
   const weite = line.fahrgasse_m, breite = line.spacing_m;
   if (!(weite > 0) || !(breite > 0)) return false;
   if (weite <= breite) return true;
-  const gasse = Math.floor((spur * breite) / weite + 0.5) * weite;
-  return Math.floor(gasse / breite + 0.5) === spur;
+  const raster = line.raster_m || 0, erste = line.fahrgassen_versatz_m || 0;
+  const mitte = raster + spur * breite;
+  const gasse = erste + Math.floor((mitte - erste) / weite + 0.5) * weite;
+  return Math.floor((gasse - raster) / breite + 0.5) === spur;
 }
 
 function drawPasses() {
@@ -677,7 +765,7 @@ function drawPasses() {
   for (let offset = current - 6; offset <= current + 6; offset++) {
     // Ring -1 läge außerhalb der Feldgrenze – dort wird nicht gearbeitet.
     if (ring && offset < 0) continue;
-    const points = shiftLine(line, offset * line.spacing_m + line.nudge_m);
+    const points = shiftLine(line, offset * line.spacing_m + line.nudge_m + (line.raster_m || 0));
     if (!points.length) continue;
     polyline(points, ring);
     const active = offset === current;
@@ -1614,6 +1702,100 @@ el('btnSaveHeadland').onclick = async () => {
   }
 };
 
+/* Reiter Saatplan: Vorgabe wählen, planen, Ergebnis und Konflikte lesen. */
+async function renderSaatplan() {
+  const feld = state.live && state.live.field;
+  el('saatplanErgebnis').hidden = true;
+  if (!feld) { el('saatplanFeld').textContent = 'Kein Feld geladen – erst unter Felder ein Feld laden.'; return; }
+  el('saatplanFeld').textContent = `Schlag: ${feld.name}`;
+  const daten = await saatplanLaden(feld.id);
+  if (!daten) { el('saatplanFeld').textContent = `${feld.name}: keine Grenze – erst umfahren oder Shapefile einlesen.`; return; }
+  const wahl = el('saatplanStart');
+  wahl.innerHTML = '';
+  daten.optionen.forEach((o) => {
+    const option = document.createElement('option');
+    option.value = o.id; option.textContent = o.text;
+    wahl.appendChild(option);
+  });
+  const vorgabe = daten.vorgabe || {};
+  if (vorgabe.start) wahl.value = vorgabe.start;
+  const form = el('saatplanForm');
+  ['breite_m', 'fahrgasse_m', 'randspuren'].forEach((name) => {
+    if (vorgabe[name] != null) form.querySelector(`[name="${name}"]`).value = vorgabe[name];
+  });
+  zeigeSaatplan(daten.plan);
+}
+
+function zeigeSaatplan(plan) {
+  el('saatplanErgebnis').hidden = !plan;
+  if (!plan) return;
+  const zahl = (x) => Number(x).toLocaleString('de-DE');
+  el('saatplanZusammenfassung').textContent =
+    `${plan.startwahl}. Vorgewende ${plan.vorgewende_runden} Runden (${zahl(plan.vorgewende_m)} m), ` +
+    `Hauptfeld ${plan.anzahl_spuren} Säspuren, davon ${plan.anzahl_fahrgassen} Fahrgassen im Abstand von ` +
+    `${zahl(plan.fahrgasse_m)} m. Fahrstrecke rund ${zahl(plan.strecke_km)} km.`;
+  const host = el('saatplanKonflikte');
+  host.innerHTML = '';
+  if (!plan.konflikte.length) {
+    const ok = document.createElement('p');
+    ok.className = 'saat-ok';
+    ok.textContent = `Die Randvorgabe passt an jeder Feldgrenze: ${plan.randspuren} Säspuren, dann die Fahrgasse.`;
+    host.appendChild(ok);
+  }
+  plan.konflikte.forEach((k) => {
+    const box = document.createElement('div');
+    box.className = 'saat-konflikt';
+    const text = document.createElement('p');
+    text.textContent = k.text;
+    box.appendChild(text);
+    const liste = document.createElement('ul');
+    (k.anpassung || []).forEach((a) => {
+      const li = document.createElement('li'); li.textContent = a; liste.appendChild(li);
+    });
+    box.appendChild(liste);
+    host.appendChild(box);
+  });
+  (plan.hinweise || []).forEach((h) => {
+    const p = document.createElement('p'); p.className = 'note'; p.textContent = h; host.appendChild(p);
+  });
+}
+
+el('btnSaatplanPlanen').onclick = async () => {
+  const feld = state.live && state.live.field;
+  if (!feld) { toast('Erst ein Feld laden', true); return; }
+  const form = el('saatplanForm');
+  const zahl = (name) => parseFloat(String(form.querySelector(`[name="${name}"]`).value).replace(',', '.'));
+  const antwort = await api('POST', `/api/fields/${feld.id}/saatplan`, {
+    start: el('saatplanStart').value, breite_m: zahl('breite_m'),
+    fahrgasse_m: zahl('fahrgasse_m'), randspuren: Math.round(zahl('randspuren')),
+  });
+  if (!antwort) return;
+  saat.feld = feld.id; saat.plan = antwort.data; saat.zeigen = true;
+  el('saatplanZeigen').checked = true;
+  zeigeSaatplan(antwort.data);
+  zeichnenAnfordern();
+  toast(antwort.data.konflikte.length
+    ? `Geplant – ${antwort.data.konflikte.length} Konflikt${antwort.data.konflikte.length > 1 ? 'e' : ''}`
+    : 'Geplant – passt an allen Rändern');
+};
+
+el('saatplanZeigen').onchange = (event) => { saat.zeigen = event.target.checked; zeichnenAnfordern(); };
+
+el('btnSaatplanUebernehmen').onclick = async () => {
+  const feld = state.live && state.live.field;
+  if (!feld) return;
+  const antwort = await api('POST', `/api/fields/${feld.id}/saatplan/uebernehmen`);
+  if (antwort) toast(`Saisonspur „${antwort.data.name}“ aktiv`);
+};
+
+el('btnSaatplanLoeschen').onclick = async () => {
+  const feld = state.live && state.live.field;
+  if (!feld) return;
+  if (await api('DELETE', `/api/fields/${feld.id}/saatplan`)) {
+    saat.plan = null; zeigeSaatplan(null); zeichnenAnfordern(); toast('Plan verworfen');
+  }
+};
+
 el('autoSections').onchange = (event) =>
   api('POST', '/api/sections/auto', { enabled: event.target.checked });
 
@@ -1964,6 +2146,7 @@ async function refreshLists() {
     renderTraktoren();
   }
   if (active === 'headland') fillHeadland();
+  if (active === 'saatplan') renderSaatplan();
   if (active === 'system') { renderSystem(); renderRohdaten(); renderUpdate(); }
   if (active === 'setup') renderSetup(await (await fetch('/api/checklist')).json());
   if (active === 'settings' && !settings.geladen) loadSettings();

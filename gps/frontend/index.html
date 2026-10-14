@@ -144,6 +144,7 @@
       <button data-tab="jobs" class="tab" role="tab" aria-selected="false" tabindex="-1">Arbeiten</button>
       <button data-tab="machine" class="tab" role="tab" aria-selected="false" tabindex="-1">Traktor &amp; Gerät</button>
       <button data-tab="headland" class="tab" role="tab" aria-selected="false" tabindex="-1">Vorgewende</button>
+      <button data-tab="saatplan" class="tab" role="tab" aria-selected="false" tabindex="-1">Saatplan</button>
       <span class="tab-trenner" aria-hidden="true">Werkstatt</span>
       <button data-tab="settings" class="tab werkstatt" role="tab" aria-selected="false" tabindex="-1">Einstellungen</button>
       <button data-tab="system" class="tab werkstatt" role="tab" aria-selected="false" tabindex="-1">System</button>
@@ -232,6 +233,50 @@
         gehen mit nach MyTerra.</p>
     </details>
     <div class="list" id="jobList"></div>
+  </section>
+
+  <section class="tab-panel" data-panel="saatplan" hidden>
+    <p class="note" id="saatplanFeld">Kein Feld geladen.</p>
+    <div class="karten">
+      <section class="karte">
+        <h3>Vorgabe</h3>
+        <div class="formular" id="saatplanForm">
+          <label class="breit">Startecke und Fahrtrichtung
+            <select name="start" id="saatplanStart"></select>
+          </label>
+          <label>Sämaschine (m)<input type="number" step="0.1" min="1" max="60" name="breite_m"></label>
+          <label>Fahrgassenweite (m)<input type="number" step="0.5" min="6" max="60" name="fahrgasse_m"></label>
+          <label>Säspuren am Rand vor der Fahrgasse<input type="number" step="1" min="0" max="20" name="randspuren"></label>
+        </div>
+        <div class="row">
+          <button id="btnSaatplanPlanen" class="primary">Schlag planen</button>
+          <label class="switch"><input type="checkbox" id="saatplanZeigen" checked> Plan auf der Karte</label>
+        </div>
+      </section>
+      <section class="karte" id="saatplanErgebnis" hidden>
+        <h3>Plan</h3>
+        <p id="saatplanZusammenfassung"></p>
+        <div id="saatplanKonflikte"></div>
+        <div class="row">
+          <button id="btnSaatplanUebernehmen" class="primary">Als Saisonspur übernehmen</button>
+          <button id="btnSaatplanLoeschen">Plan verwerfen</button>
+        </div>
+      </section>
+    </div>
+    <details class="erklaerung">
+      <summary>Erklärung</summary>
+      <p>Der <b>Saatplan</b> rechnet vor der Aussaat den ganzen Schlag durch: rundum ein
+        Vorgewende so tief wie eine Fahrgassenweite, an jeder Grenze erst die Säspuren, dann die
+        Fahrgasse (bei 3 m und 21 m: 3 Säspuren, Fahrgasse auf 10,5 m, 3 Säspuren), danach das
+        Hauptfeld parallel zur Startkante mit einer Fahrgasse alle 21 m.</p>
+      <p>Auf der Karte: Säspuren dünn, <b>Fahrgassen rot</b> mit ihrem Abstand, Vorgewende
+        gestrichelt. Passt die Vorgabe an einem Rand nicht – weil die Schlagbreite kein Vielfaches
+        der Fahrgassenweite ist oder der Rand schräg läuft – ist er <b>bernsteinfarben</b>
+        markiert, und hier steht, was dort passiert und wie es sich anpassen lässt.</p>
+      <p><b>Als Saisonspur übernehmen</b> legt eine AB-Spur durch eine Fahrgasse an. Sie ist das
+        ganze Jahr beim Laden des Feldes aktiv; beim Säen zeigt das Band „Fahrgasse“, wann die
+        Fahrgassenschaltung dran ist, und Spritze und Streuer fahren dieselben Gassen.</p>
+    </details>
   </section>
 
   <section class="tab-panel" data-panel="headland" hidden>

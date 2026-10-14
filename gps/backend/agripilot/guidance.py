@@ -250,6 +250,10 @@ class GuidanceLine:
         # der später gedüngt und gespritzt wird. Gehört zu einer Saison.
         self.fahrgasse_m = 0.0
         self.saison = 0
+        # Randspur: auf welcher Seite (Vorzeichen von "lateral") das Feld liegt,
+        # +1 rechts der Spurrichtung, -1 links, 0 = keine Randspur. Setzt die
+        # Engine beim Laden aus der Feldgrenze (siehe rand_seite).
+        self.rand_innen = 0.0
         if mode == "ab":
             self.points = [tuple(points[0]), tuple(points[-1])]
         else:
@@ -387,7 +391,7 @@ class GuidanceLine:
         else:
             lateral, line_heading, along = self._curve_lateral(position)
 
-        lateral -= self.nudge_m
+        lateral -= self.nudge_m + self.raster_versatz()
 
         # Which pass are we on, and how far off its centre?
         pass_number = round(lateral / self.spacing)
@@ -458,7 +462,7 @@ class GuidanceLine:
             # Spur anzubieten, auf der nicht gearbeitet wird.
             if self.mode == "contour" and offset < 0:
                 continue
-            shift = offset * self.spacing + self.nudge_m
+            shift = offset * self.spacing + self.nudge_m + self.raster_versatz()
             punkte = self._shift(shift, length)
             if not punkte:
                 continue
@@ -530,7 +534,32 @@ class GuidanceLine:
             "saison": self.saison,
             # Jede wievielte Spur eine Fahrgasse ist - 0 heißt keine.
             "fahrgasse_jede": self.fahrgasse_jede(),
+            # Randspur mit Fahrgassen: Spur 0 liegt eine halbe Arbeitsbreite
+            # im Feld, die Fahrgassen eine halbe Fahrgassenweite (Vorzeichen
+            # wie nudge_m). Sonst beide 0.
+            "raster_m": self.raster_versatz(),
+            "fahrgassen_versatz_m": self.fahrgassen_versatz(),
         }
+
+    def am_rand(self) -> bool:
+        """Randspur mit Fahrgassen: dann beginnt das Raster an der Grenze.
+
+        Auf der Grenze selbst (Spur 0 wie bei der Kontur) läge die erste
+        Fahrgasse auf dem Rand und jedes Gerät hinge halb draußen. Am Rand
+        beginnt deshalb jedes Gerät mit seiner Kante auf der Grenze (Spurmitte
+        eine halbe Arbeitsbreite drinnen), und die erste Fahrgasse liegt eine
+        halbe Fahrgassenweite drinnen - dort, wo die Spritze mit 21 m mit der
+        Kante an der Grenze fährt. Drille mit 3 m: Fahrgasse in Spur 3 (10,5 m).
+        """
+        return self.rand_innen != 0 and self.fahrgasse_m > 0
+
+    def raster_versatz(self) -> float:
+        """Wie weit Spur 0 neben der Bezugslinie liegt (ohne nudge_m)."""
+        return self.rand_innen * self.spacing / 2.0 if self.am_rand() else 0.0
+
+    def fahrgassen_versatz(self) -> float:
+        """Wie weit die erste Fahrgasse neben der Bezugslinie liegt (ohne nudge_m)."""
+        return self.rand_innen * self.fahrgasse_m / 2.0 if self.am_rand() else 0.0
 
     def fahrgasse_jede(self) -> int:
         """Jede wievielte Spur eine Fahrgasse ist (0 = keine Fahrgassen)."""
@@ -541,18 +570,39 @@ class GuidanceLine:
     def ist_fahrgasse(self, pass_number: int) -> bool:
         """Liegt eine Fahrgasse in dieser Spur?
 
-        Die Fahrgassen liegen fest in Metern (alle fahrgasse_m ab Spur 0), nicht
-        "jede n-te Spur": so liegen sie beim Säen mit 4 m und beim Spritzen mit
-        21 m an derselben Stelle, auch wenn die Breiten nicht glatt aufgehen.
+        Die Fahrgassen liegen fest in Metern (alle fahrgasse_m ab der
+        Bezugslinie, am Rand ab einer halben Fahrgassenweite), nicht "jede n-te
+        Spur": so liegen sie beim Säen mit 4 m und beim Spritzen mit 21 m an
+        derselben Stelle, auch wenn die Breiten nicht glatt aufgehen.
         Fahrgasse ist die Spur, in deren Streifen die Fahrgasse fällt.
         """
         if self.fahrgasse_m <= 0 or self.spacing <= 0:
             return False
         if self.fahrgasse_m <= self.spacing:
             return True
-        mitte = pass_number * self.spacing
-        fahrgasse = math.floor(mitte / self.fahrgasse_m + 0.5) * self.fahrgasse_m
-        return math.floor(fahrgasse / self.spacing + 0.5) == pass_number
+        raster, erste = self.raster_versatz(), self.fahrgassen_versatz()
+        mitte = raster + pass_number * self.spacing
+        fahrgasse = erste + math.floor((mitte - erste) / self.fahrgasse_m + 0.5) * self.fahrgasse_m
+        return math.floor((fahrgasse - raster) / self.spacing + 0.5) == pass_number
+
+
+def rand_seite(line: GuidanceLine, grenze: Sequence[Point]) -> float:
+    """Auf welcher Seite der Spur das Feld liegt: +1 rechts, -1 links, 0 unklar.
+
+    Geprüft wird je eine Probe 1 m rechts und links der Mitte des längsten
+    Stücks: die, die in der Grenze liegt, ist innen. Rechts heißt wie bei
+    "lateral" rechts der Richtung vom ersten zum letzten Punkt.
+    """
+    if line.mode == "contour" or len(grenze) < 3 or len(line.points) < 2:
+        return 0.0
+    a, b = max(zip(line.points, line.points[1:]), key=lambda s: distance(s[0], s[1]))
+    mitte = ((a[0] + b[0]) / 2.0, (a[1] + b[1]) / 2.0)
+    rx, ry = _right_vector(heading_deg(a, b))
+    rechts = point_in_polygon((mitte[0] + rx, mitte[1] + ry), grenze)
+    links = point_in_polygon((mitte[0] - rx, mitte[1] - ry), grenze)
+    if rechts == links:
+        return 0.0
+    return 1.0 if rechts else -1.0
 
 
 def speed_gain_factor(speed_ms: float, profile: VehicleProfile) -> float:

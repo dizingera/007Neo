@@ -22,7 +22,7 @@ import time
 from dataclasses import asdict
 from typing import Any, Optional
 
-from . import geo, headland as headland_module, randspuren as randspuren_module, storage
+from . import geo, headland as headland_module, randspuren as randspuren_module, saatplan as saatplan_module, storage
 from .actuators import SteerContext
 from .config import Config
 from .coverage import CoverageMap, Section, build_sections
@@ -33,6 +33,7 @@ from .guidance import (
     ImplementHeading,
     TRAKTOR_FELDER,
     VehicleProfile,
+    rand_seite,
 )
 from .imu import terrain_offset
 from .nmea import Fix
@@ -69,6 +70,7 @@ RESUME_MAX_AGE_S = 3 * 3600.0
 FAHRGASSEN_WEITE_VORGABE = 21.0
 FAHRGASSEN_WEITE_MIN = 6.0
 FAHRGASSEN_WEITE_MAX = 60.0
+SAATPLAN_PRAEFIX = "Saatplan "
 
 
 class Engine:
@@ -624,6 +626,7 @@ class Engine:
             self.line.name = record["name"]
             self.line.fahrgasse_m = record["fahrgasse_m"]
             self.line.saison = record["saison"]
+            self.line.rand_innen = self._rand_innen(self.line)
         return record
 
     def create_field(self, name: str) -> dict:
@@ -654,10 +657,18 @@ class Engine:
         self.line.nudge_m = record.get("nudge_m", 0.0)
         self.line.fahrgasse_m = float(record.get("fahrgasse_m") or 0.0)
         self.line.saison = int(record.get("saison") or 0)
+        self.line.rand_innen = self._rand_innen(self.line)
         zusatz = f" · Fahrgassen alle {self.line.fahrgasse_m:g} m" if self.line.fahrgasse_m else ""
         self.note(f"Spur aktiv: {record['name']}{zusatz}")
         self._remember_session()
         return record
+
+    def _rand_innen(self, line: GuidanceLine) -> float:
+        """Randspur: auf welcher Seite das Feld liegt, damit eine Saisonspur ihr
+        Raster an der Grenze beginnt statt auf ihr (GuidanceLine.am_rand)."""
+        if not randspuren_module.ist_randspur(line.name) or self.field is None:
+            return 0.0
+        return rand_seite(line, [tuple(p) for p in (self.field.get("boundary") or [])])
 
     def clear_line(self) -> None:
         self.line = None
@@ -721,6 +732,91 @@ class Engine:
             if self.line is not None and self.line.id == veraltet["id"]:
                 self.clear_line()
         return {"feld": feld["name"], "angelegt": neu}
+
+    # -- Saatplan ---------------------------------------------------------
+
+    def _feld_mit_grenze(self, field_id: str) -> tuple[dict, list]:
+        feld = self.store.get_field(field_id)
+        if feld is None:
+            raise KeyError("Feld nicht gefunden")
+        grenze = [tuple(p) for p in (feld.get("boundary") or [])]
+        if len(grenze) < 3:
+            raise ValueError(f"{feld['name']} hat keine Grenze - erst umfahren oder Shapefile einlesen")
+        return feld, grenze
+
+    def saatplan(self, field_id: str) -> dict:
+        """Startecken des Feldes, Vorgaben und der zuletzt gerechnete Plan."""
+        feld, grenze = self._feld_mit_grenze(field_id)
+        breite = self.profile.spacing_m
+        weite = self.fahrgassen_weite()
+        verhaeltnis = weite / breite if breite > 0 else 0.0
+        rand = int(round((verhaeltnis - 1) / 2)) if abs(verhaeltnis - round(verhaeltnis)) < 0.01 \
+            and round(verhaeltnis) % 2 == 1 else 3
+        gespeichert = self.store.get_setting(f"saatplan:{field_id}") or {}
+        return {
+            "feld": feld["name"],
+            "optionen": [{k: o[k] for k in ("id", "text", "kante")}
+                         for o in saatplan_module.startkanten(grenze)],
+            "vorgabe": gespeichert.get("vorgabe") or {"breite_m": breite, "fahrgasse_m": weite,
+                                                       "randspuren": rand},
+            "plan": gespeichert.get("plan"),
+        }
+
+    def saatplan_planen(self, field_id: str, vorgabe: dict) -> dict:
+        """Den Schlag durchplanen und den Plan beim Feld speichern."""
+        feld, grenze = self._feld_mit_grenze(field_id)
+        optionen = {o["id"]: o for o in saatplan_module.startkanten(grenze)}
+        start = optionen.get(str(vorgabe.get("start") or ""))
+        if start is None:
+            raise ValueError("Bitte Startecke und Richtung wählen")
+        try:
+            breite = float(vorgabe.get("breite_m"))
+            weite = float(vorgabe.get("fahrgasse_m"))
+            rand = int(vorgabe.get("randspuren"))
+        except (TypeError, ValueError):
+            raise ValueError("Breite, Fahrgassenweite und Randspuren als Zahlen angeben") from None
+        if not 0 <= rand <= 20:
+            raise ValueError("Randspuren zwischen 0 und 20")
+        plan = saatplan_module.planen(grenze, tuple(start["von"]), tuple(start["nach"]),
+                                      breite, weite, rand)
+        plan["startwahl"] = start["text"]
+        plan["kante"] = start["kante"]
+        self.store.set_setting(f"saatplan:{field_id}", {
+            "vorgabe": {"start": start["id"], "breite_m": breite, "fahrgasse_m": weite, "randspuren": rand},
+            "plan": plan})
+        self.note(f"Saatplan {feld['name']}: {plan['anzahl_spuren']} Spuren, "
+                  f"{plan['anzahl_fahrgassen']} Fahrgassen, {len(plan['konflikte'])} Konflikte")
+        return plan
+
+    def saatplan_uebernehmen(self, field_id: str) -> dict:
+        """Den Plan als Saisonspur speichern: eine AB-Spur durch eine Fahrgasse,
+        Fahrgassen alle fahrgasse_m. Ein früherer Saatplan des Feldes wird ersetzt."""
+        feld, _ = self._feld_mit_grenze(field_id)
+        gespeichert = self.store.get_setting(f"saatplan:{field_id}") or {}
+        plan = gespeichert.get("plan")
+        if not plan:
+            raise ValueError("Erst planen, dann übernehmen")
+        for alt in self.store.list_lines(field_id):
+            if alt["name"].startswith(SAATPLAN_PRAEFIX):
+                self.store.delete_line(alt["id"])
+        kante = plan.get("kante", "").replace(randspuren_module.NAMENS_PRAEFIX, "", 1)
+        record = self.store.save_line({
+            "field_id": field_id,
+            "name": f"{SAATPLAN_PRAEFIX}{kante} · {plan['fahrgasse_m']:g} m",
+            "mode": "ab",
+            "points": plan["saisonspur"],
+            "spacing_m": plan["breite_m"],
+            "saison": time.localtime().tm_year,
+            "fahrgasse_m": plan["fahrgasse_m"],
+        })
+        if self.field is None or self.field["id"] != field_id:
+            self.load_field(field_id)
+        self.load_line(record["id"])
+        self.note(f"Saatplan als Saisonspur übernommen: {feld['name']}")
+        return record
+
+    def saatplan_loeschen(self, field_id: str) -> None:
+        self.store.set_setting(f"saatplan:{field_id}", {})
 
     def use_contour(self) -> dict:
         """Die Feldgrenze selbst als Spurmuster nehmen.
@@ -875,7 +971,7 @@ class Engine:
             if math.dist(a, mitte) <= self.SIM_SPUR_MAX_ABSTAND_M:
                 kurs = geo.heading_deg(a, b)
                 rx, ry = math.cos(math.radians(kurs)), -math.sin(math.radians(kurs))
-                versatz = self.line.nudge_m
+                versatz = self.line.nudge_m + self.line.raster_versatz()
                 return a[0] + rx * versatz, a[1] + ry * versatz, kurs
         return mitte[0], mitte[1], 0.0
 

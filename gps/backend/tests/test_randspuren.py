@@ -151,5 +151,92 @@ class EngineTests(unittest.TestCase):
         self.assertLess(abs(zustand.cross_track_m), 3.5)
 
 
+class RandRasterTests(unittest.TestCase):
+    """Saisonspur am Rand: Geräte mit der Kante an der Grenze, Fahrgassen bei
+    halber Fahrgassenweite - Drille und Spritze treffen dieselben Gassen."""
+
+    @staticmethod
+    def linie(breite, innen=1.0, fahrgasse=21.0):
+        from agripilot.guidance import GuidanceLine
+        l = GuidanceLine("ab", [(0, 0), (0, 100)], breite, "Rand West 100 m")
+        l.rand_innen, l.fahrgasse_m = innen, fahrgasse
+        return l
+
+    def gassen_m(self, breite, innen=1.0):
+        """Wo (Meter ins Feld) die Spuren mit Fahrgasse liegen."""
+        l = self.linie(breite, innen)
+        return sorted(round(innen * (l.raster_versatz() + p * breite), 2)
+                for p in range(-40, 41) if l.ist_fahrgasse(p)
+                and innen * (l.raster_versatz() + p * breite) > 0)
+
+    def test_drill_and_sprayer_hit_the_same_tramlines(self):
+        self.assertEqual(self.gassen_m(3.0)[:3], [10.5, 31.5, 52.5])
+        self.assertEqual(self.gassen_m(21.0)[:3], [10.5, 31.5, 52.5])
+        # 4 m geht nicht auf: die Spur, in deren Streifen die Gasse fällt.
+        for soll, ist in zip([10.5, 31.5, 52.5], self.gassen_m(4.0)):
+            self.assertLessEqual(abs(soll - ist), 2.0)
+
+    def test_the_field_on_the_left_mirrors_the_grid(self):
+        self.assertEqual(self.gassen_m(3.0, innen=-1.0)[:3], [10.5, 31.5, 52.5])
+        self.assertEqual(self.gassen_m(21.0, innen=-1.0)[:2], [10.5, 31.5])
+
+    def test_the_first_pass_has_the_tool_edge_on_the_boundary(self):
+        from agripilot.guidance import VehicleProfile
+        l = self.linie(3.0)
+        zustand = l.solve((1.5, 50.0), 0.0, 2.0, VehicleProfile())
+        self.assertEqual(zustand.pass_number, 0)
+        self.assertAlmostEqual(zustand.cross_track_m, 0.0)
+        self.assertTrue(l.solve((10.5, 50.0), 0.0, 2.0, VehicleProfile()).pass_number == 3)
+        self.assertTrue(l.ist_fahrgasse(3))
+        geo = {g["pass"]: g["points"][0][0] for g in l.pass_geometry(0, 1)}
+        self.assertAlmostEqual(geo[0], 1.5)
+        self.assertAlmostEqual(geo[1], 4.5)
+
+    def test_without_tramlines_or_off_the_edge_nothing_moves(self):
+        ohne = self.linie(3.0, fahrgasse=0.0)
+        self.assertEqual(ohne.raster_versatz(), 0.0)
+        eigene = self.linie(3.0, innen=0.0)
+        self.assertEqual((eigene.raster_versatz(), eigene.fahrgassen_versatz()), (0.0, 0.0))
+        self.assertTrue(eigene.ist_fahrgasse(0))     # eigene Spur: Gasse auf Spur 0 wie bisher
+
+
+class RandSeiteTests(unittest.TestCase):
+    def setUp(self):
+        ordner = tempfile.TemporaryDirectory()
+        self.addCleanup(ordner.cleanup)
+        self.store = Storage(os.path.join(ordner.name, "s.db"))
+        self.addCleanup(self.store.close)
+        self.motor = Engine(config_module.load("/kein-solcher-pfad.yaml"), self.store)
+        self.feld = self.store.save_field({"name": "F", "datum_lat": 48.0, "datum_lon": 9.6,
+                                           "boundary": RECHTECK})
+        self.motor.randspuren_anlegen(self.feld["id"])
+        self.motor.load_field(self.feld["id"])
+
+    def spur(self, anfang):
+        return next(l for l in self.store.list_lines(self.feld["id"]) if l["name"].startswith(anfang))
+
+    def test_every_edge_knows_where_the_field_is_and_the_tramline_lies_inside(self):
+        for name, punkt in (("Rand Süd", (50.0, 10.5)), ("Rand Nord", (50.0, 49.5)),
+                            ("Rand West", (10.5, 30.0)), ("Rand Ost", (89.5, 30.0))):
+            with self.subTest(name):
+                spur = self.spur(name)
+                self.motor.update_line(spur["id"], {"saisonspur": True})
+                self.motor.load_line(spur["id"])
+                linie = self.motor.line
+                self.assertNotEqual(linie.rand_innen, 0.0)
+                linie.spacing = 3.0
+                zustand = linie.solve(punkt, 0.0, 2.0, self.motor.profile)
+                self.assertAlmostEqual(abs(zustand.cross_track_m), 0.0, places=6)
+                self.assertTrue(linie.ist_fahrgasse(zustand.pass_number))
+                self.assertNotEqual(self.motor.state()["line"]["raster_m"], 0.0)
+
+    def test_switching_the_season_on_moves_the_grid_off_the_boundary(self):
+        spur = self.spur("Rand Süd")
+        self.motor.load_line(spur["id"])
+        self.assertEqual(self.motor.line.raster_versatz(), 0.0)
+        self.motor.update_line(spur["id"], {"saisonspur": True})
+        self.assertAlmostEqual(abs(self.motor.line.raster_versatz()), self.motor.line.spacing / 2)
+
+
 if __name__ == "__main__":
     unittest.main()

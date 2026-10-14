@@ -660,6 +660,24 @@ def create_app(config=None) -> FastAPI:
         return ok({"felder": ergebnisse,
                    "spuren": sum(len(e["angelegt"]) for e in ergebnisse)})
 
+    # -- Saatplan: Säspuren und Fahrgassen vor der Aussaat ------------------
+
+    @api.get("/api/fields/{field_id}/saatplan")
+    async def saatplan_lesen(field_id: str):
+        return guard(engine.saatplan, field_id)
+
+    @api.post("/api/fields/{field_id}/saatplan")
+    async def saatplan_planen(field_id: str, payload: dict = Body(...)):
+        return guard(engine.saatplan_planen, field_id, payload)
+
+    @api.post("/api/fields/{field_id}/saatplan/uebernehmen")
+    async def saatplan_uebernehmen(field_id: str):
+        return guard(engine.saatplan_uebernehmen, field_id)
+
+    @api.delete("/api/fields/{field_id}/saatplan")
+    async def saatplan_loeschen(field_id: str):
+        return guard(engine.saatplan_loeschen, field_id)
+
     @api.delete("/api/fields/{field_id}")
     async def delete_field(field_id: str):
         store.delete_field(field_id)
