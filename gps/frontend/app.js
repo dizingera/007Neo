@@ -1024,10 +1024,10 @@ el('btnTurn').onclick = async () => {
   } else if (!plan.data.fahrbar) {
     toast(`Wende zu eng: engster Bogen ${plan.data.engster_radius_m} m, die Lenkung schafft ${plan.data.kleinster_radius_m} m – Wendekreis größer stellen`, true);
   } else if (!plan.data.im_feld) {
-    toast('Route liegt nicht vollständig im Feld', true);
+    toast(plan.data.vorschlag || 'Route liegt nicht vollständig im Feld', true);
   } else {
-    toast(`${plan.data.muster === 'u' ? 'U' : 'Ω'}-Wende geplant, ` +
-          `${plan.data.laenge_m.toFixed(0)} m – noch einmal drücken zum Starten`);
+    const wo = plan.data.anlauf_m > 1 ? `wendet in ${plan.data.anlauf_m.toFixed(0)} m am Vorgewende` : 'wendet hier';
+    toast(`${plan.data.muster === 'u' ? 'U' : 'Ω'}-Wende geplant, ${wo} – noch einmal drücken zum Starten`);
   }
 };
 

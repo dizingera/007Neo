@@ -222,7 +222,26 @@ class SimulatorSource(GnssSource):
         self.speed_ms = 2.5
         self.steer_deg = 0.0
         self.wheelbase = 2.6
+        # east/north ist die Mitte der Hinterachse - dort gilt das Einspurmodell.
+        # Gemeldet wird aber die Antenne, die beim echten Traktor auf dem
+        # Kabinendach vor der Achse sitzt und in der Kurve seitlich mitläuft.
+        # Meldete der Simulator die Achse als Antenne, rechnete die Engine eine
+        # Achse 1,85 m dahinter, die in jedem Bogen ausschwenkt: Wenden brachen
+        # nach Sekunden ab, und geradeaus pendelte die Lenkung.
+        self.antenne_vor_m = 0.0
+        self.antenne_rechts_m = 0.0
         self.auto_steer = False
+
+    def fahrzeug_setzen(self, profil) -> None:
+        """Radstand und Antennenlage vom aktiven Traktor übernehmen."""
+        self.wheelbase = max(1.0, float(profil.wheelbase_m))
+        self.antenne_vor_m = float(profil.antenna_forward_m)
+        self.antenne_rechts_m = float(profil.antenna_right_m)
+
+    def antenne(self) -> tuple[float, float]:
+        h = math.radians(self.heading)
+        return (self.east + math.sin(h) * self.antenne_vor_m + math.cos(h) * self.antenne_rechts_m,
+                self.north + math.cos(h) * self.antenne_vor_m - math.sin(h) * self.antenne_rechts_m)
 
     def set_steer(self, degrees: float) -> None:
         self.steer_deg = max(-40.0, min(40.0, degrees))
@@ -251,9 +270,10 @@ class SimulatorSource(GnssSource):
         dt = 1.0 / self.rate_hz
         while self.running:
             self._step(dt)
+            ost, nord = self.antenne()
             lat, lon = self.plane.to_wgs(
-                self.east + random.gauss(0, self.noise_m),
-                self.north + random.gauss(0, self.noise_m),
+                ost + random.gauss(0, self.noise_m),
+                nord + random.gauss(0, self.noise_m),
             )
             sentence = build_gga(lat, lon, 520.0, self.fix_quality, 22, 0.6)
             await self.handle_line(sentence)

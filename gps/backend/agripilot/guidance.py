@@ -634,6 +634,8 @@ class HeadingFilter:
     fusion_gain: float = 0.12          # Zug zum Bewegungskurs je Position
     bias_gain: float = 0.002           # Lerngeschwindigkeit des Gyro-Fehlers
     max_bias_deg_s: float = 3.0
+    gerade_deg_s: float = 1.0          # darunter gilt die Fahrt als gerade: nur dann wird gelernt
+    lern_deckel_deg: float = 0.5       # so viel Kursfehler zählt je Messung höchstens fürs Lernen
     fusion_aktiv: bool = True
     warnung: str = ""
     bias_deg_s: float = 0.0
@@ -701,17 +703,35 @@ class HeadingFilter:
 
         if (yaw_rate_deg_s is not None and self.fusion_aktiv
                 and speed_ms >= self.fusion_min_speed_ms and 0.0 < dt < 1.0):
+            # Ob die Fahrt gerade ist, sagt der Bewegungskurs - nicht der Gyro,
+            # dessen Fehler ja gerade gesucht wird.
+            # Dreht der Gyro deutlich mehr, als ein Gyro-Fehler je ausmachen
+            # kann, ist es eine Kurve - auch wenn der Kurs gerade hinterherhinkt.
+            gerade = (self._letzter_kurs is not None
+                      and abs(angle_difference(course, self._letzter_kurs)) / dt < self.gerade_deg_s
+                      and abs(yaw_rate_deg_s) < self.max_bias_deg_s + self.gerade_deg_s)
             self._pruefe_vorzeichen(course, yaw_rate_deg_s, dt)
             self._letzter_kurs = course
             if self.fusion_aktiv:
                 vorhergesagt = normalize_heading(
                     self.value + (yaw_rate_deg_s - self.bias_deg_s) * dt)
                 fehler = angle_difference(course, vorhergesagt)
-                if abs(yaw_rate_deg_s - self.bias_deg_s) < 3.0:
+                if gerade:
                     # Nur auf der Geraden lernen: in der Kurve ist der Fehler
                     # Nachlauf des Bewegungskurses, kein Gyro-Fehler.
+                    #
+                    # "Gerade" heißt: der Bewegungskurs ändert sich kaum.
+                    # Vorher wurde gegen die schon um den gelernten Fehler
+                    # bereinigte Gyro-Rate geprüft - stand der Fehler einmal am
+                    # Anschlag (3 °/s), galt die echte Gerade nie mehr als
+                    # Gerade, er wurde nie wieder verlernt, und im Stand drehte
+                    # sich der Kurs mit 3 °/s weiter, bis vorn und hinten
+                    # vertauscht waren. Ein einzelner Ausreißer (Sprung,
+                    # Wechsel der Lenkung zwischen zwei Messungen) zählt
+                    # außerdem nur gedeckelt.
+                    lern = max(-self.lern_deckel_deg, min(self.lern_deckel_deg, fehler))
                     self.bias_deg_s = max(-self.max_bias_deg_s, min(
-                        self.max_bias_deg_s, self.bias_deg_s - self.bias_gain * fehler / dt))
+                        self.max_bias_deg_s, self.bias_deg_s - self.bias_gain * lern / dt))
                 self.value = normalize_heading(vorhergesagt + self.fusion_gain * fehler)
                 return self.value
 

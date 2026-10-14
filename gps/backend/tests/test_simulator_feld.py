@@ -177,3 +177,58 @@ class SimulatorLenkungTests(unittest.TestCase):
         asyncio.run(lenkung.start())
         self.assertIn("deaktiviert", lenkung.arm())
         self.assertFalse(lenkung.armed)
+
+
+class GyroFehlerTests(unittest.TestCase):
+    """Im Simulator stand der gelernte Gyro-Fehler am Anschlag (-3 °/s), obwohl
+    der simulierte Gyro fehlerfrei ist. Im Stand drehte sich der Traktor dann
+    weiter, bis vorn und hinten vertauscht waren - und mit ihnen rechts und
+    links beim 10-cm-Versatz."""
+
+    @staticmethod
+    def _fahren(kurs, wahr, schritte, rate, tempo=2.5, dt=0.1):
+        for _ in range(schritte):
+            wahr = (wahr + rate * dt) % 360.0
+            kurs.update(wahr, None, tempo, rate, dt)
+        return wahr
+
+    def test_exact_data_never_teaches_a_gyro_error(self):
+        from agripilot.guidance import HeadingFilter
+        kurs = HeadingFilter()
+        wahr = 0.0
+        for runde in range(40):          # sanfte Schlangenlinien, immer wieder Gerade
+            wahr = self._fahren(kurs, wahr, 30, 2.0 if runde % 2 else -2.0)
+            wahr = self._fahren(kurs, wahr, 30, 0.0)
+            wahr = self._fahren(kurs, wahr, 20, 25.0)   # enge Wende
+        self.assertLess(abs(kurs.bias_deg_s), 0.3)
+
+    def test_a_wrong_gyro_error_is_unlearned_on_the_straight(self):
+        from agripilot.guidance import HeadingFilter
+        kurs = HeadingFilter()
+        self._fahren(kurs, 0.0, 5, 0.0)
+        kurs.bias_deg_s = -3.0           # so stand es im Simulator
+        self._fahren(kurs, 0.0, 600, 0.0)
+        self.assertLess(abs(kurs.bias_deg_s), 0.3)
+
+    def test_standing_still_keeps_the_heading(self):
+        from agripilot.guidance import HeadingFilter
+        kurs = HeadingFilter()
+        self._fahren(kurs, 90.0, 50, 0.0)
+        for _ in range(600):              # eine Minute Stand, Gyro meldet nichts
+            kurs.update(None, None, 0.0, 0.0, 0.1)
+        self.assertAlmostEqual(kurs.value, 90.0, delta=2.0)
+
+
+class SimulatorAntenneTests(unittest.TestCase):
+    def test_the_simulator_reports_the_antenna_ahead_of_the_axle(self):
+        """Der Simulator bewegt die Hinterachse und meldet die Antenne davor -
+        wie am echten Traktor. Vorher meldete er die Achse als Antenne, und die
+        Engine rechnete eine Achse dahinter, die in jedem Bogen ausschwenkte."""
+        from agripilot.guidance import VehicleProfile
+        sim = SimulatorSource(lambda fix: None)
+        sim.fahrzeug_setzen(VehicleProfile(antenna_forward_m=1.85, antenna_right_m=0.2, wheelbase_m=2.8))
+        sim.teleport(10.0, 20.0, 90.0)          # nach Osten
+        ost, nord = sim.antenne()
+        self.assertAlmostEqual(ost, 11.85, places=6)
+        self.assertAlmostEqual(nord, 19.8, places=6)
+        self.assertEqual(sim.wheelbase, 2.8)

@@ -1063,11 +1063,23 @@ class Engine:
         # Ab dem Gerät geplant, läge die Route sieben Meter hinter der
         # Maschine, und der Folger bräche beim ersten Bogen ab.
         start = self._lenkpunkt()
-        pfad = headland_module.plan(
-            start, self.heading, einstellung,
-            self.profile.spacing_m, einstellung.tiefe_m(self.profile.width_m),
-        )
+        # Gewendet wird am Vorgewende, nicht dort, wo der Knopf gedrückt wurde.
+        # Vorher begann der Bogen sofort - wer 20 m vorher drückte, wendete
+        # mitten im Bestand. Jetzt fährt die Route bis zum Vorgewende gerade
+        # auf der Spur weiter und wendet erst dort.
+        anlauf, kurs = self._wende_anlauf()
+        wendepunkt = (start[0] + math.sin(math.radians(kurs)) * anlauf,
+                      start[1] + math.cos(math.radians(kurs)) * anlauf)
+        gerade = [(start[0] + math.sin(math.radians(kurs)) * s,
+                   start[1] + math.cos(math.radians(kurs)) * s)
+                  for s in [i * 1.0 for i in range(int(anlauf))]]
+        tiefe = einstellung.tiefe_m(self.profile.width_m)
+        bogen = headland_module.plan(wendepunkt, kurs, einstellung, self.profile.spacing_m, tiefe)
+        pfad = gerade + bogen
         im_feld = headland_module.route_im_feld(pfad, grenze)
+        vorschlag = ""
+        if not im_feld and anlauf > 0.0 and len(grenze) >= 3:
+            vorschlag = self._wende_vorschlag(bogen, wendepunkt, kurs, tiefe, einstellung)
         # Kann die Maschine den engsten Bogen überhaupt fahren? Radstand und
         # größter Einschlag geben den kleinsten Kreis; ein enger geplanter Bogen
         # wird nicht "ungefähr" gefahren, sondern verlassen.
@@ -1091,7 +1103,55 @@ class Engine:
             "laenge_m": sum(geo.distance(pfad[i], pfad[i + 1])
                             for i in range(len(pfad) - 1)),
             "grenze_vorhanden": len(grenze) >= 3,
+            "anlauf_m": round(anlauf, 1),
+            "vorschlag": vorschlag,
         }
+
+    def _wende_vorschlag(self, bogen, wendepunkt, kurs, tiefe, einstellung) -> str:
+        """Warum die Wende nicht ins Vorgewende passt - in Metern, mit dem Ausweg.
+
+        Gewendet wird, wenn das Gerät die Vorgewendelinie erreicht; die Achse
+        steht dann schon um den Abstand Achse-Gerät im Vorgewende, und von dort
+        holt der Bogen noch nach vorn aus.
+        """
+        h = math.radians(kurs)
+        voraus = max((p[0] - wendepunkt[0]) * math.sin(h) + (p[1] - wendepunkt[1]) * math.cos(h)
+                      for p in bogen)
+        achse_vor_geraet = 0.0
+        if self.tool_position is not None and self._lenkpunkt() is not None:
+            lp, tp = self._lenkpunkt(), self.tool_position
+            achse_vor_geraet = max(0.0, (lp[0] - tp[0]) * math.sin(h) + (lp[1] - tp[1]) * math.cos(h))
+        noetig = achse_vor_geraet + voraus + 0.5
+        breite = einstellung.breite_m if einstellung.breite_m > 0 else max(0.5, self.profile.width_m)
+        spuren = int(math.ceil(noetig / breite))
+        form = "Ω-Wende" if einstellung.muster == "omega" else "U-Wende"
+        def m(wert: float) -> str:
+            return f"{wert:.1f}".replace(".", ",")
+        return (f"Die {form} braucht {m(noetig)} m Vorgewende, eingestellt sind {m(tiefe)} m. "
+                f"Vorgewende auf {spuren} Spuren stellen (Menü → Vorgewende) oder "
+                f"einen größeren Spursprung mit U-Wende wählen.")
+
+    WENDE_VORLAUF_MAX_M = 80.0
+
+    def _wende_anlauf(self) -> tuple[float, float]:
+        """Wie weit bis zum Vorgewende geradeaus, und in welche Richtung.
+
+        Ohne Spur oder schon im Vorgewende: kein Anlauf, gewendet wird hier,
+        in der Richtung, in die die Maschine zeigt. Auf der Spur geht der
+        Anlauf in Spurrichtung - nicht in die augenblickliche Fahrtrichtung,
+        die um ein paar Grad pendelt und auf 30 m einen Meter ausmacht.
+        """
+        rest = self.headland_status.rest_m
+        # Auf der Kontur fährt man die Grenze selbst ab - dort liegt kein
+        # Vorgewende voraus, gewendet wird wie bisher an Ort und Stelle.
+        auf_spur = (self.line is not None and self.guidance.active
+                    and self.guidance.mode in ("ab", "curve"))
+        if rest is None or rest <= 0.5 or not auf_spur:
+            return 0.0, self.heading
+        if rest > self.WENDE_VORLAUF_MAX_M:
+            raise RuntimeError(f"Noch {rest:.0f} m bis zum Vorgewende - die Wende auf den "
+                               f"letzten {self.WENDE_VORLAUF_MAX_M:.0f} m planen")
+        return rest, self.guidance.target_heading_deg
 
     def start_turn(self) -> dict:
         """Die geplante Route übernehmen und ihr folgen."""
@@ -1136,7 +1196,7 @@ class Engine:
         # der Knopf sagt weiter „Ω los" und ein Druck schickte die Maschine auf
         # eine Route, die an einer anderen Stelle des Feldes beginnt.
         self.turn_preview, self.turn_preview_ok = [], False
-        self.note(f"Wende beendet: {grund}")
+        self.note(grund if grund.startswith("Wende") else f"Wende beendet: {grund}")
 
     # -- jobs -------------------------------------------------------------
 
@@ -1192,6 +1252,8 @@ class Engine:
             return
         now = fix.received_at or time.time()
         self.fix = fix
+        if self.simulator is not None and hasattr(self.simulator, "fahrzeug_setzen"):
+            self.simulator.fahrzeug_setzen(self.profile)
 
         if self.plane is None:
             # No field chosen yet: anchor a working plane at the first fix so

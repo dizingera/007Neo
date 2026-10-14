@@ -3161,10 +3161,12 @@ class GeraetHinterAchseTest(unittest.TestCase):
         motor = self._motor()
         motor.update_headland({"aktiv": True, "muster": "omega", "richtung": "links",
                                "radius_m": 6.0, "ueberspringen": 0, "spuren": 2})
-        # Anfahren, damit Position und Achse gesetzt sind, dann planen.
-        self._fahren(motor, (100.0, 100.0), 0.0, sekunden=4)
+        # Anfahren, damit Position und Achse gesetzt sind, dann planen - kurz
+        # vor dem Vorgewende: gewendet wird dort, nicht mitten im Feld.
+        self._fahren(motor, (100.0, 320.0), 0.0, sekunden=4)
         plan = motor.plan_turn()
         self.assertTrue(plan["im_feld"])
+        self.assertGreater(plan["anlauf_m"], 1.0)
         motor.start_turn()
         ost, nord, heading = motor.position[0], motor.position[1], motor.heading
         uhr, tempo, dt = 2_000_000.0, 2.0, 0.1
