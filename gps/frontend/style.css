@@ -145,8 +145,37 @@ body.tag .vignette { background: radial-gradient(120% 90% at 50% 70%, transparen
 .leiste .gruppe { display: contents; }
 .leiste .unten-rechts { grid-column: 1 / -1; display: grid; gap: calc(.6 * var(--u)); margin-top: auto; align-self: end; }
 /* Markieren und Lenkung sitzen unten, auch wenn oben Platz frei bleibt. */
-.leiste { grid-template-rows: repeat(3, auto) 1fr; }
-.leiste .unten-rechts { grid-row: 4; }
+.leiste { grid-template-rows: repeat(4, auto) 1fr; }
+.leiste .unten-rechts { grid-row: 5; }
+
+/* Fahrgasse: nicht zu übersehen, aber kein Alarm - Bernstein, ruhig. */
+.fahrgasse-hinweis { grid-column: 1 / -1; grid-row: 4; display: flex; flex-direction: column; align-items: center; gap: 2px;
+  padding: 8px 6px; border-radius: calc(1 * var(--u)); background: var(--amber); color: var(--bg); text-align: center; }
+.fahrgasse-hinweis[hidden] { display: none; }
+.fahrgasse-hinweis b { font-family: "Rajdhani", "Bahnschrift", sans-serif; font-weight: 700; font-size: max(18px, calc(1.8 * var(--u)));
+  letter-spacing: .08em; text-transform: uppercase; line-height: 1; }
+.fahrgasse-hinweis small { font-size: max(12px, calc(1 * var(--u))); font-weight: 600; line-height: 1.15; }
+
+/* Wende-Fenster: links neben der Leiste, groß genug für Handschuhe. */
+.wendefenster { position: absolute; right: calc(100% + 10px); top: 0; z-index: 6; width: max(300px, calc(26 * var(--u)));
+  display: flex; flex-direction: column; gap: 12px; padding: 14px; box-sizing: border-box;
+  background: var(--bg); color: var(--text); border: 2px solid var(--blau); border-radius: calc(1.6 * var(--u));
+  box-shadow: 0 12px 34px rgba(0,0,0,.45); }
+.wendefenster[hidden] { display: none; }
+.wf-kopf { font-family: "Rajdhani", "Bahnschrift", sans-serif; font-weight: 700; font-size: 22px; letter-spacing: .06em; text-transform: uppercase; color: var(--blau); }
+.wf-gruppe { display: flex; flex-direction: column; gap: 6px; }
+.wf-gruppe > span { font-size: 13px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+.wf-wahl { display: flex; gap: 6px; }
+.wf-wahl button { flex: 1; min-height: var(--touch); border-radius: 10px; border: 2px solid var(--haar); background: var(--glas);
+  color: var(--text); font-size: 17px; font-weight: 700; cursor: pointer; }
+.wf-wahl button.an { background: var(--blau); border-color: var(--blau); color: var(--bg); }
+.wf-ergebnis { margin: 0; min-height: 2.6em; font-size: 15px; font-weight: 600; line-height: 1.3; }
+.wf-ergebnis.gut { color: var(--leucht); } .wf-ergebnis.schlecht { color: var(--amber); }
+.wf-knoepfe { display: flex; gap: 8px; }
+.wf-knoepfe button { flex: 1; min-height: var(--touch); border-radius: 10px; font-size: 16px; font-weight: 700; cursor: pointer;
+  border: 2px solid var(--haar); background: var(--glas); color: var(--text); }
+.wf-knoepfe button.primary { background: var(--blau); border-color: var(--blau); color: var(--bg); }
+.wf-knoepfe button:disabled { opacity: .4; cursor: default; }
 
 /* Spur-Werkzeuge: klappen links neben der Leiste auf, zwei mal zwei. */
 .werkzeuge { position: absolute; right: calc(100% + 10px); top: 0; z-index: 5;
@@ -282,6 +311,10 @@ body.tag .vignette { background: radial-gradient(120% 90% at 50% 70%, transparen
   .leiste { top: auto; left: var(--rand); width: auto; height: var(--leiste-hoehe);
     grid-template-columns: repeat(6, 1fr); grid-template-rows: none; }
   .werkzeuge { right: auto; left: 0; top: auto; bottom: calc(100% + 10px); }
+  .wendefenster { right: 0; left: auto; top: auto; bottom: calc(100% + 10px); }
+  .fahrgasse-hinweis { position: absolute; left: 0; right: 0; bottom: calc(100% + 8px); grid-row: auto; }
+  /* Steht das Fahrgassen-Band über der Leiste, rücken die Fahrdaten darüber. */
+  .stage:has(#fahrgasseHinweis:not([hidden])) .unten { bottom: calc(var(--leiste-hoehe) + 2 * var(--rand) + 64px); }
   .leiste .unten-rechts { grid-column: 1 / -1; grid-row: auto; grid-template-columns: 1fr 1.4fr; }
   .taste.lenk { height: max(60px, calc(5.6 * var(--u))); }
   .taste.bestaetigen::after { right: auto; left: 50%; top: auto; bottom: calc(100% + 10px); transform: translateX(-50%); }

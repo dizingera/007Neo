@@ -1969,17 +1969,19 @@ class EngineHeadlandTest(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             motor.start_turn()
 
-    def test_a_stale_plan_is_not_started(self):
-        """Die Route beginnt dort, wo sie geplant wurde. Von woanders aus wäre
-        ihr erster Bogen ein Sprung quer über das Feld."""
+    def test_a_stale_plan_is_replanned_from_where_the_machine_is(self):
+        """Zwischen Planen und Starten fährt die Maschine weiter. Die alte Route
+        begänne dort, wo geplant wurde - ihr erster Bogen wäre ein Sprung quer
+        über das Feld. Deshalb wird beim Start von der jetzigen Lage aus neu
+        geplant (früher: abgelehnt, und der Fahrer musste noch einmal drücken)."""
         motor = self._motor()
         motor.tool_position = (50.0, 50.0)
         motor.heading = 0.0
         motor.update_headland({"muster": "u", "radius_m": 4.0})
         motor.plan_turn()
         motor.tool_position = (50.0, 80.0)
-        with self.assertRaises(RuntimeError):
-            motor.start_turn()
+        motor.start_turn()
+        self.assertLess(math.dist(motor.turn.pfad[0], (50.0, 80.0)), 1.0)
 
     def test_during_a_turn_the_route_guides_not_the_line(self):
         motor = self._motor()

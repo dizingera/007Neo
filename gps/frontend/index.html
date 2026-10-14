@@ -100,6 +100,33 @@
       <!-- Wenn die Anlage vorwärts und rückwärts verwechselt: der Traktor zeigt dann gegen die Fahrt. -->
       <button class="taste" id="btnRichtung" title="Fahrtrichtung umdrehen"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 20V4M4 8l4-4 4 4M16 4v16M12 16l4 4 4-4"/></svg><span id="richtungText">Richtung</span></button>
     </div>
+    <!-- Fahrgasse: sitzt zwischen Richtung und Markieren, wo der Blick beim Säen
+         ohnehin hinwandert. Nur sichtbar, solange die aktuelle Spur eine ist. -->
+    <div class="fahrgasse-hinweis" id="fahrgasseHinweis" role="status" aria-live="assertive" hidden>
+      <b>Fahrgasse</b><small>Spur <span id="fahrgasseSpur">-</span> · Fahrgassenschaltung setzen</small>
+    </div>
+    <!-- Wende: Richtung, ausgelassene Spuren und Form wählen; geplant wird sofort,
+         das Ergebnis steht im Fenster, gestartet wird mit einem Druck. -->
+    <div class="wendefenster" id="wendeFenster" role="dialog" aria-label="Wende planen" hidden>
+      <div class="wf-kopf">Wende</div>
+      <div class="wf-gruppe"><span>Richtung</span>
+        <div class="wf-wahl" id="wfRichtung">
+          <button data-wert="links">↶ Links</button><button data-wert="rechts">Rechts ↷</button>
+        </div></div>
+      <div class="wf-gruppe"><span>Spuren auslassen</span>
+        <div class="wf-wahl" id="wfAuslassen">
+          <button data-wert="0">0</button><button data-wert="1">1</button><button data-wert="2">2</button><button data-wert="3">3</button>
+        </div></div>
+      <div class="wf-gruppe"><span>Form</span>
+        <div class="wf-wahl" id="wfForm">
+          <button data-wert="omega">Ω-Wende</button><button data-wert="u">U-Wende</button>
+        </div></div>
+      <p class="wf-ergebnis" id="wfErgebnis" role="status" aria-live="polite"></p>
+      <div class="wf-knoepfe">
+        <button id="wfStarten" class="primary" disabled>Wende starten</button>
+        <button id="wfZu">Schließen</button>
+      </div>
+    </div>
     <div class="unten-rechts">
       <button class="taste mark" id="btnJob" role="switch" aria-checked="false"><i></i><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h16M6 20V9l6-5 6 5v11M10 20v-6h4v6"/></svg><span>Markieren<small id="jobText">aus</small></span></button>
       <button class="taste lenk" id="btnSteer" role="switch" aria-checked="false"><i></i><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3"/><path d="M3 12h6M15 12h6M12 15v6"/></svg><span>Lenkung<small id="steerText">aus</small></span></button>

@@ -271,9 +271,10 @@ function updateHud(s) {
   if (s.recording && s.recording.mode === 'curve') hint.push('Kurve wird aufgezeichnet');
   if (s.recording && s.recording.pending_a) hint.push('A gesetzt – bis zum Ende fahren, dann B');
   if (turn.aktiv) hint.push('Wende läuft – Hand am Lenkrad');
-  else if (turn.geplant) {
+  else if (turn.geplant && el('wendeFenster').hidden) {
+    // Bei offenem Wende-Fenster steht das Ergebnis dort - nicht doppelt.
     hint.push(turn.fahrbar === false ? 'Wende zu eng für die Maschine – Wendekreis größer stellen'
-            : turn.im_feld ? 'Wende geplant – Wende noch einmal drücken'
+            : turn.im_feld ? 'Wende geplant – unter „Wende“ starten'
                            : 'Wende geplant, liegt aber nicht im Feld – Richtung oder Wendekreis ändern');
   }
   if (headland && headland.hinweis) hint.push(headland.hinweis);
@@ -315,6 +316,8 @@ function updateHud(s) {
   el('btnRichtung').classList.toggle('rueck', rueck);
   el('richtungText').textContent = rueck ? 'Rückwärts' : 'Richtung';
   el('btnSpur').classList.toggle('recording', spurAufnahmeLaeuft());
+  el('fahrgasseHinweis').hidden = !s.fahrgasse_aktiv;
+  if (s.fahrgasse_aktiv) el('fahrgasseSpur').textContent = s.guidance.pass_number;
 
   const steer = el('btnSteer');
   steer.classList.remove('an', 'scharf');
@@ -351,7 +354,7 @@ function updateHud(s) {
 
   // Die Wende: klein, weil sie Nebensache ist. Der Text sagt, was der nächste Druck tut.
   const turnBtn = el('btnTurn');
-  turnBtn.querySelector('span:last-child').textContent = turn.aktiv ? 'Ω Stopp' : turn.geplant ? 'Ω los' : 'Wende';
+  turnBtn.querySelector('span:last-child').textContent = turn.aktiv ? 'Stopp' : 'Wende';
   turnBtn.classList.toggle('aktiv', !!turn.aktiv);
   turnBtn.classList.toggle('geplant', !!turn.geplant && !turn.aktiv);
   el('turnFill').style.width = turn.aktiv && turn.punkte && turn.index != null
@@ -1005,6 +1008,9 @@ el('btnCurve').onclick = async () => {
 };
 /* Wende: planen, ansehen, starten. Bewusst zwei Druck – die Route liegt erst
  * sichtbar auf der Karte, bevor die Maschine ihr folgt. */
+/* Wende: läuft eine, beendet der Knopf sie. Sonst öffnet er das Wende-Fenster -
+ * Richtung, ausgelassene Spuren und Form wählen; jede Wahl plant sofort neu,
+ * das Ergebnis steht im Fenster, gestartet wird mit "Wende starten". */
 el('btnTurn').onclick = async () => {
   const turn = (state.live && state.live.turn) || {};
   if (turn.aktiv) {
@@ -1012,23 +1018,105 @@ el('btnTurn').onclick = async () => {
     toast('Wende abgebrochen');
     return;
   }
-  if (turn.geplant) {
-    const result = await api('POST', '/api/turn/start');
-    if (result) toast('Wende läuft – Hand am Lenkrad');
-    return;
+  if (!el('wendeFenster').hidden) { wendeFensterZu(); return; }
+  await wendeFensterAuf();
+};
+
+async function apiRoh(method, url, body) {
+  try {
+    const antwort = await fetch(url, {
+      method, headers: body ? { 'Content-Type': 'application/json' } : undefined,
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    const daten = await antwort.json().catch(() => ({}));
+    return { ok: antwort.ok, data: daten.data, detail: daten.detail };
+  } catch (fehler) {
+    return { ok: false, detail: 'Gerät nicht erreichbar' };
   }
-  const plan = await api('POST', '/api/turn/plan', {});
-  if (!plan) return;
-  if (!plan.data.grenze_vorhanden) {
-    toast('Ohne Feldgrenze wird die Route nicht geprüft', true);
-  } else if (!plan.data.fahrbar) {
-    toast(`Wende zu eng: engster Bogen ${plan.data.engster_radius_m} m, die Lenkung schafft ${plan.data.kleinster_radius_m} m – Wendekreis größer stellen`, true);
-  } else if (!plan.data.im_feld) {
-    toast(plan.data.vorschlag || 'Route liegt nicht vollständig im Feld', true);
+}
+
+function wahlSetzen(gruppe, wert) {
+  el(gruppe).querySelectorAll('button').forEach((b) => b.classList.toggle('an', b.dataset.wert === String(wert)));
+}
+function wahlLesen(gruppe) {
+  const an = el(gruppe).querySelector('button.an');
+  return an ? an.dataset.wert : null;
+}
+
+function wendeErgebnis(text, gut) {
+  const feld = el('wfErgebnis');
+  feld.textContent = text;
+  feld.className = 'wf-ergebnis ' + (gut ? 'gut' : 'schlecht');
+  el('wfStarten').disabled = !gut;
+}
+
+async function wendePlanen(speichern = true) {
+  const auslassen = parseInt(wahlLesen('wfAuslassen') || '0', 10);
+  if (speichern) {
+    wendeErgebnis('Plane …', false);
+    const gespeichert = await apiRoh('POST', '/api/headland', {
+      richtung: wahlLesen('wfRichtung'), muster: wahlLesen('wfForm'), ueberspringen: auslassen + 1,
+    });
+    if (!gespeichert.ok) { wendeErgebnis(gespeichert.detail || 'Einstellung nicht übernommen', false); return; }
+  }
+  const plan = await apiRoh('POST', '/api/turn/plan', {});
+  if (!plan.ok) { wendeErgebnis(plan.detail || 'Keine Wende möglich', false); return; }
+  const d = plan.data;
+  if (!d.fahrbar) {
+    wendeErgebnis(`Zu eng: engster Bogen ${d.engster_radius_m} m, die Lenkung schafft ${d.kleinster_radius_m} m – ` +
+                  'mehr Spuren auslassen oder U-Wende.', false);
+  } else if (!d.grenze_vorhanden) {
+    wendeErgebnis('Das Feld hat keine Grenze – die Route kann nicht geprüft werden.', false);
+  } else if (!d.im_feld) {
+    wendeErgebnis(d.vorschlag || 'Die Route liegt nicht vollständig im Feld.', false);
   } else {
-    const wo = plan.data.anlauf_m > 1 ? `wendet in ${plan.data.anlauf_m.toFixed(0)} m am Vorgewende` : 'wendet hier';
-    toast(`${plan.data.muster === 'u' ? 'U' : 'Ω'}-Wende geplant, ${wo} – noch einmal drücken zum Starten`);
+    const form = d.muster === 'u' ? 'U-Wende' : 'Ω-Wende';
+    const spuren = auslassen === 0 ? 'auf die Nachbarspur' : `${auslassen} ${auslassen === 1 ? 'Spur' : 'Spuren'} ausgelassen`;
+    const wo = d.anlauf_m > 1 ? `wendet in ${d.anlauf_m.toFixed(0)} m am Vorgewende` : 'wendet hier';
+    wendeErgebnis(`${form} nach ${d.richtung}, ${spuren} – ${wo}.`, true);
   }
+}
+
+async function wendeFensterAuf() {
+  // /api/headland antwortet ohne Umschlag - deshalb hier direkt gelesen.
+  const einstellung = await fetch('/api/headland').then((r) => r.json()).catch(() => ({}));
+  wahlSetzen('wfRichtung', einstellung.richtung || 'links');
+  wahlSetzen('wfAuslassen', Math.max(0, (einstellung.ueberspringen || 1) - 1));
+  wahlSetzen('wfForm', einstellung.muster || 'omega');
+  el('wendeFenster').hidden = false;
+  el('btnTurn').setAttribute('aria-expanded', 'true');
+  await wendePlanen();
+  // Solange das Fenster offen ist, alle 2 s neu planen: der Abstand zum
+  // Vorgewende stimmt, und ist es noch über 80 m entfernt, sieht der Fahrer,
+  // sobald es passt - ohne erneut zu wählen.
+  clearInterval(wendeTakt);
+  wendeTakt = setInterval(() => {
+    if (el('wendeFenster').hidden) { clearInterval(wendeTakt); return; }
+    wendePlanen(false);
+  }, 2000);
+}
+let wendeTakt = null;
+
+function wendeFensterZu() {
+  el('wendeFenster').hidden = true;
+  el('btnTurn').setAttribute('aria-expanded', 'false');
+  clearInterval(wendeTakt);
+}
+
+['wfRichtung', 'wfAuslassen', 'wfForm'].forEach((gruppe) => {
+  el(gruppe).addEventListener('click', (ereignis) => {
+    const knopf = ereignis.target.closest('button');
+    if (!knopf) return;
+    wahlSetzen(gruppe, knopf.dataset.wert);
+    wendePlanen();
+  });
+});
+el('wfZu').onclick = wendeFensterZu;
+el('wfStarten').onclick = async () => {
+  const antwort = await apiRoh('POST', '/api/turn/start');
+  if (!antwort.ok) { wendeErgebnis(antwort.detail || 'Start nicht möglich', false); return; }
+  wendeFensterZu();
+  toast('Wende läuft – fährt bis zum Vorgewende und wendet dort');
 };
 
 /* Kontur und Grenze sind dasselbe: die Grenze wird einmal abgefahren, und
@@ -1154,9 +1242,12 @@ el('btnSteer').onclick = async () => {
     await api('POST', '/api/steering/disarm');
     toast('Lenkung aus');
   } else {
-    const result = await api('POST', '/api/steering/arm');
-    if (result) toast(result.data.armed ? 'Lenkung scharf – Hände ans Lenkrad'
-                                        : result.data.message, !result.data.armed);
+    const result = await api('POST', '/api/steering/arm', { operation: arbeitBezeichnung() });
+    if (result) {
+      const zusatz = result.data.markieren_gestartet ? ' · Markieren an' : '';
+      toast(result.data.armed ? `Lenkung scharf – Hände ans Lenkrad${zusatz}`
+                              : result.data.message, !result.data.armed);
+    }
   }
 };
 

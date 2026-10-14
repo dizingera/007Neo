@@ -274,3 +274,62 @@ class VersatzBildschirmTests(unittest.TestCase):
             motor.tool_position = (-97.0, 0.0)          # an der Westkante
             schub, _ = self._verschiebung(motor, rechts)
             self.assertAlmostEqual(schub, 0.1, places=6, msg=str(rechts))
+
+
+class LenkungMarkiertTests(unittest.TestCase):
+    def test_arming_the_steering_also_starts_marking(self):
+        import warnings
+        from fastapi.testclient import TestClient
+        from agripilot.server import create_app
+        warnings.filterwarnings("ignore")
+        ordner = tempfile.TemporaryDirectory()
+        self.addCleanup(ordner.cleanup)
+        config = config_module.load("/kein-solcher-pfad.yaml")
+        config.server.data_dir = ordner.name
+        config.gnss.source = "simulator"
+        with TestClient(create_app(config)) as client:
+            store = Storage(os.path.join(ordner.name, "agripilot.db"))
+            self.addCleanup(store.close)
+            feld = store.save_field({"name": "F", "datum_lat": BEZUG[0], "datum_lon": BEZUG[1],
+                                     "boundary": QUADRAT})
+            client.post(f"/api/fields/{feld['id']}/load")
+            antwort = client.post("/api/steering/arm", json={"operation": "Säen"}).json()["data"]
+            self.assertTrue(antwort["armed"])
+            self.assertTrue(antwort["markieren_gestartet"])
+            job = client.get("/api/state").json()["job"]
+            self.assertEqual(job["operation"], "Säen")
+            # Schon markierend: kein zweiter Auftrag
+            client.post("/api/steering/disarm")
+            zweite = client.post("/api/steering/arm").json()["data"]
+            self.assertFalse(zweite["markieren_gestartet"])
+
+
+class FahrgasseUndWendeTests(unittest.TestCase):
+    def setUp(self):
+        from agripilot.guidance import GuidanceLine, GuidanceState
+        ordner = tempfile.TemporaryDirectory()
+        self.addCleanup(ordner.cleanup)
+        self.store = Storage(os.path.join(ordner.name, "f.db"))
+        self.addCleanup(self.store.close)
+        self.motor = Engine(config_module.load("/kein-solcher-pfad.yaml"), self.store)
+        feld = self.store.save_field({"name": "F", "datum_lat": 48.0, "datum_lon": 9.6, "boundary": QUADRAT})
+        self.motor.load_field(feld["id"])
+        self.motor.line = GuidanceLine(mode="ab", points=[(0.0, -50.0), (0.0, 50.0)], spacing=6.0)
+        self.motor.line.fahrgasse_m = 18.0            # jede dritte Spur
+        self.GuidanceState = GuidanceState
+
+    def _auf_spur(self, nummer):
+        self.motor.guidance = self.GuidanceState(active=True, mode="ab", pass_number=nummer)
+        return self.motor.state()["fahrgasse_aktiv"]
+
+    def test_the_tramline_pass_is_reported(self):
+        self.assertTrue(self._auf_spur(3))
+        self.assertFalse(self._auf_spur(4))
+        self.assertTrue(self._auf_spur(-3))
+        self.assertTrue(self._auf_spur(0))
+
+    def test_after_a_finished_turn_the_next_goes_the_other_way(self):
+        self.assertEqual(self.motor.headland.richtung, "links")
+        self.motor._wenderichtung_wechseln()
+        self.assertEqual(self.motor.headland.richtung, "rechts")
+        self.assertEqual(self.store.get_setting("headland")["richtung"], "rechts")

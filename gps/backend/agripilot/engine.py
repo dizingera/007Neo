@@ -1237,10 +1237,12 @@ class Engine:
         losgefahren = getattr(self, "_turn_planned_at", None)
         if losgefahren is not None and \
                 geo.distance(losgefahren, self._lenkpunkt()) > 5.0:
-            # Die Route beginnt dort, wo sie geplant wurde. Von hier aus wäre
-            # ihr erster Bogen ein Sprung quer über das Feld.
-            raise RuntimeError("Die Maschine steht nicht mehr am Planungspunkt - "
-                               "Wende neu planen")
+            # Die Route beginnt dort, wo sie geplant wurde - inzwischen ist die
+            # Maschine weitergefahren. Von hier neu planen (gleiche Einstellung)
+            # und erneut prüfen, statt den Fahrer noch einmal drücken zu lassen.
+            self.plan_turn()
+            if not self.turn_preview_fahrbar or (self.headland.nur_im_feld and not self.turn_preview_ok):
+                raise RuntimeError("Von hier aus passt die Wende nicht mehr ins Feld - neu planen")
         # Der Folger gibt spätestens dort auf, wo auch die Lenkung aufgäbe -
         # sonst zeigte die Anzeige "Wende läuft", während der Motor längst
         # abgeschaltet hat und der Fahrer allein lenkt.
@@ -1252,6 +1254,18 @@ class Engine:
         self.note(f"Wende gestartet ({self.headland.muster.upper()}, "
                   f"{self.headland.richtung})")
         return self.turn.to_dict()
+
+    def _wenderichtung_wechseln(self) -> None:
+        """Nach einer fertigen Wende geht die nächste andersherum.
+
+        Beim Hin- und Herfahren wendet man am einen Ende links, am anderen
+        rechts - sonst fährt die Maschine nach zwei Wenden auf die Spuren
+        zurück, von denen sie kam.
+        """
+        werte = self.headland.to_dict()
+        werte["richtung"] = "rechts" if self.headland.richtung == "links" else "links"
+        self.headland = headland_module.HeadlandSettings.from_dict(werte)
+        self.store.set_setting("headland", self.headland.to_dict())
 
     def stop_turn(self, grund: str = "vom Fahrer beendet") -> None:
         if self.turn is None:
@@ -1465,6 +1479,7 @@ class Engine:
                 # Regulär am Ziel: die Route endete geprüft auf der Nachbarspur,
                 # dort darf die Spur sofort wieder führen.
                 self.stop_turn(self.turn.grund or "Wende beendet")
+                self._wenderichtung_wechseln()
             else:
                 self.guidance = zustand
                 return
@@ -1654,6 +1669,11 @@ class Engine:
                 "fahrbar": self.turn_preview_fahrbar,
             },
             "line": self.line.to_dict() if self.line else None,
+            # Liegt die Maschine gerade auf einer Fahrgasse? Dann muss der Fahrer
+            # beim Säen die Fahrgassenschaltung setzen.
+            "fahrgasse_aktiv": bool(self.line is not None and self.guidance.active
+                                    and self.guidance.mode != "turn"
+                                    and self.line.ist_fahrgasse(self.guidance.pass_number)),
             "field": {
                 "id": self.field["id"],
                 "name": self.field["name"],

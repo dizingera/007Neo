@@ -977,9 +977,16 @@ def create_app(config=None) -> FastAPI:
         return ok({"compensation": config.imu.terrain_compensation})
 
     @api.post("/api/steering/arm")
-    async def arm_steering():
-        return ok({"message": engine.arm_steering(),
-                   "armed": application.steering.armed})
+    async def arm_steering(payload: dict = Body(default={})):
+        meldung = engine.arm_steering()
+        # Wer lenken lässt, arbeitet: Markieren geht mit an, wenn es noch aus
+        # ist - sonst fehlt am Abend die Fläche der ersten Spuren.
+        markieren = False
+        if application.steering.armed and engine.job is None and engine.field is not None:
+            engine.start_job(str(payload.get("operation") or "Arbeit"))
+            markieren = True
+        return ok({"message": meldung, "armed": application.steering.armed,
+                   "markieren_gestartet": markieren})
 
     @api.post("/api/steering/centre")
     async def learn_steering_centre():
