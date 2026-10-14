@@ -201,14 +201,14 @@ Fahrtrichtung zeigt. Am Schreibtisch geht es auch mit einer gewählten Ecke.
 Weitere Eingaben: **Sämaschine** (z. B. 3 m), **Fahrgassenweite** (21 m) und
 **Säspuren am Rand vor der Fahrgasse** (3) – sie bleiben beim Feld gespeichert.
 
-**So wird gesät:** von der Startkante aus Fahrgasse um Fahrgasse, solange ganze
-21 m passen. Am Gegenrand dasselbe Band wie an der Startkante (3 Säspuren ab der
-Grenze, die erste direkt an der Grenze, dann die Fahrgasse auf 10,5 m). Was
-dazwischen übrig bleibt, ist der **Füllstreifen**: aufgefüllt, ohne Fahrgasse.
-Ab 5 m bekommt er eine **Restfahrgasse** in der Mitte; Spritze und Streuer
-arbeiten dort nur so breit, wie der Streifen ist (der Plan sagt, wie viele Meter
-zu welcher Seite). Die Reihenfolge steht beim Plan. Auf der Karte ist der
-Füllstreifen bernsteinfarben, die Restfahrgasse rot gestrichelt.
+**So wird gesät:** von der Startecke (A) bis zur vorletzten Fahrgasse – die
+letzte, nach der bis zur Fahrgasse an B noch ganze 21 m bleiben. Dann an der
+Gegenseite (B) anfangen: 3 Säspuren ab der Grenze, dann die Fahrgasse auf
+10,5 m. Den Rest zwischen B und A auffüllen – das ist der **Füllstreifen**, ohne
+Fahrgasse. Die Reihenfolge mit Spurnummern steht beim Plan; auf der Karte ist
+der Füllstreifen bernsteinfarben. Wer im Füllstreifen doch eine
+**Restfahrgasse** will, schaltet sie ein (ab 5 m Streifenbreite, in der Mitte,
+Spritze und Streuer dort nur so breit wie der Streifen).
 
 * **Vorgewende** rundum, so tief wie eine Fahrgassenweite: bei 3 m und 21 m
   sieben Runden – drei Säspuren, die Fahrgasse auf 10,5 m, drei Säspuren.

@@ -760,7 +760,7 @@ class Engine:
             "optionen": [{k: o[k] for k in ("id", "text", "kante")}
                          for o in saatplan_module.startkanten(grenze)],
             "vorgabe": gespeichert.get("vorgabe") or {"breite_m": breite, "fahrgasse_m": weite,
-                                                       "randspuren": rand},
+                                                       "randspuren": rand, "restfahrgasse": False},
             "plan": gespeichert.get("plan"),
         }
 
@@ -779,12 +779,15 @@ class Engine:
             raise ValueError("Breite, Fahrgassenweite und Randspuren als Zahlen angeben") from None
         if not 0 <= rand <= 20:
             raise ValueError("Randspuren zwischen 0 und 20")
+        # Restfahrgasse im Füllstreifen: so wird nicht gesät, deshalb nur auf Wunsch.
+        rest = bool(vorgabe.get("restfahrgasse"))
         plan = saatplan_module.planen(grenze, tuple(start["von"]), tuple(start["nach"]),
-                                      breite, weite, rand)
+                                      breite, weite, rand, rest)
         plan["startwahl"] = start["text"]
         plan["kante"] = start["kante"]
         self.store.set_setting(f"saatplan:{field_id}", {
-            "vorgabe": {"start": start["id"], "breite_m": breite, "fahrgasse_m": weite, "randspuren": rand},
+            "vorgabe": {"start": start["id"], "breite_m": breite, "fahrgasse_m": weite, "randspuren": rand,
+                        "restfahrgasse": rest},
             "plan": plan})
         self.note(f"Saatplan {feld['name']}: {plan['anzahl_spuren']} Spuren, "
                   f"{plan['anzahl_fahrgassen']} Fahrgassen, {len(plan['konflikte'])} Konflikte")

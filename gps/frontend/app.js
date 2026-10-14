@@ -1742,6 +1742,7 @@ async function renderSaatplan() {
   });
   const vorgabe = daten.vorgabe || {};
   if (vorgabe.start) wahl.value = vorgabe.start;
+  el('saatplanRest').checked = !!vorgabe.restfahrgasse;
   const form = el('saatplanForm');
   ['breite_m', 'fahrgasse_m', 'randspuren'].forEach((name) => {
     if (vorgabe[name] != null) form.querySelector(`[name="${name}"]`).value = vorgabe[name];
@@ -1810,7 +1811,7 @@ el('btnSaatplanPlanen').onclick = async () => {
   const zahl = (name) => parseFloat(String(form.querySelector(`[name="${name}"]`).value).replace(',', '.'));
   const antwort = await api('POST', `/api/fields/${feld.id}/saatplan`, {
     start: el('saatplanStart').value, breite_m: zahl('breite_m'),
-    fahrgasse_m: zahl('fahrgasse_m'), randspuren: Math.round(zahl('randspuren')),
+    fahrgasse_m: zahl('fahrgasse_m'), randspuren: Math.round(zahl('randspuren')), restfahrgasse: el('saatplanRest').checked,
   });
   if (!antwort) return;
   saat.feld = feld.id; saat.plan = antwort.data; saat.zeigen = true;
@@ -1827,7 +1828,7 @@ el('btnSaatplanAbHier').onclick = async () => {
   const form = el('saatplanForm');
   const zahl = (name) => parseFloat(String(form.querySelector(`[name="${name}"]`).value).replace(',', '.'));
   const antwort = await api('POST', '/api/saatplan/hier', {
-    breite_m: zahl('breite_m'), fahrgasse_m: zahl('fahrgasse_m'), randspuren: Math.round(zahl('randspuren')),
+    breite_m: zahl('breite_m'), fahrgasse_m: zahl('fahrgasse_m'), randspuren: Math.round(zahl('randspuren')), restfahrgasse: el('saatplanRest').checked,
   });
   if (!antwort) return;
   saat.feld = state.live.field.id; saat.plan = antwort.data; saat.zeigen = true;

@@ -105,7 +105,7 @@ def _r(wert: float) -> float:
 
 
 def planen(grenze: Sequence[Point], von: Point, nach: Point, breite_m: float,
-           fahrgasse_m: float, randspuren_zahl: int = 3) -> dict:
+           fahrgasse_m: float, randspuren_zahl: int = 3, restfahrgasse: bool = False) -> dict:
     """Den ganzen Schlag planen. ``von``→``nach`` ist die Startkante, ``von`` die Startecke."""
     ring = [tuple(map(float, p)) for p in grenze]
     if len(ring) < 3:
@@ -228,12 +228,12 @@ def planen(grenze: Sequence[Point], von: Point, nach: Point, breite_m: float,
         gassen_m += haupt + [(d_min + d_max) / 2.0 - F / 2.0]
         if rest_m > TOLERANZ_M:
             fuell_spuren = [s for s in spuren if s.get("fuell")]
-            text = (f"Füllstreifen {rest_m:.1f} m vor dem {name}: zwischen der letzten Fahrgasse "
-                    f"und dem Band am Gegenrand passt keine ganze Fahrgassenweite mehr - aufgefüllt, "
+            text = (f"Füllstreifen {rest_m:.1f} m vor dem {name}: zwischen der vorletzten Fahrgasse "
+                    f"(von A) und dem Band an B passt keine ganze Fahrgassenweite mehr - aufgefüllt, "
                     f"ohne Fahrgasse.")
             anpassung = []
             rest_spur = None
-            if rest_m >= KLEINE_LUECKE_M and fuell_spuren:
+            if restfahrgasse and rest_m >= KLEINE_LUECKE_M and fuell_spuren:
                 ziel = (fuell_von + band) / 2.0
                 rest_spur = min(fuell_spuren, key=lambda s: abs(s["versatz_m"] - ziel))
                 rest_spur["fahrgasse"] = True
@@ -244,10 +244,14 @@ def planen(grenze: Sequence[Point], von: Point, nach: Point, breite_m: float,
                     f"Restfahrgasse auf Spur {rest_spur['nummer']}: Spritze und Streuer dort nur "
                     f"{rest_m:.1f} m breit - {z - fuell_von:.1f} m zur Startseite, {band - z:.1f} m "
                     f"zum {name} hin, die übrigen Teilbreiten zu")
+            elif rest_m >= KLEINE_LUECKE_M:
+                anpassung.append(f"Spritze und Streuer erreichen den Füllstreifen von keiner Fahrgasse ganz: "
+                                 f"an der vorletzten Fahrgasse und an der Fahrgasse am {name} je "
+                                 f"{rest_m / 2:.1f} m weiter arbeiten - oder „Restfahrgasse im "
+                                 f"Füllstreifen“ einschalten")
             else:
-                anpassung.append(f"Schmaler Rest: an der letzten Fahrgasse und an der Fahrgasse am "
-                                 f"{name} je {rest_m / 2:.1f} m weiter streuen und spritzen (Randdüsen) "
-                                 f"- eine Restfahrgasse lohnt erst ab {KLEINE_LUECKE_M:g} m")
+                anpassung.append(f"Schmaler Rest: an der vorletzten Fahrgasse und an der Fahrgasse am "
+                                 f"{name} je {rest_m / 2:.1f} m weiter streuen und spritzen (Randdüsen)")
             unten = math.floor((d_min + d_max) / 2.0 / F) * F
             anpassung.append(f"Zur Einordnung: Randabstand {(d_min + d_max) / 2.0:.1f} m - ohne Rest "
                              f"ginge es bei {unten:g} m oder {unten + F:g} m")
@@ -365,15 +369,16 @@ def planen(grenze: Sequence[Point], von: Point, nach: Point, breite_m: float,
     haupt_spuren = [s for s in spuren if not s.get("fuell")]
     if haupt_spuren:
         gassen_haupt = [s for s in haupt_spuren if s["fahrgasse"]]
+        bis = "bis zur vorletzten Fahrgasse" if gegenrand is not None else "bis zum Gegenrand"
         reihenfolge.append(
-            f"Hauptfeld von der Startkante: Spur 1–{haupt_spuren[-1]['nummer']}, Fahrgassen "
+            f"Von der Startecke (A) {bis}: Spur 1–{haupt_spuren[-1]['nummer']}, Fahrgassen in Spur "
             f"{', '.join(str(s['nummer']) for s in gassen_haupt) or 'keine'} (alle {F:g} m)")
     if gegenrand is not None:
-        reihenfolge.append(f"Am {gegenrand[1]}: {r} Säspuren ab der Grenze (die erste direkt an der Grenze), "
-                           f"dann die Fahrgasse auf {F / 2:.1f} m - das Band gehört zum Vorgewende")
+        reihenfolge.append(f"An der Gegenseite (B, {gegenrand[1]}) anfangen: {r} Säspuren ab der Grenze, "
+                           f"dann die Fahrgasse auf {F / 2:.1f} m")
     if fuellstreifen and fuellstreifen["spuren"]:
         erste, letzte_f = fuellstreifen["spuren"][0], fuellstreifen["spuren"][-1]
-        reihenfolge.append(f"Rest auffüllen: Spur {erste}" + (f"–{letzte_f}" if letzte_f != erste else "")
+        reihenfolge.append(f"Rest zwischen B und A auffüllen: Spur {erste}" + (f"–{letzte_f}" if letzte_f != erste else "")
                            + f" ({fuellstreifen['breite_m']:.1f} m)"
                            + (f", Restfahrgasse auf Spur {fuellstreifen['restfahrgasse']}"
                               if fuellstreifen["restfahrgasse"] else ""))
