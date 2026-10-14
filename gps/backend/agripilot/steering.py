@@ -46,9 +46,13 @@ class SteerCommand:
 
 
 class SteeringController:
-    def __init__(self, config, output: Optional[SteerOutput] = None) -> None:
+    def __init__(self, config, output: Optional[SteerOutput] = None,
+                 simulator: bool = False) -> None:
         self.config = config
         self.output = output or NullOutput()
+        # Im Simulator gibt es keinen Motor, den man freigeben müsste: die
+        # Engine schreibt den Einschlag direkt in den virtuellen Traktor.
+        self.simulator = simulator
         self.armed = False           # vom Fahrer gesetzt, geht bei jedem Stopp weg
         self.rueckwaerts = False     # setzt die Engine aus dem Kurs; Rückwärts lenkt nichts
         self.command = SteerCommand()
@@ -60,8 +64,12 @@ class SteeringController:
 
     # -- Bedienung durch den Fahrer ---------------------------------------
 
+    @property
+    def freigegeben(self) -> bool:
+        return bool(self.config.enabled or self.simulator)
+
     def arm(self) -> str:
-        if not self.config.enabled:
+        if not self.freigegeben:
             self.armed = False
             return "Lenkautomatik ist in der Konfiguration deaktiviert"
         if not self.output.ready:
@@ -130,7 +138,7 @@ class SteeringController:
                          now: float) -> Optional[str]:
         cfg = self.config
         feedback = self.output.feedback
-        if not cfg.enabled:
+        if not self.freigegeben:
             return "in der Konfiguration deaktiviert"
         if not self.armed:
             return "nicht scharf"
@@ -177,7 +185,8 @@ class SteeringController:
     def status(self) -> dict:
         feedback = self.output.feedback
         return {
-            "configured": self.config.enabled,
+            "configured": self.freigegeben,
+            "simulator": self.simulator,
             "armed": self.armed,
             "command": self.command.to_dict(),
             "output": self.output.status_dict(),

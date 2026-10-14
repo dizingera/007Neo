@@ -146,3 +146,34 @@ class FremdeZellenTests(unittest.TestCase):
         self.assertEqual(len(eigen.drain_new_cells()), 16)
         self.assertEqual(len(eigen.drain_fremde_zellen()), 16)
         self.assertEqual(eigen.drain_fremde_zellen(), [])
+
+
+class SimulatorLenkungTests(unittest.TestCase):
+    def test_the_simulator_steers_without_a_motor_being_enabled(self):
+        import warnings
+        from fastapi.testclient import TestClient
+        from agripilot.server import create_app
+        warnings.filterwarnings("ignore")
+        ordner = tempfile.TemporaryDirectory()
+        self.addCleanup(ordner.cleanup)
+        config = config_module.load("/kein-solcher-pfad.yaml")
+        config.server.data_dir = ordner.name
+        config.gnss.source = "simulator"
+        config.steering.enabled = False          # kein Motor freigegeben
+        with TestClient(create_app(config)) as client:
+            client.post("/api/steering/arm")
+            lenkung = client.get("/api/state").json()["steering"]
+            self.assertTrue(lenkung["configured"])
+            self.assertTrue(lenkung["simulator"])
+            self.assertTrue(lenkung["armed"])
+
+    def test_a_real_receiver_still_needs_the_motor_enabled(self):
+        import asyncio
+        from agripilot.actuators import NullOutput
+        from agripilot.steering import SteeringController
+        config = config_module.load("/kein-solcher-pfad.yaml")
+        config.steering.enabled = False
+        lenkung = SteeringController(config.steering, NullOutput())
+        asyncio.run(lenkung.start())
+        self.assertIn("deaktiviert", lenkung.arm())
+        self.assertFalse(lenkung.armed)

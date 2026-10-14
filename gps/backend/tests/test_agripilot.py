@@ -1540,9 +1540,11 @@ class ServerTest(unittest.TestCase):
                 self.assertGreater(job["distance_m"], 0.0)
                 self.assertEqual(client.get(f"/api/jobs/{job['id']}/gpx").status_code, 200)
 
-                # Lenkung ist ohne Freigabe in der Konfiguration nicht scharf zu bekommen
+                # Im Simulator braucht die Lenkung keinen freigegebenen Motor - sie
+                # lenkt den virtuellen Traktor. (Mit echtem Empfänger bleibt die
+                # Freigabe Pflicht: test_simulator_feld.SimulatorLenkungTests.)
                 armed = client.post("/api/steering/arm").json()["data"]
-                self.assertFalse(armed["armed"])
+                self.assertTrue(armed["armed"])
 
 
 QUADRAT = [(0.0, 0.0), (100.0, 0.0), (100.0, 100.0), (0.0, 100.0)]

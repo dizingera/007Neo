@@ -131,6 +131,16 @@ class NullOutput(SteerOutput):
         self.status = "nur Anzeige (kein Ausgang)"
 
 
+class SimulatorOutput(NullOutput):
+    """Im Simulatorbetrieb: kein Motor, die Engine lenkt den virtuellen Traktor."""
+
+    name = "simulator"
+
+    async def start(self) -> None:
+        self.ready = True
+        self.status = "Simulator - lenkt den virtuellen Traktor"
+
+
 class UdpOutput(SteerOutput):
     """Sollwinkel an eine externe Lenkplatine."""
 

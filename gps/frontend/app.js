@@ -35,7 +35,7 @@ let F = {};
 function farbenLesen() {
   const cs = getComputedStyle(document.body);
   F = Object.fromEntries(['boden', 'raster', 'grenze', 'vg', 'pass', 'aktiv', 'flaeche', 'doppelt', 'wende', 'spur',
-    'traktor', 'traktor-rand', 'geraet', 'fahrgasse']
+    'traktor', 'traktor-rand', 'geraet', 'fahrgasse', 'lack', 'lack-hell', 'lack-dunkel', 'akzent', 'reifen', 'kabine']
     .map((k) => [k, cs.getPropertyValue('--f-' + k).trim()]));
   flaeche.farbenSetzen(F.flaeche, F.doppelt);
 }
@@ -816,42 +816,139 @@ function geraetZeichnen(s, profil, implement, rechts, vor) {
   ctx.restore();
 }
 
-/* Ein Traktor von oben: Hinterräder, Kabine, Haube, Vorderräder. Unter einer
- * Fingerkuppe Größe wird er vergrößert - das Gerät nicht, dessen Breite zählt. */
+/* Ein Schlepper von oben, in Metern ab Mitte Hinterachse (+y vorn, +x rechts):
+ * Reifen mit Stollen, Kotflügel, Haube mit Glanzlicht, Kabine mit Glasrand,
+ * Dach, Frontgewicht. Unter einer Fingerkuppe Größe wird er vergrößert - das
+ * Gerät nicht, dessen Breite zählt. */
+function rundRechteck(x, y, b, h, r) {
+  const rr = Math.min(r, b / 2, h / 2);
+  ctx.beginPath();
+  ctx.moveTo(x + rr, y);
+  ctx.arcTo(x + b, y, x + b, y + h, rr);
+  ctx.arcTo(x + b, y + h, x, y + h, rr);
+  ctx.arcTo(x, y + h, x, y, rr);
+  ctx.arcTo(x, y, x + b, y, rr);
+  ctx.closePath();
+}
+
+function reifen(mx, my, breite, laenge, px) {
+  rundRechteck(mx - breite / 2, my - laenge / 2, breite, laenge, breite * 0.28);
+  ctx.fillStyle = F.reifen;
+  ctx.fill();
+  // Stollen: schräge Rippen, wie sie von oben auf der Lauffläche zu sehen sind
+  ctx.save();
+  ctx.clip();
+  ctx.strokeStyle = 'rgba(255,255,255,.13)';
+  ctx.lineWidth = Math.max(0.05, 1.2 * px);
+  const schritt = laenge / 9;
+  for (let s = -laenge / 2 - schritt; s <= laenge / 2 + schritt; s += schritt) {
+    ctx.beginPath();
+    ctx.moveTo(mx - breite / 2, my + s);
+    ctx.lineTo(mx, my + s + schritt * 0.45);
+    ctx.lineTo(mx + breite / 2, my + s);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+/* Schatten in Bildschirmpixeln - er bleibt gleich weich, egal wie nah gezoomt ist. */
+function schattenAn() { ctx.shadowColor = 'rgba(0,0,0,.5)'; ctx.shadowBlur = 10; }
+function schattenAus() { ctx.shadowColor = 'transparent'; ctx.shadowBlur = 0; }
+
 function traktorZeichnen(profil) {
-  const radstand = profil.wheelbase_m || 2.6;
-  const laenge = radstand + 2.2;
-  const k = Math.max(1, (34 / state.view.scale) / laenge);
+  const radstand = Math.max(2.2, Math.min(3.4, profil.wheelbase_m || 2.6));
+  const laenge = radstand + 2.4;
+  const k = Math.max(1, (40 / state.view.scale) / laenge);
   ctx.save();
   ctx.scale(k, k);
   const px = 1 / (state.view.scale * k);
-  ctx.lineWidth = 1.4 * px;
-  ctx.strokeStyle = F['traktor-rand'];
-  ctx.fillStyle = F['traktor-rand'];
-  // Räder
-  ctx.fillRect(-1.25, -0.8, 0.55, 1.6);
-  ctx.fillRect(0.7, -0.8, 0.55, 1.6);
-  ctx.fillRect(-1.05, radstand - 0.45, 0.4, 0.9);
-  ctx.fillRect(0.65, radstand - 0.45, 0.4, 0.9);
-  // Rumpf: Kabine hinten breit, Haube nach vorn schmal, die Spitze zeigt die Richtung
-  ctx.beginPath();
-  ctx.moveTo(-0.75, -0.9);
-  ctx.lineTo(0.75, -0.9);
-  ctx.lineTo(0.75, 0.9);
-  ctx.lineTo(0.45, 1.2);
-  ctx.lineTo(0.45, radstand + 0.75);
-  ctx.lineTo(0, radstand + 1.25);
-  ctx.lineTo(-0.45, radstand + 0.75);
-  ctx.lineTo(-0.45, 1.2);
-  ctx.lineTo(-0.75, 0.9);
-  ctx.closePath();
-  ctx.fillStyle = F.traktor;
+  const spur = 1.0;                       // halbe Spurweite bis Reifenmitte
+
+  // Räder: hinten groß, vorn kleiner und etwas schmaler
+  reifen(-spur, 0, 0.58, 1.75, px);
+  reifen(spur, 0, 0.58, 1.75, px);
+  reifen(-spur + 0.08, radstand, 0.44, 1.15, px);
+  reifen(spur - 0.08, radstand, 0.44, 1.15, px);
+
+  // Vorderachse und Frontgewicht
+  ctx.fillStyle = F['lack-dunkel'];
+  ctx.fillRect(-spur + 0.1, radstand - 0.09, 2 * spur - 0.2, 0.18);
+  rundRechteck(-0.5, radstand + 0.78, 1.0, 0.38, 0.08);
+  ctx.fillStyle = '#2b2f2d';
   ctx.fill();
+
+  // Haube: zur Front schmaler, mit Glanzlicht in der Mitte
+  ctx.beginPath();
+  ctx.moveTo(-0.5, 0.75);
+  ctx.lineTo(-0.44, radstand + 0.55);
+  ctx.quadraticCurveTo(-0.42, radstand + 0.86, 0, radstand + 0.9);
+  ctx.quadraticCurveTo(0.42, radstand + 0.86, 0.44, radstand + 0.55);
+  ctx.lineTo(0.5, 0.75);
+  ctx.closePath();
+  const haube = ctx.createLinearGradient(-0.5, 0, 0.5, 0);
+  haube.addColorStop(0, F['lack-dunkel']);
+  haube.addColorStop(0.42, F['lack-hell']);
+  haube.addColorStop(0.58, F['lack-hell']);
+  haube.addColorStop(1, F['lack-dunkel']);
+  ctx.fillStyle = haube;
+  schattenAn();
+  ctx.fill();
+  schattenAus();
+  ctx.lineWidth = 1.2 * px;
+  ctx.strokeStyle = 'rgba(0,0,0,.55)';
   ctx.stroke();
-  // Kabinendach
-  ctx.fillStyle = F['traktor-rand'];
-  ctx.globalAlpha = 0.25;
-  ctx.fillRect(-0.6, -0.65, 1.2, 1.4);
+  // Gelber Zierstreifen und Lüftungsschlitze
+  ctx.fillStyle = F.akzent;
+  ctx.fillRect(-0.47, 0.95, 0.06, radstand - 0.6);
+  ctx.fillRect(0.41, 0.95, 0.06, radstand - 0.6);
+  ctx.strokeStyle = 'rgba(0,0,0,.35)';
+  ctx.lineWidth = Math.max(0.03, 1 * px);
+  for (let i = 0; i < 4; i++) {
+    const y = radstand + 0.1 + i * 0.12;
+    ctx.beginPath(); ctx.moveTo(-0.22, y); ctx.lineTo(0.22, y); ctx.stroke();
+  }
+  // Auspuff rechts vor der Kabine
+  ctx.beginPath();
+  ctx.arc(0.3, 1.05, 0.075, 0, Math.PI * 2);
+  ctx.fillStyle = '#111';
+  ctx.fill();
+
+  // Kotflügel über den Hinterrädern
+  [-1, 1].forEach((seite) => {
+    rundRechteck(seite > 0 ? spur - 0.36 : -spur - 0.36, -0.82, 0.72, 1.64, 0.3);
+    ctx.fillStyle = F.lack;
+    schattenAn();
+    ctx.fill();
+    schattenAus();
+    ctx.strokeStyle = 'rgba(0,0,0,.5)';
+    ctx.lineWidth = 1.2 * px;
+    ctx.stroke();
+  });
+
+  // Kabine: Glasrand, darüber das Dach mit Glanz
+  rundRechteck(-0.78, -0.72, 1.56, 1.5, 0.16);
+  ctx.fillStyle = F.kabine;
+  schattenAn();
+  ctx.fill();
+  schattenAus();
+  rundRechteck(-0.68, -0.6, 1.36, 1.26, 0.14);
+  const dach = ctx.createRadialGradient(-0.2, 0.25, 0.1, 0, 0, 1.0);
+  dach.addColorStop(0, F['lack-hell']);
+  dach.addColorStop(1, F.lack);
+  ctx.fillStyle = dach;
+  ctx.fill();
+  ctx.lineWidth = 1 * px;
+  ctx.strokeStyle = 'rgba(0,0,0,.45)';
+  ctx.stroke();
+  // Rundumleuchte
+  ctx.beginPath();
+  ctx.arc(0.42, -0.36, 0.09, 0, Math.PI * 2);
+  ctx.fillStyle = F.akzent;
+  ctx.fill();
+
+  // Heckkraftheber
+  ctx.fillStyle = '#2b2f2d';
+  ctx.fillRect(-0.35, -1.0, 0.7, 0.22);
   ctx.restore();
 }
 

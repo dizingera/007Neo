@@ -38,7 +38,7 @@ from . import onlineupdate as onlineupdate_module
 from . import exe as exe_module
 from . import teilen as teilen_module
 from . import myterra as myterra_module
-from .actuators import build_output
+from .actuators import SimulatorOutput, build_output
 from .coverage import CoverageMap
 from .engine import Engine
 from .gnss import SimulatorSource, build_source
@@ -92,9 +92,7 @@ class Application:
         self._quellen_tasks: list[asyncio.Task] = []
         self._korrektur_tasks: list[asyncio.Task] = []
         self._quellen_aufbauen()
-        self.steering = SteeringController(
-            config.steering, build_output(config, self.imu)
-        )
+        self.steering = self._lenkung_bauen()
         self.engine.steering = self.steering
         # Führt Buch über den Einbau und liest dabei mit, was sich erst
         # über die Zeit zeigt - etwa ob "RTK fix" dauerhaft steht.
@@ -177,6 +175,12 @@ class Application:
         quelle = self.corrections or self.rtcm_client
         return quelle.adresse if quelle is not None and quelle.adresse else "aus"
 
+    def _lenkung_bauen(self) -> SteeringController:
+        """Lenkausgang zur Quelle: im Simulator lenkt die Engine selbst, ohne Motor."""
+        if self.engine.simulator is not None:
+            return SteeringController(self.config.steering, SimulatorOutput(), simulator=True)
+        return SteeringController(self.config.steering, build_output(self.config, self.imu))
+
     def simulator_ins_feld(self) -> bool:
         """Den virtuellen Traktor ins geladene Feld setzen - nur im Simulator."""
         simulator_source = self.engine.simulator
@@ -231,8 +235,7 @@ class Application:
         self._quellen_aufbauen()
         # Der Lenkausgang hängt am Sensor (Drehrate als Rückmeldung): neu bauen.
         await self.steering.stop()
-        self.steering = SteeringController(
-            self.config.steering, build_output(self.config, self.imu))
+        self.steering = self._lenkung_bauen()
         self.engine.steering = self.steering
         await self.steering.start()
         # Kurs und Nachlauf gehören zur alten Fahrt; der erste Schritt der neuen
