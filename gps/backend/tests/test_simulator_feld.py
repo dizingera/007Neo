@@ -97,3 +97,52 @@ class SimulatorServerTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RichtungTests(unittest.TestCase):
+    def _filter(self):
+        from agripilot.guidance import HeadingFilter
+        kurs = HeadingFilter()
+        for _ in range(5):
+            kurs.update(0.0, None, 2.5)
+        return kurs
+
+    def test_a_teleport_jump_is_taken_for_reversing_without_a_reset(self):
+        """So kam es zu dem Traktor, der rückwärts fuhr: drei Kurse 180 Grad daneben."""
+        kurs = self._filter()
+        for _ in range(3):
+            kurs.update(180.0, None, 2.5)
+        self.assertTrue(kurs.rueckwaerts)
+        kurs.reset()
+        kurs.update(180.0, None, 2.5)
+        self.assertFalse(kurs.rueckwaerts)
+        self.assertEqual(kurs.value, 180.0)
+
+    def test_the_driver_can_turn_the_direction_round(self):
+        kurs = self._filter()
+        for _ in range(3):
+            kurs.update(180.0, None, 2.5)
+        self.assertTrue(kurs.rueckwaerts)
+        self.assertAlmostEqual(kurs.value, 0.0)
+        kurs.umkehren()
+        self.assertFalse(kurs.rueckwaerts)
+        self.assertAlmostEqual(kurs.value, 180.0)
+        # Und es bleibt dabei: der nächste Kurs passt jetzt zur Fahrt.
+        kurs.update(180.0, None, 2.5)
+        self.assertFalse(kurs.rueckwaerts)
+        self.assertAlmostEqual(kurs.value, 180.0, places=3)
+
+
+class FremdeZellenTests(unittest.TestCase):
+    def test_merged_cells_are_reported_apart_from_the_own_swath(self):
+        """Die Anzeige malt die eigene Fahrt selbst als Streifen; aus Zellen malt
+        sie nur, was ein anderer Traktor beigetragen hat."""
+        from agripilot.coverage import CoverageMap, build_sections
+        eigen = CoverageMap()
+        eigen.add_swath((0.0, 0.0), (0.0, 2.0), 0.0, build_sections(2.0, 1))
+        fremd = CoverageMap()
+        fremd.add_swath((10.0, 0.0), (10.0, 2.0), 0.0, build_sections(2.0, 1))
+        eigen.merge(fremd)
+        self.assertEqual(len(eigen.drain_new_cells()), 16)
+        self.assertEqual(len(eigen.drain_fremde_zellen()), 16)
+        self.assertEqual(eigen.drain_fremde_zellen(), [])

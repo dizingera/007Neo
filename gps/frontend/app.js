@@ -34,37 +34,38 @@ const stage = el('stage');
 let F = {};
 function farbenLesen() {
   const cs = getComputedStyle(document.body);
-  F = Object.fromEntries(['boden', 'raster', 'grenze', 'vg', 'pass', 'aktiv', 'flaeche', 'wende', 'spur', 'traktor', 'fahrgasse']
+  F = Object.fromEntries(['boden', 'raster', 'grenze', 'vg', 'pass', 'aktiv', 'flaeche', 'doppelt', 'wende', 'spur',
+    'traktor', 'traktor-rand', 'geraet', 'fahrgasse']
     .map((k) => [k, cs.getPropertyValue('--f-' + k).trim()]));
-  coverCtx.fillStyle = F.flaeche;
+  flaeche.farbenSetzen(F.flaeche, F.doppelt);
 }
 
 /* ---------------------------------------------------------------- Bedeckung */
 
-const COVER_SIZE = 4096;            // Zellen; bei 0,5 m sind das gut 2 x 2 km
-const coverLayer = document.createElement('canvas');
-coverLayer.width = coverLayer.height = COVER_SIZE;
-const coverCtx = coverLayer.getContext('2d');
-const coverCells = [];              // alle Zellen, damit ein Farbwechsel neu malen kann
+/* Die bearbeitete Fläche zeichnet flaeche.js: die eigene Fahrt als glatter
+ * Streifen hinter dem Gerät, Fremdes und Früheres aus den Zellen des Servers. */
+const flaeche = new window.FlaecheModul.Flaeche((px) => {
+  const leinwand = document.createElement('canvas');
+  leinwand.width = leinwand.height = px;
+  return leinwand;
+});
 
-function paintCells(cells, merken = true) {
-  const half = COVER_SIZE / 2;
-  for (const [ix, iy] of cells) {
-    const px = ix + half, py = half - iy;
-    if (px < 0 || py < 0 || px >= COVER_SIZE || py >= COVER_SIZE) continue;
-    coverCtx.fillRect(px, py, 1, 1);
-    if (merken) coverCells.push([ix, iy]);
-  }
-}
+function feldKennung(daten) { return daten && daten.field ? daten.field.id : null; }
 
-function clearCells() {
-  coverCtx.clearRect(0, 0, COVER_SIZE, COVER_SIZE);
-  coverCells.length = 0;
-}
-
-function repaintCells() {
-  coverCtx.clearRect(0, 0, COVER_SIZE, COVER_SIZE);
-  paintCells(coverCells, false);
+/* Wo das Gerät gerade arbeitet - die Lage, an der der Streifen weiterwächst. */
+function geraeteLage(s, versatz) {
+  if (!s || s.heading == null) return null;
+  const implement = s.implement || {};
+  const pos = implement.position || s.tool_position;
+  if (!pos) return null;
+  const kurs = implement.trailed && implement.heading != null ? implement.heading : s.heading;
+  const [dx, dy, dh] = versatz || [0, 0, 0];
+  return {
+    pos: [pos[0] + dx, pos[1] + dy],
+    kurs: kurs + dh,
+    stuecke: window.FlaecheModul.querStuecke(s.sections, (s.profile || {}).width_m || 3),
+    aktiv: Boolean(s.job),
+  };
 }
 
 /* ------------------------------------------------------------- Verbindung */
@@ -86,11 +87,14 @@ function connect() {
     const data = JSON.parse(event.data);
     if (data.type === 'init') {
       state.cellSize = data.coverage ? data.coverage.cell_size : 0.5;
-      clearCells();
-      paintCells(data.cells || []);
+      flaeche.leeren();
+      flaeche.zellenMalen(data.cells || [], state.cellSize);
       state.trail = [];
-    } else if (data.new_cells && data.new_cells.length) {
-      paintCells(data.new_cells);
+    } else {
+      // Feldwechsel vor dem Malen: was mit dem neuen Feld schon mitkommt
+      // (Arbeit eines anderen Traktors), gehört bereits auf das neue Feld.
+      if (state.live && feldKennung(state.live) !== feldKennung(data)) { flaeche.leeren(); state.trail = []; }
+      if (data.fremde_zellen && data.fremde_zellen.length) flaeche.zellenMalen(data.fremde_zellen, state.cellSize);
     }
     onState(data);
   };
@@ -98,7 +102,15 @@ function connect() {
 
 function onState(data) {
   const previous = state.live;
+  glaettungNachfuehren(previous, data);
   state.live = data;
+  // Erst den Streifen bis zur neuen Lage malen, dann die Zellen dieser Fahrt
+  // merken - sonst hielte er seine eigene Spur für eine Überlappung.
+  const jetzt = performance.now();
+  const lage = geraeteLage(data);
+  if (lage) flaeche.fahrt(lage, jetzt);
+  else flaeche.letzte = null;
+  if (data.new_cells && data.new_cells.length) flaeche.zellenMerken(data.new_cells, jetzt);
   zeichnenAnfordern();
   // Hörbar machen, was der Fahrer nicht selbst ausgelöst hat (alerts.js).
   if (previous && window.Warnungen) {
@@ -119,7 +131,7 @@ function onState(data) {
   // die eben im 'init' gemalte Fläche wäre sonst sofort wieder weg.
   const before = previous && previous.field ? previous.field.id : null;
   const now = data.field ? data.field.id : null;
-  if (previous && before !== now) { clearCells(); state.trail = []; refreshLists(); }
+  if (previous && before !== now) refreshLists();
   // Erstes Bild bei offenem Menü (Aufruf über #menu=…): die Listen wurden vor
   // dem Zustand gefüllt und wussten noch nichts vom geladenen Feld.
   if (!previous && !el('sheet').hidden) refreshLists();
@@ -297,6 +309,13 @@ function updateHud(s) {
     : 'aus · Fläche wird nicht gemalt';
 
   const steering = s.steering;
+  // Nimmt die Anlage gerade Rückwärtsfahrt an, soll man das sehen - stimmt es
+  // nicht, dreht derselbe Knopf es um.
+  const rueck = Boolean(s.kurs_kopplung && s.kurs_kopplung.rueckwaerts);
+  el('btnRichtung').classList.toggle('rueck', rueck);
+  el('richtungText').textContent = rueck ? 'Rückwärts' : 'Richtung';
+  el('btnSpur').classList.toggle('recording', spurAufnahmeLaeuft());
+
   const steer = el('btnSteer');
   steer.classList.remove('an', 'scharf');
   // Dasselbe am Lichtbalken, wo der Blick ist: Rahmen und Plakette.
@@ -419,15 +438,79 @@ window.addEventListener('resize', resize);
   .forEach((art) => canvas.addEventListener(art, zeichnenAnfordern, { passive: true }));
 document.addEventListener('click', zeichnenAnfordern, { passive: true });
 
+/* ------------------------------------------------- Glatte Bewegung
+
+   Die Lage kommt zehnmal je Sekunde, aber nicht im Takt des Bildschirms -
+   mal zwei Pakete kurz hintereinander, mal eine Lücke. Gezeichnet stur nach
+   Paket ruckelt das Bild. Deshalb wird zwischen zwei Paketen mit Tempo und
+   Kurs weitergerechnet, und ein neues Paket zieht die Anzeige in 180 ms weich
+   auf die gemeldete Lage, statt sie hinüberspringen zu lassen. */
+const glatt = { empfangen: 0, korrektur: [0, 0, 0], korrekturZeit: 0 };
+let rahmen = [0, 0, 0];             // Versatz dieses Bildes: Ost, Nord, Kurs
+const GLATT_VORAUS_S = 0.25;
+const GLATT_ZIEHEN_MS = 180;
+
+/* Die Hinterachse - dort steht der Traktor, dort ist die Mitte der Ansicht. */
+function traktorPose(s) {
+  if (!s || !s.position || s.heading == null) return null;
+  const profil = s.profile || {};
+  const h = s.heading * Math.PI / 180;
+  const vor = profil.antenna_forward_m || 0, rechts = profil.antenna_right_m || 0;
+  return [s.position[0] - Math.sin(h) * vor - Math.cos(h) * rechts,
+          s.position[1] - Math.cos(h) * vor + Math.sin(h) * rechts, s.heading];
+}
+
+function fahrtTempo(s) {
+  const v = s && s.fix ? (s.fix.speed_ms || 0) : 0;
+  return s && s.kurs_kopplung && s.kurs_kopplung.rueckwaerts ? -v : v;
+}
+
+function winkelDifferenz(a, b) { return ((a - b + 540) % 360) - 180; }
+
+function anzeigeVersatz(jetzt) {
+  const s = state.live;
+  if (!s || s.heading == null) return [0, 0, 0];
+  const dt = Math.min(GLATT_VORAUS_S, Math.max(0, (jetzt - glatt.empfangen) / 1000));
+  const v = fahrtTempo(s), h = s.heading * Math.PI / 180;
+  const rest = Math.max(0, 1 - (jetzt - glatt.korrekturZeit) / GLATT_ZIEHEN_MS);
+  return [Math.sin(h) * v * dt + glatt.korrektur[0] * rest,
+          Math.cos(h) * v * dt + glatt.korrektur[1] * rest,
+          glatt.korrektur[2] * rest];
+}
+
+function glaettungNachfuehren(vorher, neu) {
+  const jetzt = performance.now();
+  const alt = traktorPose(vorher), neuPose = traktorPose(neu);
+  let korrektur = [0, 0, 0];
+  if (alt && neuPose) {
+    const v = anzeigeVersatz(jetzt);
+    const k = [alt[0] + v[0] - neuPose[0], alt[1] + v[1] - neuPose[1],
+               winkelDifferenz(alt[2] + v[2], neuPose[2])];
+    // Ein Sprung (neues Feld, Simulator versetzt) wird nicht weichgezeichnet.
+    if (Math.hypot(k[0], k[1]) < 3 && Math.abs(k[2]) < 30) korrektur = k;
+  }
+  glatt.korrektur = korrektur;
+  glatt.empfangen = jetzt;
+  glatt.korrekturZeit = jetzt;
+}
+
+function inBewegung() {
+  const s = state.live;
+  return Boolean(s && s.heading != null && (Math.abs(fahrtTempo(s)) > 0.05
+    || performance.now() - glatt.korrekturZeit < GLATT_ZIEHEN_MS));
+}
+
 function viewCentre() {
   const s = state.live;
+  const pose = traktorPose(s);
+  if (pose) return [pose[0] + rahmen[0], pose[1] + rahmen[1]];
   return (s && s.tool_position) ? s.tool_position : [0, 0];
 }
 
 function viewRotation() {
   const s = state.live;
   if (state.view.mode === 'nord' || !s || s.heading == null) return 0;
-  return -s.heading * Math.PI / 180;
+  return -(s.heading + rahmen[2]) * Math.PI / 180;
 }
 
 function ankerY() { return canvas.clientHeight * (state.view.mode === 'nord' ? 0.5 : ANKER_Y); }
@@ -460,15 +543,22 @@ let neuZeichnen = true;
 function zeichnenAnfordern() { neuZeichnen = true; }
 setInterval(zeichnenAnfordern, 1000);   // falls irgendwo eine Änderung nicht Bescheid sagt
 
-function render() {
+/* In Fahrt wird zwischen den Paketen weitergezeichnet - gedeckelt auf 30 Bilder
+   je Sekunde, das reicht für eine ruhige Bewegung und schont das Tablet. */
+const BILD_ABSTAND_MS = 33;
+let letztesBild = 0;
+function render(zeit) {
+  if (inBewegung() && zeit - letztesBild >= BILD_ABSTAND_MS) neuZeichnen = true;
   if (neuZeichnen && document.visibilityState === 'visible') {
     neuZeichnen = false;
+    letztesBild = zeit;
     zeichnen();
   }
   requestAnimationFrame(render);
 }
 
 function zeichnen() {
+  rahmen = anzeigeVersatz(performance.now());
   const width = canvas.clientWidth, height = canvas.clientHeight;
   ctx.save();
   ctx.fillStyle = F.boden;
@@ -505,29 +595,13 @@ function drawGrid() {
 }
 
 function drawCoverage() {
-  const cell = state.cellSize || 0.5;
-  const half = COVER_SIZE / 2;
-  // Nur den sichtbaren Ausschnitt der Hintergrund-Leinwand zeichnen.
-  const corners = [
+  const ecken = [
     screenToWorld(0, 0), screenToWorld(canvas.clientWidth, 0),
-    screenToWorld(0, canvas.clientHeight),
-    screenToWorld(canvas.clientWidth, canvas.clientHeight),
+    screenToWorld(0, canvas.clientHeight), screenToWorld(canvas.clientWidth, canvas.clientHeight),
   ];
-  const xs = corners.map((p) => p[0]), ys = corners.map((p) => p[1]);
-  const sx0 = Math.max(0, Math.floor(Math.min(...xs) / cell) + half - 1);
-  const sx1 = Math.min(COVER_SIZE, Math.ceil(Math.max(...xs) / cell) + half + 1);
-  const sy0 = Math.max(0, half - Math.ceil(Math.max(...ys) / cell) - 1);
-  const sy1 = Math.min(COVER_SIZE, half - Math.floor(Math.min(...ys) / cell) + 1);
-  if (sx1 <= sx0 || sy1 <= sy0) return;
-
-  const wx = (sx0 - half) * cell;
-  const wy = (half - sy1) * cell;
-  ctx.save();
-  ctx.scale(1, -1);
-  ctx.imageSmoothingEnabled = false;
-  ctx.drawImage(coverLayer, sx0, sy0, sx1 - sx0, sy1 - sy0,
-                wx, -(wy + (sy1 - sy0) * cell), (sx1 - sx0) * cell, (sy1 - sy0) * cell);
-  ctx.restore();
+  const xs = ecken.map((p) => p[0]), ys = ecken.map((p) => p[1]);
+  flaeche.zeichnen(ctx, [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)],
+    geraeteLage(state.live, rahmen));
 }
 
 function polyline(points, close) {
@@ -658,7 +732,8 @@ function shiftLine(line, shift) {
 }
 
 function drawTrail() {
-  if (state.trail.length < 2) return;
+  // Bei laufender Arbeit zeigt der Streifen, wo gefahren wurde.
+  if (state.trail.length < 2 || (state.live && state.live.job)) return;
   polyline(state.trail);
   ctx.strokeStyle = F.spur;
   ctx.lineWidth = 1.5 / state.view.scale;
@@ -678,61 +753,105 @@ function drawRecording() {
 }
 
 /* Traktor und Gerät im Weltmaßstab, damit die Perspektive mitspielt: was drei
- * Meter breit ist, ist auch auf dem Bildschirm drei Meter breit - und wird
- * nach vorn hin kleiner wie alles andere. */
+ * Meter breit ist, ist auch auf dem Bildschirm drei Meter breit.
+ *
+ * Der Traktor steht an der Hinterachse, das Gerät dort, wo der Server markiert
+ * (implement.position) - beim gezogenen Gerät in seiner eigenen Ausrichtung.
+ * So beginnt der Streifen sichtbar am Gerät und nicht unter dem Traktor. */
 function drawVehicle() {
   const s = state.live;
-  if (!s || !s.tool_position || s.heading == null) return;
-  const profile = s.profile || { width_m: 3 };
-  const sections = s.sections || [];
+  const pose = traktorPose(s);
+  if (!pose) return;
+  const profil = s.profile || {};
   const implement = s.implement || {};
-  const h = s.heading * Math.PI / 180;
-  // Nie kleiner als eine Fingerkuppe, egal wie weit herausgezoomt wird.
-  const mind = 26 / state.view.scale;
-  const laenge = Math.max(3.2, mind);
+  const roh = pose[2] * Math.PI / 180;
+  const kurs = (pose[2] + rahmen[2]) * Math.PI / 180;
+
+  // Lage des Geräts relativ zur Achse, im Fahrzeugsystem (rechts, vorwärts).
+  const ip = implement.position || s.tool_position || pose;
+  const ox = ip[0] - pose[0], oy = ip[1] - pose[1];
+  const geraetRechts = ox * Math.cos(roh) - oy * Math.sin(roh);
+  const geraetVor = ox * Math.sin(roh) + oy * Math.cos(roh);
 
   ctx.save();
-  ctx.translate(s.tool_position[0], s.tool_position[1]);
-  ctx.rotate(-h);          // Welt ist y-oben: Kurs im Uhrzeigersinn = negative Drehung
+  ctx.translate(pose[0] + rahmen[0], pose[1] + rahmen[1]);
+  ctx.rotate(-kurs);           // Welt ist y-oben: +y ist vorwärts, +x rechts
+  geraetZeichnen(s, profil, implement, geraetRechts, geraetVor);
+  traktorZeichnen(profil);
+  ctx.restore();
+}
 
-  // Gerät: beim gezogenen Gerät in seiner eigenen Ausrichtung am Zugpunkt.
+function geraetZeichnen(s, profil, implement, rechts, vor) {
+  const px = 1 / state.view.scale;
+  const tiefe = Math.max(0.9, 7 * px);
+  const sections = s.sections || [];
+  const breite = profil.width_m || 3;
+
+  // Verbindung von der Hinterachse zum Gerät
+  ctx.beginPath();
+  ctx.moveTo(0, -0.6);
+  ctx.lineTo(rechts, vor + tiefe / 2);
   ctx.save();
-  if (implement.trailed && implement.heading != null) {
-    const lag = (implement.heading - s.heading) * Math.PI / 180;
-    const hitch = implement.hitch_length_m || 4;
-    ctx.rotate(-lag);
-    ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(0, -hitch);
-    ctx.strokeStyle = F.traktor; ctx.globalAlpha = 0.6; ctx.lineWidth = 2 / state.view.scale; ctx.stroke();
-    ctx.globalAlpha = 1;
-    ctx.translate(0, -hitch);
-  } else {
-    ctx.translate(0, -laenge * 0.55);
-  }
-  const bar = profile.width_m || 3, dicke = Math.max(0.6, mind * 0.35);
-  if (sections.length) {
-    sections.forEach((section) => {
-      ctx.fillStyle = section.forced_off ? F.vg : section.enabled ? F.aktiv : F.pass;
-      ctx.globalAlpha = section.enabled && !section.forced_off ? 0.9 : 0.6;
-      ctx.fillRect(section.left_m, -dicke / 2, section.right_m - section.left_m, dicke);
-    });
-    ctx.globalAlpha = 1;
-  } else {
-    ctx.fillStyle = F.aktiv; ctx.globalAlpha = 0.9;
-    ctx.fillRect(-bar / 2, -dicke / 2, bar, dicke);
-    ctx.globalAlpha = 1;
-  }
+  ctx.strokeStyle = F.traktor;
+  ctx.globalAlpha = 0.7;
+  ctx.lineWidth = Math.max(0.12, 2.5 * px);
+  ctx.stroke();
   ctx.restore();
 
-  // Traktor: eine Pfeilspitze in Fahrtrichtung
-  const w = laenge * 0.42;
+  ctx.save();
+  ctx.translate(rechts, vor);
+  if (implement.trailed && implement.heading != null) {
+    ctx.rotate(-winkelDifferenz(implement.heading, s.heading) * Math.PI / 180);
+  }
+  const teile = sections.length ? sections : [{ left_m: -breite / 2, right_m: breite / 2, enabled: true }];
+  teile.forEach((t) => {
+    const an = t.enabled && !t.forced_off;
+    ctx.fillStyle = t.forced_off ? F.vg : an ? F.aktiv : F.geraet;
+    ctx.fillRect(t.left_m, -tiefe / 2, t.right_m - t.left_m, tiefe);
+  });
+  // Fugen zwischen den Teilbreiten und ein Rand ums ganze Gerät
+  ctx.strokeStyle = F['traktor-rand'];
+  ctx.lineWidth = Math.max(0.05, 1.2 * px);
+  teile.forEach((t) => ctx.strokeRect(t.left_m, -tiefe / 2, t.right_m - t.left_m, tiefe));
+  ctx.restore();
+}
+
+/* Ein Traktor von oben: Hinterräder, Kabine, Haube, Vorderräder. Unter einer
+ * Fingerkuppe Größe wird er vergrößert - das Gerät nicht, dessen Breite zählt. */
+function traktorZeichnen(profil) {
+  const radstand = profil.wheelbase_m || 2.6;
+  const laenge = radstand + 2.2;
+  const k = Math.max(1, (34 / state.view.scale) / laenge);
+  ctx.save();
+  ctx.scale(k, k);
+  const px = 1 / (state.view.scale * k);
+  ctx.lineWidth = 1.4 * px;
+  ctx.strokeStyle = F['traktor-rand'];
+  ctx.fillStyle = F['traktor-rand'];
+  // Räder
+  ctx.fillRect(-1.25, -0.8, 0.55, 1.6);
+  ctx.fillRect(0.7, -0.8, 0.55, 1.6);
+  ctx.fillRect(-1.05, radstand - 0.45, 0.4, 0.9);
+  ctx.fillRect(0.65, radstand - 0.45, 0.4, 0.9);
+  // Rumpf: Kabine hinten breit, Haube nach vorn schmal, die Spitze zeigt die Richtung
   ctx.beginPath();
-  ctx.moveTo(0, laenge * 0.55);
-  ctx.lineTo(w, -laenge * 0.4);
-  ctx.lineTo(0, -laenge * 0.22);
-  ctx.lineTo(-w, -laenge * 0.4);
+  ctx.moveTo(-0.75, -0.9);
+  ctx.lineTo(0.75, -0.9);
+  ctx.lineTo(0.75, 0.9);
+  ctx.lineTo(0.45, 1.2);
+  ctx.lineTo(0.45, radstand + 0.75);
+  ctx.lineTo(0, radstand + 1.25);
+  ctx.lineTo(-0.45, radstand + 0.75);
+  ctx.lineTo(-0.45, 1.2);
+  ctx.lineTo(-0.75, 0.9);
   ctx.closePath();
   ctx.fillStyle = F.traktor;
   ctx.fill();
+  ctx.stroke();
+  // Kabinendach
+  ctx.fillStyle = F['traktor-rand'];
+  ctx.globalAlpha = 0.25;
+  ctx.fillRect(-0.6, -0.65, 1.2, 1.4);
   ctx.restore();
 }
 
@@ -823,6 +942,25 @@ el('btnTurn').onclick = async () => {
 /* Was die aktive Spur ersetzt, braucht einen zweiten Tipp: auf dem rüttelnden Sitz
    trifft der Handschuh leicht die Nachbartaste, und bei eingeschalteter Lenkung
    wechselte sonst das Lenkziel. Wie bei der Wende - erst fragen, dann tun. */
+/* Spur-Werkzeuge: aufklappen, nach der Wahl wieder zu. Läuft eine Aufnahme
+   (A gesetzt, Kurve, Grenze), bleiben sie offen - der zweite Druck folgt. */
+function spurAufnahmeLaeuft() {
+  const r = state.live && state.live.recording;
+  return Boolean(r && (r.pending_a || r.mode));
+}
+function werkzeugeZeigen(offen) {
+  el('werkzeuge').hidden = !offen;
+  el('btnSpur').setAttribute('aria-expanded', String(offen));
+}
+function werkzeugeSchliessenWennFertig() {
+  if (!spurAufnahmeLaeuft() && !document.querySelector('#werkzeuge .bestaetigen')) werkzeugeZeigen(false);
+}
+el('btnSpur').onclick = () => werkzeugeZeigen(el('werkzeuge').hidden);
+el('werkzeuge').addEventListener('click', () => setTimeout(werkzeugeSchliessenWennFertig, 700));
+document.addEventListener('pointerdown', (event) => {
+  if (!el('werkzeuge').hidden && !event.target.closest('#werkzeuge, #btnSpur')) werkzeugeSchliessenWennFertig();
+});
+
 function nachfragen(knopf, frage) {
   if (knopf.classList.contains('bestaetigen')) {
     knopf.classList.remove('bestaetigen');
@@ -864,6 +1002,10 @@ el('btnContour').onclick = async () => {
 
 // Zehn Zentimeter je Druck: das ist der Schritt, den man im Feld braucht -
 // die Nachbarspur liegt einen Meter daneben, nicht einen Zentimeter.
+el('btnRichtung').onclick = async () => {
+  const antwort = await api('POST', '/api/richtung/umkehren');
+  if (antwort) toast(antwort.data.rueckwaerts ? 'Fahrtrichtung: rückwärts' : 'Fahrtrichtung: vorwärts');
+};
 el('btnNudgeLeft').onclick = () => api('POST', '/api/guidance/nudge', { metres: -0.10 });
 el('btnNudgeRight').onclick = () => api('POST', '/api/guidance/nudge', { metres: 0.10 });
 
@@ -936,7 +1078,7 @@ function tagSetzen(tag) {
   document.querySelector('meta[name=theme-color]').setAttribute('content', tag ? '#dfe6dc' : '#05090c');
   merken('agripilot.tag', tag ? '1' : '0');
   farbenLesen();
-  repaintCells();
+  zeichnenAnfordern();
 }
 el('tagNacht').onclick = () => tagSetzen(!document.body.classList.contains('tag'));
 

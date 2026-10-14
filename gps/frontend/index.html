@@ -58,16 +58,14 @@
     </button>
   </div>
 
-  <!-- Die untere Reihe: Fahrt links, Vorgewende in der Mitte, Handlung rechts.
-       Eine Reihe, die sich den Platz teilt - nichts liegt absolut, nichts
-       kann sich überlappen, egal wie breit eine Zahl wird. -->
+  <!-- Unten links nur die Zahlen, die man beim Fahren braucht - flach, damit
+       die Mitte frei bleibt: dort stehen Traktor, Gerät und Feld. -->
   <div class="ruf" id="ruf"></div>
   <div class="unten">
-    <!-- Fahrt: die Zahlen, die man beim Fahren braucht -->
     <div class="glas cluster">
       <div class="kmh"><b id="speed">--</b><span>km/h</span></div>
       <div><b id="pass">--</b><span id="passLabel">Spur</span></div>
-      <div><b id="area">--</b><span>ha bearbeitet</span></div>
+      <div><b id="area">--</b><span>ha</span></div>
       <div id="tiltBox" hidden><b id="tilt">--</b><span id="tiltLabel">° Hang</span></div>
       <div class="spark" aria-hidden="true"><svg viewBox="0 0 200 40" preserveAspectRatio="none"><line class="null" x1="0" y1="20" x2="200" y2="20"/><path class="band" d="M0 17 H200 V23 H0 Z"/><path id="spark" d=""/></svg></div>
       <div class="sections" id="sections" hidden></div>
@@ -77,26 +75,36 @@
       <div class="zeile"><span id="restLabel">bis Vorgewende</span><b id="rest">--</b></div>
       <div class="bar"><i id="restBar"></i></div>
     </div>
-    <!-- Handlungsspalte: nach Wichtigkeit von unten nach oben -->
-    <div class="spalte">
-      <div class="reihe">
-        <button class="taste" id="btnNudgeLeft"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg>10 cm</button>
-        <button class="taste" id="btnNudgeRight">10 cm<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5l7 7-7 7"/></svg></button>
-      </div>
-      <div class="reihe">
-        <button class="taste" id="btnAB"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 19V5M19 19V5M5 12h14"/></svg><span>A setzen</span></button>
-        <button class="taste" id="btnAPlus"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 19V5M5 12h9M17 9v6M14 12h6"/></svg>A+</button>
-        <button class="taste" id="btnContour"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l9 6.5-3.5 10.5h-11L3 9.5z"/><path d="M12 8l5 3.5-2 6H9l-2-6z"/></svg><span>Kontur</span></button>
-      </div>
-      <div class="reihe klein">
-        <button class="taste turn" id="btnTurn"><span class="fuellung" id="turnFill"></span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12a8 8 0 1 1 3 6.3M4 18v-6h6"/></svg><span>Wende</span></button>
-        <button class="taste" id="btnCurve"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 15c3-8 6-8 9 0s6 8 9 0"/></svg><span>Kurve</span></button>
-        <button class="taste" id="btnMenu"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg><span>Menü</span></button>
-      </div>
-      <button class="taste mark" id="btnJob" role="switch" aria-checked="false"><i></i><span>Markieren<small id="jobText">aus</small></span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h16M6 20V9l6-5 6 5v11M10 20v-6h4v6"/></svg></button>
-      <button class="taste lenk" id="btnSteer" role="switch" aria-checked="false"><i></i><span>Lenkung<small id="steerText">aus</small></span><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3"/><path d="M3 12h6M15 12h6M12 15v6"/></svg></button>
-    </div>
   </div>
+
+  <!-- Die Leiste rechts: schmal, damit das Feld Platz hat. Oben das Menü, in
+       der Mitte die Spurwerkzeuge, unten - wo die Hand am montierten Tablet
+       liegt - Markieren und Lenkung. -->
+  <nav class="leiste" id="leiste" aria-label="Bedienung">
+    <button class="taste" id="btnMenu"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg><span>Menü</span></button>
+    <!-- Spur anlegen braucht man einmal je Feld: die vier Werkzeuge klappen
+         neben der Leiste auf, statt ständig Platz zu belegen. -->
+    <button class="taste" id="btnSpur" aria-expanded="false" aria-controls="werkzeuge"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 20L10 4M18 20L14 4M12 6v2M12 11v2M12 16v2"/></svg><span>Spur</span></button>
+    <div class="werkzeuge" id="werkzeuge" role="group" aria-label="Spur anlegen" hidden>
+      <button class="taste" id="btnAB"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 19V5M19 19V5M5 12h14"/></svg><span>A setzen</span></button>
+      <button class="taste" id="btnAPlus"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 19V5M5 12h9M17 9v6M14 12h6"/></svg><span>A+</span></button>
+      <button class="taste" id="btnContour"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l9 6.5-3.5 10.5h-11L3 9.5z"/><path d="M12 8l5 3.5-2 6H9l-2-6z"/></svg><span>Kontur</span></button>
+      <button class="taste" id="btnCurve"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 15c3-8 6-8 9 0s6 8 9 0"/></svg><span>Kurve</span></button>
+    </div>
+    <div class="gruppe paar" role="group" aria-label="Spur verschieben">
+      <button class="taste" id="btnNudgeLeft" aria-label="Spur 10 cm nach links"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg><span>10 cm</span></button>
+      <button class="taste" id="btnNudgeRight" aria-label="Spur 10 cm nach rechts"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5l7 7-7 7"/></svg><span>10 cm</span></button>
+    </div>
+    <div class="gruppe paar" role="group" aria-label="Fahrt">
+      <button class="taste turn" id="btnTurn"><span class="fuellung" id="turnFill"></span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12a8 8 0 1 1 3 6.3M4 18v-6h6"/></svg><span>Wende</span></button>
+      <!-- Wenn die Anlage vorwärts und rückwärts verwechselt: der Traktor zeigt dann gegen die Fahrt. -->
+      <button class="taste" id="btnRichtung" title="Fahrtrichtung umdrehen"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 20V4M4 8l4-4 4 4M16 4v16M12 16l4 4 4-4"/></svg><span id="richtungText">Richtung</span></button>
+    </div>
+    <div class="unten-rechts">
+      <button class="taste mark" id="btnJob" role="switch" aria-checked="false"><i></i><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h16M6 20V9l6-5 6 5v11M10 20v-6h4v6"/></svg><span>Markieren<small id="jobText">aus</small></span></button>
+      <button class="taste lenk" id="btnSteer" role="switch" aria-checked="false"><i></i><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3"/><path d="M3 12h6M15 12h6M12 15v6"/></svg><span>Lenkung<small id="steerText">aus</small></span></button>
+    </div>
+  </nav>
 </main>
 
 <!-- Menü-Ebenen -->
@@ -485,6 +493,7 @@
 <button class="vorschlag" id="feldVorschlag" hidden></button>
 
 <script src="alerts.js"></script>
+<script src="flaeche.js"></script>
 <script src="app.js"></script>
 <script>
   /* Nur fuer die Kachel auf dem Android-Tablet. Browser lassen Service Worker

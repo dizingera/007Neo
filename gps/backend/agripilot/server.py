@@ -184,6 +184,11 @@ class Application:
         if simulator_source is None or ziel is None:
             return False
         simulator_source.versetzen(*ziel)
+        # Der Kurs springt mit: ohne Neubeginn hielte die Kursberechnung den
+        # Sprung für eine Umkehr, und der Traktor zeigte rückwärts.
+        self.engine.heading_filter.reset()
+        if self.engine.heading is not None:
+            self.engine.implement_heading.reset(ziel[2])
         return True
 
     def _quellen_starten(self) -> None:
@@ -440,12 +445,14 @@ class Application:
                 # Nobody is looking: drop the delta so a later viewer gets a
                 # full map instead of a half one.
                 self.engine.coverage.drain_new_cells()
+                self.engine.coverage.drain_fremde_zellen()
                 continue
             message = json.dumps({
                 "type": "state",
                 **self.engine.state(),
                 "system": self.system_status(),
                 "new_cells": self.engine.coverage.drain_new_cells(),
+                "fremde_zellen": self.engine.coverage.drain_fremde_zellen(),
             })
             for websocket in list(self.clients):
                 try:
@@ -1251,6 +1258,10 @@ def create_app(config=None) -> FastAPI:
     async def quelle_neustart():
         """Empfänger und Sensor neu verbinden - etwa nach dem Umstecken."""
         return ok(await application.quelle_wechseln())
+
+    @api.post("/api/richtung/umkehren")
+    async def richtung_umkehren():
+        return guard(engine.richtung_umkehren)
 
     @api.post("/api/simulator")
     async def simulator(payload: dict = Body(...)):

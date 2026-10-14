@@ -758,6 +758,20 @@ class HeadingFilter:
     def bestaetigung_offen(self) -> bool:
         return self._bestaetigt
 
+    def umkehren(self) -> None:
+        """Der Fahrer dreht die Fahrtrichtung von Hand um.
+
+        Für den Fall, dass die Anlage vorwärts und rückwärts verwechselt hat -
+        der Traktor zeigt dann auf der Karte gegen die Fahrt. Die Vermutung
+        wird umgedreht und gilt, bis wieder eine echte Umkehr erkannt wird.
+        """
+        self.rueckwaerts = not self.rueckwaerts
+        if self.value is not None:
+            self.value = normalize_heading(self.value + 180.0)
+        self._gegen = 0
+        self._bestaetigt = False
+        self._letzter_kurs = None
+
     def reset(self) -> None:
         """Neue Fahrt, neue Quelle: alles Gelernte und Vermutete verwerfen."""
         self.value = None

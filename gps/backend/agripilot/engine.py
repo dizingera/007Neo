@@ -818,6 +818,16 @@ class Engine:
         })
         return self.line.nudge_m
 
+    def richtung_umkehren(self) -> dict:
+        """Vorwärts/rückwärts von Hand umdrehen (Knopf auf dem Hauptbildschirm)."""
+        self.heading_filter.umkehren()
+        if self.heading_filter.value is not None:
+            self.heading = self.heading_filter.value
+            self.implement_heading.reset(self.heading)
+        richtung = "rückwärts" if self.heading_filter.rueckwaerts else "vorwärts"
+        self.note(f"Fahrtrichtung von Hand: {richtung}")
+        return {"rueckwaerts": self.heading_filter.rueckwaerts}
+
     def arm_steering(self) -> str:
         """Lenkung scharf schalten - der Fahrer erklärt damit auch, dass er vorwärts fährt."""
         self.heading_filter.bestaetige_vorwaerts()

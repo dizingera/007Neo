@@ -59,6 +59,10 @@ class CoverageMap:
         self.cells: set[tuple[int, int]] = set()
         self.applied_area_m2 = 0.0  # includes overlap: what the machine actually put out
         self._new_cells: list[tuple[int, int]] = []
+        # Was nicht diese Maschine eben gefahren hat (anderer Traktor, früherer
+        # Stand). Getrennt, weil die Anzeige die eigene Fahrt selbst als glatten
+        # Streifen zeichnet und nur das Fremde aus Zellen malen muss.
+        self._fremde_neu: list[tuple[int, int]] = []
 
     # -- queries ----------------------------------------------------------
 
@@ -218,6 +222,11 @@ class CoverageMap:
         new, self._new_cells = self._new_cells, []
         return new
 
+    def drain_fremde_zellen(self) -> list[tuple[int, int]]:
+        """Zellen, die seit dem letzten Aufruf von außen dazukamen (merge)."""
+        neu, self._fremde_neu = self._fremde_neu, []
+        return neu
+
     def pack(self) -> bytes:
         """Compact binary form for storage and for syncing to the master."""
         import struct
@@ -256,7 +265,7 @@ class CoverageMap:
         added = other.cells - self.cells
         self.cells |= added
         self.applied_area_m2 += other.applied_area_m2
-        self._new_cells.extend(sorted(added))
+        self._fremde_neu.extend(sorted(added))
 
     def cells_for_display(self, limit: int = 200_000) -> list[list[int]]:
         cells = sorted(self.cells)
