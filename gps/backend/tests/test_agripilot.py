@@ -3014,6 +3014,43 @@ class SaisonspurTest(unittest.TestCase):
         self.assertEqual([l["id"] for l in self.store.list_lines(self.feld["id"])][:2],
                          [neu["id"], alt["id"]])
 
+    def test_the_tramline_width_defaults_to_21_m_and_is_used_for_a_season_line(self):
+        jahr = time.localtime().tm_year
+        self.assertEqual(self.engine.fahrgassen_weite(), 21.0)
+        spur = self._spur("Saat")
+        self.engine.load_field(self.feld["id"])
+        record = self.engine.update_line(spur["id"], {"saisonspur": True})
+        self.assertEqual((record["saison"], record["fahrgasse_m"]), (jahr, 21.0))
+        self.assertEqual(self.engine.line.fahrgasse_m, 21.0)
+        record = self.engine.update_line(spur["id"], {"saisonspur": False})
+        self.assertEqual((record["saison"], record["fahrgasse_m"]), (0, 0.0))
+
+    def test_changing_the_tramline_width_leaves_existing_season_lines_alone(self):
+        spur = self._spur("Saat")
+        self.engine.update_line(spur["id"], {"saisonspur": True})
+        self.assertEqual(self.engine.set_fahrgassen_weite("24"), 24.0)
+        self.assertEqual(self.engine.fahrgassen_weite(), 24.0)
+        self.assertEqual(self.store.get_line(spur["id"])["fahrgasse_m"], 21.0)
+        for falsch in (None, "abc", 2, 100):
+            with self.assertRaises(ValueError):
+                self.engine.set_fahrgassen_weite(falsch)
+        self.assertEqual(self.engine.fahrgassen_weite(), 24.0)
+
+    def test_tramlines_stay_at_the_same_metres_for_every_working_width(self):
+        def gassen(breite):
+            linie = GuidanceLine("ab", [(0, 0), (0, 100)], breite)
+            linie.fahrgasse_m = 21.0
+            return [round(p * breite, 2) for p in range(-30, 31) if linie.ist_fahrgasse(p)]
+        # Drille 3 m, Spritze/Streuer 21 m: die Gassen bei 0, ±21, ±42 m.
+        self.assertEqual(gassen(3.0)[:5], [-84.0, -63.0, -42.0, -21.0, 0.0])
+        self.assertEqual([g for g in gassen(21.0) if -50 < g < 50], [-42.0, -21.0, 0.0, 21.0, 42.0])
+        # 4 m geht in 21 m nicht auf: trotzdem eine Gasse je 21 m, keine wandert
+        # (früher jede 5. Spur = alle 20 m), jede liegt höchstens 2 m daneben.
+        vier = gassen(4.0)
+        self.assertEqual(len([g for g in vier if 0 <= g <= 105]), 6)
+        for g in vier:
+            self.assertLessEqual(abs(g - round(g / 21.0) * 21.0), 2.0)
+
 
 class GrenzeZuKleinTest(unittest.TestCase):
     """Eine Gerade als Grenze abschließen darf die echte Grenze nicht ersetzen."""

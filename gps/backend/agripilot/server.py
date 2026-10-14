@@ -689,6 +689,15 @@ def create_app(config=None) -> FastAPI:
         """Umbenennen oder als Saisonspur mit Fahrgassenabstand festlegen."""
         return guard(engine.update_line, line_id, payload)
 
+    @api.get("/api/fahrgassen")
+    async def get_fahrgassen() -> dict:
+        return {"weite_m": engine.fahrgassen_weite()}
+
+    @api.post("/api/fahrgassen")
+    async def set_fahrgassen(payload: dict = Body(...)):
+        """Fahrgassenweite für neue Saisonspuren (Menü → Spuren)."""
+        return guard(lambda: {"weite_m": engine.set_fahrgassen_weite(payload.get("weite_m"))})
+
     @api.delete("/api/lines/{line_id}")
     async def delete_line(line_id: str):
         store.delete_line(line_id)

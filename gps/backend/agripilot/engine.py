@@ -65,6 +65,11 @@ SESSION_KEY = "session"
 CHECKPOINT_S = 30.0
 RESUME_MAX_AGE_S = 3 * 3600.0
 
+# Fahrgassen: Spritze und Streuer auf dem Betrieb arbeiten mit 21 m.
+FAHRGASSEN_WEITE_VORGABE = 21.0
+FAHRGASSEN_WEITE_MIN = 6.0
+FAHRGASSEN_WEITE_MAX = 60.0
+
 
 class Engine:
     def __init__(self, config: Config, store: storage.Storage) -> None:
@@ -572,11 +577,37 @@ class Engine:
         self.note(f"{len(angelegt)} Felder aus Shapefile übernommen")
         return angelegt
 
+    def fahrgassen_weite(self) -> float:
+        """Abstand der Fahrgassen, mit dem eine Spur zur Saisonspur wird.
+
+        Gehört zum Betrieb (Spritze und Streuer), nicht zum Gerät, das gerade
+        dran ist. Eine schon gesetzte Saisonspur behält ihren Abstand, auch wenn
+        sich dieser Wert ändert - die Fahrgassen liegen dann schon im Feld.
+        """
+        wert = self.store.get_setting("fahrgassen_weite")
+        return float(wert) if wert else FAHRGASSEN_WEITE_VORGABE
+
+    def set_fahrgassen_weite(self, meter: float) -> float:
+        try:
+            meter = float(meter)
+        except (TypeError, ValueError):
+            raise ValueError("Fahrgassenweite bitte in Metern angeben") from None
+        if not FAHRGASSEN_WEITE_MIN <= meter <= FAHRGASSEN_WEITE_MAX:
+            raise ValueError(f"Fahrgassenweite zwischen {FAHRGASSEN_WEITE_MIN:g} "
+                             f"und {FAHRGASSEN_WEITE_MAX:g} m")
+        self.store.set_setting("fahrgassen_weite", meter)
+        self.note(f"Fahrgassenweite {meter:g} m")
+        return meter
+
     def update_line(self, line_id: str, values: dict) -> dict:
         """Spur umbenennen oder als Saisonspur mit Fahrgassen festlegen."""
         werte = {}
         if "name" in values:
             werte["name"] = str(values["name"]).strip() or "Spur"
+        if "saisonspur" in values:
+            # Die Taste in der Liste: Saisonspur mit der eingestellten
+            # Fahrgassenweite, oder wieder keine.
+            values = {**values, "fahrgasse_m": self.fahrgassen_weite() if values["saisonspur"] else 0.0}
         if "fahrgasse_m" in values:
             fahrgasse = float(values["fahrgasse_m"] or 0.0)
             if fahrgasse < 0:

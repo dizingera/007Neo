@@ -539,8 +539,20 @@ class GuidanceLine:
         return max(1, round(self.fahrgasse_m / self.spacing))
 
     def ist_fahrgasse(self, pass_number: int) -> bool:
-        jede = self.fahrgasse_jede()
-        return jede > 0 and pass_number % jede == 0
+        """Liegt eine Fahrgasse in dieser Spur?
+
+        Die Fahrgassen liegen fest in Metern (alle fahrgasse_m ab Spur 0), nicht
+        "jede n-te Spur": so liegen sie beim Säen mit 4 m und beim Spritzen mit
+        21 m an derselben Stelle, auch wenn die Breiten nicht glatt aufgehen.
+        Fahrgasse ist die Spur, in deren Streifen die Fahrgasse fällt.
+        """
+        if self.fahrgasse_m <= 0 or self.spacing <= 0:
+            return False
+        if self.fahrgasse_m <= self.spacing:
+            return True
+        mitte = pass_number * self.spacing
+        fahrgasse = math.floor(mitte / self.fahrgasse_m + 0.5) * self.fahrgasse_m
+        return math.floor(fahrgasse / self.spacing + 0.5) == pass_number
 
 
 def speed_gain_factor(speed_ms: float, profile: VehicleProfile) -> float:

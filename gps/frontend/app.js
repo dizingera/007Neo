@@ -657,6 +657,17 @@ function drawTurn() {
   ctx.restore();
 }
 
+/* Wie GuidanceLine.ist_fahrgasse: Fahrgassen liegen fest alle fahrgasse_m ab
+ * Spur 0, Fahrgasse ist die Spur, in deren Streifen eine fällt. So liegen sie
+ * bei jeder Arbeitsbreite an derselben Stelle. */
+function istFahrgasse(line, spur) {
+  const weite = line.fahrgasse_m, breite = line.spacing_m;
+  if (!(weite > 0) || !(breite > 0)) return false;
+  if (weite <= breite) return true;
+  const gasse = Math.floor((spur * breite) / weite + 0.5) * weite;
+  return Math.floor(gasse / breite + 0.5) === spur;
+}
+
 function drawPasses() {
   const s = state.live;
   if (!s || !s.line) return;
@@ -670,8 +681,8 @@ function drawPasses() {
     if (!points.length) continue;
     polyline(points, ring);
     const active = offset === current;
-    // Fahrgassen: jede n-te Spur, rot – dort wird nicht gesät, dort fährt man später.
-    const fahrgasse = line.fahrgasse_jede > 0 && offset % line.fahrgasse_jede === 0;
+    // Fahrgassen rot – dort wird nicht gesät, dort fährt man später.
+    const fahrgasse = istFahrgasse(line, offset);
     if (active) {
       // Die aktive Spur leuchtet: ein breiter, blasser Schein und die Linie darin.
       ctx.strokeStyle = fahrgasse ? F.fahrgasse : F.aktiv;
@@ -1897,9 +1908,41 @@ document.addEventListener('keyup', (event) => {
   if ((event.key === 'ArrowLeft' || event.key === 'ArrowRight') && simulatorLaeuft()) simulatorLenken(0);
 });
 
+/* Fahrgassenweite: eine für den Betrieb (Spritze/Streuer), steht oben in den
+ * Reitern Felder und Spuren. Eine schon gesetzte Saisonspur behält ihre. */
+let fahrgassenWeite = 21;
+function zeigeFahrgassenWeite() {
+  document.querySelectorAll('.fahrgassen-taste').forEach((b) => {
+    b.textContent = `Fahrgassenweite: ${fahrgassenWeite.toLocaleString('de-DE')} m`;
+  });
+}
+async function ladeFahrgassenWeite() {
+  try {
+    fahrgassenWeite = (await (await fetch('/api/fahrgassen')).json()).weite_m;
+    zeigeFahrgassenWeite();
+  } catch (fehler) { /* Anzeige bleibt beim letzten Wert */ }
+}
+document.querySelectorAll('.fahrgassen-taste').forEach((b) => {
+  b.onclick = async () => {
+    const eingabe = prompt('Fahrgassenweite in Metern (Arbeitsbreite von Spritze und Streuer).\n' +
+      'Gilt für neu gesetzte Saisonspuren – vorhandene Fahrgassen bleiben, wo sie sind.',
+      String(fahrgassenWeite).replace('.', ','));
+    if (eingabe === null) return;
+    const meter = parseFloat(eingabe.replace(',', '.'));
+    if (Number.isNaN(meter)) { toast('Bitte eine Zahl in Metern eingeben', true); return; }
+    const antwort = await api('POST', '/api/fahrgassen', { weite_m: meter });
+    if (antwort) {
+      fahrgassenWeite = antwort.data.weite_m;
+      zeigeFahrgassenWeite();
+      toast(`Fahrgassenweite ${fahrgassenWeite.toLocaleString('de-DE')} m`);
+    }
+  };
+});
+
 async function refreshLists() {
   if (el('sheet').hidden) return;
   const active = document.querySelector('.tab.active').dataset.tab;
+  if (active === 'fields' || active === 'lines') ladeFahrgassenWeite();
   if (active === 'fields') {
     const [fields, lines] = await Promise.all([
       fetch('/api/fields').then((r) => r.json()), fetch('/api/lines').then((r) => r.json())]);
@@ -2028,16 +2071,11 @@ function spurZeile(fieldId, line, jahr) {
         }
       }],
       [saison ? 'Saisonspur ✓' : 'Als Saisonspur', async () => {
-        const vorgabe = line.fahrgasse_m > 0 ? line.fahrgasse_m : Math.max(line.spacing_m, 12);
-        const eingabe = prompt(
-          `Fahrgassenabstand in Metern für "${line.name}" (Saison ${jahr}).
-` +
-          `0 = keine Fahrgassen, Spur ist dann keine Saisonspur mehr.`, vorgabe.toFixed(0));
-        if (eingabe === null) return;
-        const abstand = parseFloat(eingabe.replace(',', '.'));
-        if (Number.isNaN(abstand) || abstand < 0) { toast('Bitte eine Zahl ab 0 eingeben', true); return; }
-        if (await api('POST', `/api/lines/${line.id}`, { fahrgasse_m: abstand, saison: jahr })) {
-          toast(abstand > 0 ? `Saisonspur ${jahr}: Fahrgassen alle ${abstand} m` : 'Keine Fahrgassen mehr');
+        // Ein Tipp: Saisonspur mit der eingestellten Fahrgassenweite, noch
+        // einer nimmt sie wieder weg. Die Weite steht oben im Reiter.
+        const antwort = await api('POST', `/api/lines/${line.id}`, { saisonspur: !saison, saison: jahr });
+        if (antwort) {
+          toast(!saison ? `Saisonspur ${jahr}: Fahrgassen alle ${antwort.data.fahrgasse_m} m` : 'Keine Fahrgassen mehr');
           refreshLists();
         }
       }],

@@ -157,23 +157,27 @@ Beim Säen entscheidet sich, wo das ganze Jahr gefahren wird: die Fahrgassen.
 Düngen und Spritzen sollen später genau diese Spuren treffen, sonst liegt die
 Spritze neben der Fahrgasse und fährt durch den Bestand. Deshalb wird die
 Spur vom Säen als **Saisonspur** gespeichert: **Menü → Felder → Spuren ▾ →
-Als Saisonspur**, Fahrgassenabstand in Metern eingeben (bei 6 m Sämaschine
-und 24 m Spritze: 24). Von da an
+Als Saisonspur** (ein Tipp; nochmal tippen nimmt sie wieder weg). Der Abstand
+der Fahrgassen ist die **Fahrgassenweite**, oben in den Reitern *Felder* und
+*Spuren* (Taste „Fahrgassenweite: 21 m", Vorgabe 21 m = Spritze und Streuer).
+Eine geänderte Fahrgassenweite gilt nur für neu gesetzte Saisonspuren – schon
+angelegte Fahrgassen bleiben, wo sie sind. Von da an
 
 * wird diese Spur beim Laden des Feldes **automatisch aktiv** – dieses Jahr,
   bei jeder Arbeit, ohne dass jemand daran denken muss;
-* ist jede vierte Spur (24 m / 6 m) auf dem Bildschirm **rot gestrichelt** –
-  das sind die Fahrgassen. Die aktive Spur leuchtet rot statt grün, wenn sie
-  eine Fahrgasse ist;
-* steht im Spur-Chip oben links „Fahrgassen 24 m".
+* liegen die Fahrgassen **fest in Metern**: alle 21 m ab Spur 0, bei jeder
+  Arbeitsbreite an derselben Stelle. Auf dem Bildschirm sind sie **rot
+  gestrichelt**; Fahrgasse ist die Spur, in deren Streifen sie fällt (bei 3 m
+  jede siebte). Geht die Breite nicht glatt auf (4 m), wandern sie trotzdem
+  nicht. Die aktive Spur leuchtet rot statt grün, wenn sie eine Fahrgasse ist;
+* steht im Spur-Chip oben links „Fahrgassen 21 m".
 
-Wird mit der Spritze gearbeitet (Maschine mit 24 m wählen), ist der Spurabstand
-24 m und jede Spur eine Fahrgasse – die Führung läuft auf denselben Linien.
+Wird mit Spritze oder Streuer gearbeitet (21 m), ist jede Spur eine Fahrgasse –
+die Führung läuft auf denselben Linien.
 
 Im nächsten Jahr zählt die Saisonspur nicht mehr; beim Laden kommt dann wieder
 die zuletzt benutzte Spur, bis die neue Saat ihre Saisonspur bekommt. Alte
-Saisonspuren bleiben mit Jahreszahl in der Liste stehen. Fahrgassenabstand 0
-nimmt einer Spur die Saison wieder weg.
+Saisonspuren bleiben mit Jahreszahl in der Liste stehen.
 
 ## Arbeiten
 
