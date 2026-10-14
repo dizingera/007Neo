@@ -191,6 +191,76 @@ def planen(grenze: Sequence[Point], von: Point, nach: Point, breite_m: float,
                                "laenge_m": _r(sum(distance(a, b) for a, b in stuecke))})
             k += 1
 
+    # -- Gegenrand und Füllstreifen ------------------------------------------
+    # So wird gesät: von der Startkante aus Fahrgasse um Fahrgasse, solange
+    # ganze Fahrgassenweiten passen. Am Gegenrand dasselbe Band wie an der
+    # Startkante (3 Säspuren ab der Grenze, Fahrgasse, ...). Was dazwischen
+    # übrig bleibt, ist der Füllstreifen: aufgefüllt, ohne Fahrgasse - ab
+    # ``KLEINE_LUECKE_M`` mit einer Restfahrgasse in der Mitte, auf der Spritze
+    # und Streuer nur so breit arbeiten, wie der Streifen ist.
+    kurs = heading_deg(von, nach)
+    parallele = []
+    for kante in randspuren.kanten(ring):
+        a, b = tuple(kante["points"][0]), tuple(kante["points"][-1])
+        if abs((heading_deg(a, b) - kurs + 90.0) % 180.0 - 90.0) > PARALLEL_DEG:
+            continue
+        d_werte = [versatz(tuple(p)) for p in kante["points"]]
+        if max(d_werte) < 1.0:
+            continue                               # die Startkante selbst (oder auf ihrer Linie)
+        parallele.append((kante, randspuren.benennen(kante, ring), min(d_werte), max(d_werte)))
+    gegen = [p for p in parallele if p[2] > tiefe / 2.0 and p[3] - p[2] <= w]
+    gegenrand = min(gegen, key=lambda p: p[2]) if gegen and spuren else None
+    fuellstreifen = None
+    gassen_m: list[float] = [F / 2.0]              # wo Fahrgassen liegen, ab Startkante
+    if gegenrand is not None:
+        kante, name, d_min, d_max = gegenrand
+        band = (d_min + d_max) / 2.0 - F           # dort beginnt das Band am Gegenrand
+        haupt = [F / 2.0 + j * F for j in range(1, int(tiefe / F) + 2)
+                 if F / 2.0 + j * F + F / 2.0 <= band + TOLERANZ_M]
+        letzte = max(haupt) if haupt else F / 2.0
+        fuell_von = letzte + F / 2.0
+        rest_m = band - fuell_von
+        for s in spuren:
+            if s["fahrgasse"] and s["versatz_m"] > letzte + TOLERANZ_M:
+                s["fahrgasse"] = False
+            if s["versatz_m"] > fuell_von + 1e-6:
+                s["fuell"] = True
+        gassen_m += haupt + [(d_min + d_max) / 2.0 - F / 2.0]
+        if rest_m > TOLERANZ_M:
+            fuell_spuren = [s for s in spuren if s.get("fuell")]
+            text = (f"Füllstreifen {rest_m:.1f} m vor dem {name}: zwischen der letzten Fahrgasse "
+                    f"und dem Band am Gegenrand passt keine ganze Fahrgassenweite mehr - aufgefüllt, "
+                    f"ohne Fahrgasse.")
+            anpassung = []
+            rest_spur = None
+            if rest_m >= KLEINE_LUECKE_M and fuell_spuren:
+                ziel = (fuell_von + band) / 2.0
+                rest_spur = min(fuell_spuren, key=lambda s: abs(s["versatz_m"] - ziel))
+                rest_spur["fahrgasse"] = True
+                rest_spur["rest"] = True
+                z = rest_spur["versatz_m"]
+                gassen_m.append(z)
+                anpassung.append(
+                    f"Restfahrgasse auf Spur {rest_spur['nummer']}: Spritze und Streuer dort nur "
+                    f"{rest_m:.1f} m breit - {z - fuell_von:.1f} m zur Startseite, {band - z:.1f} m "
+                    f"zum {name} hin, die übrigen Teilbreiten zu")
+            else:
+                anpassung.append(f"Schmaler Rest: an der letzten Fahrgasse und an der Fahrgasse am "
+                                 f"{name} je {rest_m / 2:.1f} m weiter streuen und spritzen (Randdüsen) "
+                                 f"- eine Restfahrgasse lohnt erst ab {KLEINE_LUECKE_M:g} m")
+            unten = math.floor((d_min + d_max) / 2.0 / F) * F
+            anpassung.append(f"Zur Einordnung: Randabstand {(d_min + d_max) / 2.0:.1f} m - ohne Rest "
+                             f"ginge es bei {unten:g} m oder {unten + F:g} m")
+            fuellstreifen = {
+                "kante": name, "breite_m": _r(rest_m), "von_m": _r(fuell_von), "bis_m": _r(band),
+                "spuren": [s["nummer"] for s in fuell_spuren],
+                "restfahrgasse": rest_spur["nummer"] if rest_spur else None,
+                "text": text, "anpassung": anpassung,
+                "punkte": [[_r(p[0]), _r(p[1])] for p in kante["points"]],
+            }
+    else:
+        gassen_m += [s["versatz_m"] for s in spuren if s["fahrgasse"]]
+
     fahrgassen = [s for s in spuren if s["fahrgasse"]]
     if spuren and not fahrgassen:
         konflikte.append({"art": "keine_fahrgasse",
@@ -198,30 +268,25 @@ def planen(grenze: Sequence[Point], von: Point, nach: Point, breite_m: float,
                           "anpassung": ["Pflege nur über die Vorgewende-Fahrgasse"]})
 
     # -- Prüfung der übrigen Kanten -----------------------------------------
-    kurs = heading_deg(von, nach)
-    for kante in randspuren.kanten(ring):
-        a, b = tuple(kante["points"][0]), tuple(kante["points"][-1])
-        winkel = abs((heading_deg(a, b) - kurs + 90.0) % 180.0 - 90.0)
-        if winkel > PARALLEL_DEG or not fahrgassen:
-            continue
-        d_werte = [versatz(tuple(p)) for p in kante["points"]]
-        d_min, d_max = min(d_werte), max(d_werte)
-        if d_max < 1.0:
-            continue                               # die Startkante selbst (oder auf ihrer Linie)
+    for kante, name, d_min, d_max in parallele:
+        if not fahrgassen:
+            break
+        if gegenrand is not None and abs((d_min + d_max) / 2.0 - (gegenrand[2] + gegenrand[3]) / 2.0) < w \
+                and d_max - d_min <= w:
+            continue                               # der Gegenrand: Füllstreifen statt Konflikt
         ferne = d_min > tiefe / 2.0
-        name = randspuren.benennen(kante, ring)
 
         def abweichung(d: float) -> tuple[float, Optional[dict]]:
             # Vorgewende-Fahrgasse an diesem Rand und die nächste Fahrgasse des Hauptfeldes.
             if ferne:
                 h = d - F / 2.0
-                davor = [s for s in fahrgassen if s["versatz_m"] <= h - 1e-6]
+                davor = [s for s in fahrgassen if s["versatz_m"] <= h - 1e-6 and not s.get("rest")]
                 if not davor:
                     return 0.0, None
                 nachbar = max(davor, key=lambda s: s["versatz_m"])
                 return (h - nachbar["versatz_m"]) - F, nachbar
             h = d + F / 2.0
-            dahinter = [s for s in fahrgassen if s["versatz_m"] >= h + 1e-6]
+            dahinter = [s for s in fahrgassen if s["versatz_m"] >= h + 1e-6 and not s.get("rest")]
             if not dahinter:
                 return 0.0, None
             nachbar = min(dahinter, key=lambda s: s["versatz_m"])
@@ -287,18 +352,47 @@ def planen(grenze: Sequence[Point], von: Point, nach: Point, breite_m: float,
                           "abweichung_m": _r(schlimmste), "anpassung": anpassung,
                           "punkte": [[_r(p[0]), _r(p[1])] for p in kante["points"]]})
 
-    # Kurze Kanten mit Fahrgassen-Raster quer: nur ein Hinweis, kein Konflikt.
-    rest = tiefe - (spuren[-1]["versatz_m"] + w / 2.0 + vorgewende_m) if spuren else 0.0
+    # Die Säbreite, die nicht mehr ganz passt: nur ein Hinweis, kein Konflikt.
+    ende = ((gegenrand[2] + gegenrand[3]) / 2.0 - vorgewende_m) if gegenrand else (tiefe - vorgewende_m)
+    rest = ende - (spuren[-1]["versatz_m"] + w / 2.0) if spuren else 0.0
     if spuren and rest > 0.2:
-        hinweise.append(f"Zwischen der letzten Säspur (Spur {spuren[-1]['nummer']}) und dem Vorgewende "
-                        f"bleiben {rest:.1f} m - eine Spur mehr mit Teilbreite, oder diesen Streifen "
-                        f"beim Vorgewende mitnehmen.")
+        hinweise.append(f"Zwischen der letzten Säspur (Spur {spuren[-1]['nummer']}) und dem Band am Rand "
+                        f"bleiben {rest:.1f} m - die letzte Spur mit Teilbreite fahren, oder diesen "
+                        f"Streifen beim Vorgewende mitnehmen.")
 
-    # Die Saisonspur: eine AB-Linie durch eine Fahrgasse, parallel zur Startkante.
-    # Spur 0 ist damit eine Fahrgasse, die Führung zählt die übrigen alle F.
+    # Reihenfolge, so wie gesät wird.
+    reihenfolge = []
+    haupt_spuren = [s for s in spuren if not s.get("fuell")]
+    if haupt_spuren:
+        gassen_haupt = [s for s in haupt_spuren if s["fahrgasse"]]
+        reihenfolge.append(
+            f"Hauptfeld von der Startkante: Spur 1–{haupt_spuren[-1]['nummer']}, Fahrgassen "
+            f"{', '.join(str(s['nummer']) for s in gassen_haupt) or 'keine'} (alle {F:g} m)")
+    if gegenrand is not None:
+        reihenfolge.append(f"Am {gegenrand[1]}: {r} Säspuren ab der Grenze (die erste direkt an der Grenze), "
+                           f"dann die Fahrgasse auf {F / 2:.1f} m - das Band gehört zum Vorgewende")
+    if fuellstreifen and fuellstreifen["spuren"]:
+        erste, letzte_f = fuellstreifen["spuren"][0], fuellstreifen["spuren"][-1]
+        reihenfolge.append(f"Rest auffüllen: Spur {erste}" + (f"–{letzte_f}" if letzte_f != erste else "")
+                           + f" ({fuellstreifen['breite_m']:.1f} m)"
+                           + (f", Restfahrgasse auf Spur {fuellstreifen['restfahrgasse']}"
+                              if fuellstreifen["restfahrgasse"] else ""))
+    reihenfolge.append(f"Vorgewende rundum: {len(ringe)} Runden, Fahrgasse in Runde {r + 1}")
+
+    # Die Saisonspur: eine AB-Linie durch die erste Fahrgasse, parallel zur
+    # Startkante. Mit Gegenrand bekommt sie die Liste der Fahrgassen mit (in
+    # Metern neben der Spur, rechts der Richtung positiv): im Füllstreifen
+    # keine, dafür die Restfahrgasse. Ohne Gegenrand gilt alle F.
     saison_versatz = F / 2.0
     saisonspur = [[_r(von[0] + nrm[0] * saison_versatz), _r(von[1] + nrm[1] * saison_versatz)],
                   [_r(nach[0] + nrm[0] * saison_versatz), _r(nach[1] + nrm[1] * saison_versatz)]]
+    rechts = 1.0 if (nrm[0] * e[1] - nrm[1] * e[0]) > 0 else -1.0
+    saison_fahrgassen = sorted(_r(rechts * (t - saison_versatz)) + 0.0 for t in set(gassen_m)) \
+        if gegenrand is not None else []
+    if fuellstreifen:
+        fuellstreifen["text"] = _deutsch(fuellstreifen["text"])
+        fuellstreifen["anpassung"] = [_deutsch(a) for a in fuellstreifen["anpassung"]]
+    reihenfolge = [_deutsch(x) for x in reihenfolge]
 
     # Texte für den Fahrer mit deutschem Komma (10,5 m statt 10.5 m).
     for k in konflikte:
@@ -315,7 +409,8 @@ def planen(grenze: Sequence[Point], von: Point, nach: Point, breite_m: float,
         "strecke_km": _r((sum(s["laenge_m"] for s in spuren)
                           + sum(_umfang(x["punkte"]) for x in ringe)) / 1000.0),
         "konflikte": konflikte, "hinweise": hinweise,
-        "saisonspur": saisonspur, "start": [_r(von[0]), _r(von[1])], "kurs": _r(heading_deg(von, nach)),
+        "fuellstreifen": fuellstreifen, "reihenfolge": reihenfolge,
+        "saisonspur": saisonspur, "saisonspur_fahrgassen": saison_fahrgassen, "start": [_r(von[0]), _r(von[1])], "kurs": _r(heading_deg(von, nach)),
     }
 
 

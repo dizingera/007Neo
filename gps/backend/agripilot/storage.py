@@ -38,6 +38,7 @@ CREATE TABLE IF NOT EXISTS lines (
     nudge_m REAL NOT NULL DEFAULT 0,
     saison INTEGER NOT NULL DEFAULT 0,      -- Jahr der Fahrgassen, 0 = keine Saisonspur
     fahrgasse_m REAL NOT NULL DEFAULT 0,    -- Fahrgassenabstand, 0 = keine Fahrgassen
+    fahrgassen TEXT NOT NULL DEFAULT '',    -- Saatplan: Fahrgassen in m neben der Spur (JSON), '' = alle fahrgasse_m
     updated_at REAL NOT NULL,
     deleted INTEGER NOT NULL DEFAULT 0
 );
@@ -129,7 +130,8 @@ class Storage:
         """
         vorhanden = {c[1] for c in self.db.execute("PRAGMA table_info(lines)")}
         for spalte, definition in (("saison", "INTEGER NOT NULL DEFAULT 0"),
-                                   ("fahrgasse_m", "REAL NOT NULL DEFAULT 0")):
+                                   ("fahrgasse_m", "REAL NOT NULL DEFAULT 0"),
+                                   ("fahrgassen", "TEXT NOT NULL DEFAULT ''")):
             if spalte not in vorhanden:
                 self.db.execute(f"ALTER TABLE lines ADD COLUMN {spalte} {definition}")
         # Seit 1.5.7: mit welchem Traktor eine Arbeit gefahren wurde (Gerät steht in vehicle).
@@ -187,18 +189,21 @@ class Storage:
         record.setdefault("nudge_m", 0.0)
         record.setdefault("saison", 0)
         record.setdefault("fahrgasse_m", 0.0)
+        record.setdefault("fahrgassen", [])
         record["updated_at"] = time.time()
         self.db.execute(
             """INSERT INTO lines (id, field_id, name, mode, points, spacing_m,
-                                  nudge_m, saison, fahrgasse_m, updated_at, deleted)
+                                  nudge_m, saison, fahrgasse_m, fahrgassen, updated_at, deleted)
                VALUES (:id, :field_id, :name, :mode, :points, :spacing_m,
-                       :nudge_m, :saison, :fahrgasse_m, :updated_at, 0)
+                       :nudge_m, :saison, :fahrgasse_m, :fahrgassen, :updated_at, 0)
                ON CONFLICT(id) DO UPDATE SET
                    name=excluded.name, mode=excluded.mode, points=excluded.points,
                    spacing_m=excluded.spacing_m, nudge_m=excluded.nudge_m,
                    saison=excluded.saison, fahrgasse_m=excluded.fahrgasse_m,
+                   fahrgassen=excluded.fahrgassen,
                    updated_at=excluded.updated_at, deleted=0""",
-            {**record, "points": json.dumps(record["points"])},
+            {**record, "points": json.dumps(record["points"]),
+             "fahrgassen": json.dumps(record["fahrgassen"]) if record["fahrgassen"] else ""},
         )
         self.db.commit()
         return self.get_line(record["id"])
@@ -464,6 +469,7 @@ def _field_row(row: sqlite3.Row) -> dict:
 def _line_row(row: sqlite3.Row) -> dict:
     record = dict(row)
     record["points"] = json.loads(record["points"] or "[]")
+    record["fahrgassen"] = json.loads(record.get("fahrgassen") or "[]")
     return record
 
 

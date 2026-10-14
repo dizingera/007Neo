@@ -670,6 +670,11 @@ def create_app(config=None) -> FastAPI:
     async def saatplan_planen(field_id: str, payload: dict = Body(...)):
         return guard(engine.saatplan_planen, field_id, payload)
 
+    @api.post("/api/saatplan/hier")
+    async def saatplan_hier(payload: dict = Body(default={})):
+        """Saatplan ab der Ecke, an der der Traktor steht, in seiner Fahrtrichtung."""
+        return guard(engine.saatplan_hier, payload)
+
     @api.post("/api/fields/{field_id}/saatplan/uebernehmen")
     async def saatplan_uebernehmen(field_id: str):
         return guard(engine.saatplan_uebernehmen, field_id)

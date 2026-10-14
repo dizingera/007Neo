@@ -90,6 +90,8 @@
       <button class="taste" id="btnAPlus"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 19V5M5 12h9M17 9v6M14 12h6"/></svg><span>A+</span></button>
       <button class="taste" id="btnContour"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l9 6.5-3.5 10.5h-11L3 9.5z"/><path d="M12 8l5 3.5-2 6H9l-2-6z"/></svg><span>Kontur</span></button>
       <button class="taste" id="btnCurve"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 15c3-8 6-8 9 0s6 8 9 0"/></svg><span>Kurve</span></button>
+      <!-- Saatplan: an die Startecke fahren, in Fahrtrichtung ausrichten, drücken. -->
+      <button class="taste" id="btnSaatplanHier"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20V4h16"/><path d="M8 20V8M12 20V8M16 20V8" stroke-dasharray="2 2"/><path d="M4 4l4 4"/></svg><span>Saatplan</span></button>
     </div>
     <div class="gruppe paar" role="group" aria-label="Spur verschieben">
       <button class="taste" id="btnNudgeLeft" aria-label="Spur 10 cm nach links"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg><span>10 cm</span></button>
@@ -249,7 +251,11 @@
           <label>Säspuren am Rand vor der Fahrgasse<input type="number" step="1" min="0" max="20" name="randspuren"></label>
         </div>
         <div class="row">
-          <button id="btnSaatplanPlanen" class="primary">Schlag planen</button>
+          <button id="btnSaatplanAbHier" class="primary">Ab hier planen</button>
+          <span class="note">Traktor an der Startecke, in Richtung der ersten Spur</span>
+        </div>
+        <div class="row">
+          <button id="btnSaatplanPlanen">Mit gewählter Ecke planen</button>
           <label class="switch"><input type="checkbox" id="saatplanZeigen" checked> Plan auf der Karte</label>
         </div>
       </section>
@@ -269,10 +275,15 @@
         Vorgewende so tief wie eine Fahrgassenweite, an jeder Grenze erst die Säspuren, dann die
         Fahrgasse (bei 3 m und 21 m: 3 Säspuren, Fahrgasse auf 10,5 m, 3 Säspuren), danach das
         Hauptfeld parallel zur Startkante mit einer Fahrgasse alle 21 m.</p>
-      <p>Auf der Karte: Säspuren dünn, <b>Fahrgassen rot</b> mit ihrem Abstand, Vorgewende
-        gestrichelt. Passt die Vorgabe an einem Rand nicht – weil die Schlagbreite kein Vielfaches
-        der Fahrgassenweite ist oder der Rand schräg läuft – ist er <b>bernsteinfarben</b>
-        markiert, und hier steht, was dort passiert und wie es sich anpassen lässt.</p>
+      <p><b>Gegenrand und Füllstreifen:</b> von der Startkante aus wird gesät, solange ganze
+        21 m passen. Am Gegenrand liegt dasselbe Band (3 Säspuren ab der Grenze, Fahrgasse auf
+        10,5 m). Der Rest dazwischen ist der <b>Füllstreifen</b> – aufgefüllt, ohne Fahrgasse; ab
+        5 m mit einer <b>Restfahrgasse</b> in der Mitte, auf der Spritze und Streuer nur so breit
+        arbeiten, wie der Streifen ist. Die Reihenfolge steht beim Plan.</p>
+      <p>Auf der Karte: Säspuren dünn, <b>Fahrgassen rot</b> mit ihrem Abstand, der Füllstreifen
+        bernsteinfarben, die Restfahrgasse rot gestrichelt, Vorgewende gestrichelt. Läuft ein Rand
+        schräg (Keil) oder passt die Randvorgabe nicht zur Sämaschine, ist das ein
+        <b>Konflikt</b> mit Vorschlag zur Anpassung.</p>
       <p><b>Als Saisonspur übernehmen</b> legt eine AB-Spur durch eine Fahrgasse an. Sie ist das
         ganze Jahr beim Laden des Feldes aktiv; beim Säen zeigt das Band „Fahrgasse“, wann die
         Fahrgassenschaltung dran ist, und Spritze und Streuer fahren dieselben Gassen.</p>

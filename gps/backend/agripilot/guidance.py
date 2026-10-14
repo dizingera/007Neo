@@ -254,6 +254,9 @@ class GuidanceLine:
         # +1 rechts der Spurrichtung, -1 links, 0 = keine Randspur. Setzt die
         # Engine beim Laden aus der Feldgrenze (siehe rand_seite).
         self.rand_innen = 0.0
+        # Saatplan: wo genau die Fahrgassen liegen, in Metern neben der Spur
+        # (rechts der Richtung positiv). Leer = alle fahrgasse_m.
+        self.fahrgassen_liste: list[float] = []
         if mode == "ab":
             self.points = [tuple(points[0]), tuple(points[-1])]
         else:
@@ -539,6 +542,8 @@ class GuidanceLine:
             # wie nudge_m). Sonst beide 0.
             "raster_m": self.raster_versatz(),
             "fahrgassen_versatz_m": self.fahrgassen_versatz(),
+            # Saatplan: die Fahrgassen in Metern neben der Spur (rechts +).
+            "fahrgassen": list(self.fahrgassen_liste),
         }
 
     def am_rand(self) -> bool:
@@ -578,6 +583,12 @@ class GuidanceLine:
         """
         if self.fahrgasse_m <= 0 or self.spacing <= 0:
             return False
+        if self.fahrgassen_liste:
+            # Saatplan: genau diese Fahrgassen - im Füllstreifen keine, dafür
+            # gegebenenfalls die Restfahrgasse.
+            mitte = self.raster_versatz() + pass_number * self.spacing
+            return any(-self.spacing / 2.0 < mitte - x <= self.spacing / 2.0 + 1e-6
+                       for x in self.fahrgassen_liste)
         if self.fahrgasse_m <= self.spacing:
             return True
         raster, erste = self.raster_versatz(), self.fahrgassen_versatz()

@@ -71,6 +71,7 @@ FAHRGASSEN_WEITE_VORGABE = 21.0
 FAHRGASSEN_WEITE_MIN = 6.0
 FAHRGASSEN_WEITE_MAX = 60.0
 SAATPLAN_PRAEFIX = "Saatplan "
+SAATPLAN_ECKE_M = 40.0      # so weit darf die Antenne von der Startecke weg sein
 
 
 class Engine:
@@ -657,8 +658,9 @@ class Engine:
         self.line.nudge_m = record.get("nudge_m", 0.0)
         self.line.fahrgasse_m = float(record.get("fahrgasse_m") or 0.0)
         self.line.saison = int(record.get("saison") or 0)
+        self.line.fahrgassen_liste = [float(x) for x in (record.get("fahrgassen") or [])]
         self.line.rand_innen = self._rand_innen(self.line)
-        zusatz = f" · Fahrgassen alle {self.line.fahrgasse_m:g} m" if self.line.fahrgasse_m else ""
+        zusatz =f" · Fahrgassen alle {self.line.fahrgasse_m:g} m" if self.line.fahrgasse_m else ""
         self.note(f"Spur aktiv: {record['name']}{zusatz}")
         self._remember_session()
         return record
@@ -788,6 +790,35 @@ class Engine:
                   f"{plan['anzahl_fahrgassen']} Fahrgassen, {len(plan['konflikte'])} Konflikte")
         return plan
 
+    def saatplan_hier(self, werte: Optional[dict] = None) -> dict:
+        """Saatplan ab der Ecke, an der der Traktor gerade steht.
+
+        So wird es auf dem Acker gemacht: an die Startecke fahren, in die
+        Richtung der ersten Spur ausrichten, Knopf drücken. Die Ecke ist die
+        nächste Startecke zur Antenne (höchstens ``SAATPLAN_ECKE_M`` weg), die
+        Kante die, die von dort am besten in Fahrtrichtung zeigt.
+        """
+        if self.field is None:
+            raise RuntimeError("Kein Feld geladen")
+        if self.position is None:
+            raise RuntimeError("Keine Position - auf GPS warten")
+        feld, grenze = self._feld_mit_grenze(self.field["id"])
+        optionen = saatplan_module.startkanten(grenze)
+        if not optionen:
+            raise ValueError("Der Schlag hat keine gerade Kante für den Saatplan")
+        naechste = min(geo.distance(self.position, tuple(o["von"])) for o in optionen)
+        if naechste > SAATPLAN_ECKE_M:
+            raise ValueError(f"Keine Ecke in der Nähe - die nächste ist {naechste:.0f} m weg. "
+                             f"Erst an die Startecke fahren.")
+        an_der_ecke = [o for o in optionen if geo.distance(self.position, tuple(o["von"])) <= naechste + 5.0]
+        if self.heading is None:
+            raise RuntimeError("Fahrtrichtung unbekannt - ein paar Meter in Richtung der ersten Spur fahren")
+        wahl = min(an_der_ecke, key=lambda o: abs(geo.angle_difference(
+            geo.heading_deg(tuple(o["von"]), tuple(o["nach"])), self.heading)))
+        gespeichert = (self.store.get_setting(f"saatplan:{feld['id']}") or {}).get("vorgabe") or {}
+        vorgabe = {**self.saatplan(feld["id"])["vorgabe"], **gespeichert, **(werte or {}), "start": wahl["id"]}
+        return self.saatplan_planen(feld["id"], vorgabe)
+
     def saatplan_uebernehmen(self, field_id: str) -> dict:
         """Den Plan als Saisonspur speichern: eine AB-Spur durch eine Fahrgasse,
         Fahrgassen alle fahrgasse_m. Ein früherer Saatplan des Feldes wird ersetzt."""
@@ -808,6 +839,9 @@ class Engine:
             "spacing_m": plan["breite_m"],
             "saison": time.localtime().tm_year,
             "fahrgasse_m": plan["fahrgasse_m"],
+            # Genau die geplanten Fahrgassen: im Füllstreifen keine, dafür die
+            # Restfahrgasse. Läuft mit der Spur auf die Tablets.
+            "fahrgassen": plan.get("saisonspur_fahrgassen") or [],
         })
         if self.field is None or self.field["id"] != field_id:
             self.load_field(field_id)

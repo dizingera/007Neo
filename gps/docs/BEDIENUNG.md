@@ -192,9 +192,23 @@ Saisonspuren bleiben mit Jahreszahl in der Liste stehen.
 ### Saatplan: den Schlag vor der Aussaat durchplanen (Menü → Saatplan)
 
 Der Saatplan rechnet den ganzen Schlag mit Säspuren und Fahrgassen durch, bevor
-die Drille aufs Feld fährt. Eingaben: **Startecke und Fahrtrichtung** (eine
-gerade Kante und an welchem Ende es losgeht), **Sämaschine** (z. B. 3 m),
-**Fahrgassenweite** (21 m) und **Säspuren am Rand vor der Fahrgasse** (3).
+die Drille aufs Feld fährt.
+
+**Auf dem Acker:** an die Ecke fahren, an der es losgeht, in Richtung der ersten
+Spur ausrichten, **Spur → Saatplan** drücken (oder im Menü **Ab hier planen**).
+AgriPilot nimmt die nächste Ecke (höchstens 40 m weg) und die Kante, die dort in
+Fahrtrichtung zeigt. Am Schreibtisch geht es auch mit einer gewählten Ecke.
+Weitere Eingaben: **Sämaschine** (z. B. 3 m), **Fahrgassenweite** (21 m) und
+**Säspuren am Rand vor der Fahrgasse** (3) – sie bleiben beim Feld gespeichert.
+
+**So wird gesät:** von der Startkante aus Fahrgasse um Fahrgasse, solange ganze
+21 m passen. Am Gegenrand dasselbe Band wie an der Startkante (3 Säspuren ab der
+Grenze, die erste direkt an der Grenze, dann die Fahrgasse auf 10,5 m). Was
+dazwischen übrig bleibt, ist der **Füllstreifen**: aufgefüllt, ohne Fahrgasse.
+Ab 5 m bekommt er eine **Restfahrgasse** in der Mitte; Spritze und Streuer
+arbeiten dort nur so breit, wie der Streifen ist (der Plan sagt, wie viele Meter
+zu welcher Seite). Die Reihenfolge steht beim Plan. Auf der Karte ist der
+Füllstreifen bernsteinfarben, die Restfahrgasse rot gestrichelt.
 
 * **Vorgewende** rundum, so tief wie eine Fahrgassenweite: bei 3 m und 21 m
   sieben Runden – drei Säspuren, die Fahrgasse auf 10,5 m, drei Säspuren.
@@ -205,18 +219,15 @@ gerade Kante und an welchem Ende es losgeht), **Sämaschine** (z. B. 3 m),
   und Abstand, Vorgewende gestrichelt. „Plan auf der Karte“ blendet ihn aus.
 
 **Prüfung:** Die Randvorgabe geht nur auf, wenn die Fahrgassenweite eine
-ungerade Zahl Säbreiten ist ((2 · 3 + 1) · 3 m = 21 m). An jedem Rand, der zur
-Fahrtrichtung parallel liegt, muss die letzte Fahrgasse genau 21 m vor der
-Vorgewende-Fahrgasse liegen – sonst bleibt ein Streifen ohne Dünger und
-Pflanzenschutz oder wird doppelt behandelt. Solche Ränder sind
-**bernsteinfarben** markiert; der Plan sagt, wie viel fehlt oder überlappt, und
-schlägt eine Anpassung vor (Teilbreite schalten, zusätzliche Fahrgasse, bei
-schrägen Rändern Keil mit Teilbreitenschaltung oder an diesem Rand beginnen).
-Die Schlagbreite, bei der es ohne Rest aufginge, steht dabei.
+ungerade Zahl Säbreiten ist ((2 · 3 + 1) · 3 m = 21 m) – sonst ein Konflikt mit
+Vorschlag. Läuft ein Rand schräg zur Fahrtrichtung (Keil), passen 21 m dort
+nicht durchgehend: Konflikt, Vorschlag Teilbreitenschaltung oder an diesem Rand
+beginnen. Ein zu schmaler Schlag (unter 2 × 21 m) hat kein Hauptfeld.
 
 **Als Saisonspur übernehmen** legt eine AB-Spur „Saatplan …“ durch die erste
-Fahrgasse (10,5 m von der Startkante) mit 21 m Fahrgassen an und macht sie
-aktiv. Sie gilt das ganze Jahr: beim Säen zeigt das Band „Fahrgasse“, wann die
+Fahrgasse (10,5 m von der Startkante) an und macht sie aktiv. Sie kennt genau
+die geplanten Fahrgassen – im Füllstreifen keine, dafür die Restfahrgasse – und
+nimmt sie beim Abgleich mit aufs Tablet. Sie gilt das ganze Jahr: beim Säen zeigt das Band „Fahrgasse“, wann die
 Fahrgassenschaltung dran ist; Spritze und Streuer (21 m) fahren dieselben
 Gassen. Ein neuer Plan und nochmal übernehmen ersetzt die alte Saatplan-Spur.
 
