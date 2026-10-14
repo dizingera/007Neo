@@ -85,6 +85,7 @@ network:
 {master_zeile}{code_zeile}  device_id: {rechnername}
   device_name: {rechnername}
   rtcm_relay_port: 2102
+  use_master_rtcm: false
 
 server:
   host: 0.0.0.0

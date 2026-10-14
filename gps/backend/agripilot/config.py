@@ -100,7 +100,10 @@ class NetworkConfig:
     # The master re-serves its NTRIP stream on this port so the other tractors
     # need neither a mobile connection nor their own caster account.
     rtcm_relay_port: int = 2102
-    use_master_rtcm: bool = True
+    # Aus als Vorgabe: jedes Tablet holt RTK über seinen eigenen Caster,
+    # unabhängig vom Master. Einschalten nur, wer bewusst die Weitergabe im
+    # Hofnetz will.
+    use_master_rtcm: bool = False
     # Arbeitercode: das gemeinsame Geheimnis von Master und Arbeitern. Der Master
     # verlangt ihn beim Abgleich, wenn er gesetzt ist - und von außen (über einen
     # Tunnel wie Cloudflare) immer. Im Heimnetz ohne Code läuft der Abgleich wie bisher.

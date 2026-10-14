@@ -117,7 +117,7 @@ network:
   device_name: $HOSTNAME_KURZ
   master_url: http://$MASTER_IP:8080
   rtcm_relay_port: 2102
-  use_master_rtcm: true
+  use_master_rtcm: false
   sync_interval_s: 30
 
 steering:

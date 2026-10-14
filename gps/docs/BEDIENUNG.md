@@ -493,7 +493,9 @@ Ohne Fragen: `AgriPilot-Setup.exe --arbeiter --master http://192.168.1.20:8080`.
 
 1. **Über das Netz, von allein.** Sind Master und Tablet im selben WLAN (oder per VPN
    verbunden), gleichen sie alle 30 Sekunden ab: Felder, Umrisse, Spuren, Maschinen und
-   fertige Arbeiten. Der Master gibt auch die RTK-Korrekturen weiter. Draußen auf dem
+   fertige Arbeiten. RTK holt jedes Tablet über seinen eigenen Caster (Menü →
+   Einstellungen → Korrekturdaten), unabhängig vom Master; „Korrekturen vom Master
+   holen“ ist ab 1.5.19 als Vorgabe aus. Draußen auf dem
    Acker ohne Verbindung zum Büro arbeitet das Tablet einfach weiter und gleicht
    später ab.
 2. **Als Datei.** Menü → System → **Datenpaket erstellen (.zip)** auf dem Master

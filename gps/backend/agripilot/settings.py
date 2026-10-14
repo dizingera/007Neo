@@ -319,7 +319,9 @@ GRUPPEN: list[Gruppe] = [
             Feld("network.rtcm_relay_port", "Port der Korrektur-Weitergabe", "ganzzahl",
                  minimum=1, maximum=65535),
             Feld("network.use_master_rtcm", "Korrekturen vom Master holen", "schalter",
-                 hilfe="Nur beim Client."),
+                 hilfe="Nur am Arbeiter, und nur wenn er keinen eigenen Caster hat: "
+                       "dann holt er die Korrekturen des Masters (nur im Hofnetz). "
+                       "Vorgabe aus - jedes Gerät mit eigenem NTRIP."),
         ],
     ),
     Gruppe(
