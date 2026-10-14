@@ -273,7 +273,13 @@ GRUPPEN: list[Gruppe] = [
                  hilfe="Die dritte Rückfallebene neben Not-Aus und Wachhund."),
             Feld("phidget.max_duty", "Größte Leistung", "zahl", minimum=0.05, maximum=1.0,
                  hilfe="Anteil der vollen Motorleistung."),
-            Feld("phidget.acceleration", "Beschleunigung", "zahl", minimum=0.1, maximum=100.0),
+            Feld("phidget.min_duty", "Mindestleistung", "zahl", minimum=0.0, maximum=0.6,
+                 hilfe="Eigener Regelkreis: unter dieser Leistung läuft der Motor nicht an "
+                       "(Haftreibung). Lenkt der Motor zu langsam oder kriecht, höher stellen; "
+                       "ruckelt er um die Spur, niedriger."),
+            Feld("phidget.acceleration", "Beschleunigung", "zahl", minimum=0.1, maximum=100.0,
+                 hilfe="Anteil der vollen Leistung je Sekunde. 12,5 = 1250 %/s wie im Terminal; "
+                       "kleiner macht die Lenkung träge."),
             Feld("phidget.failsafe_ms", "Failsafe der Platine", "ganzzahl", einheit="ms",
                  minimum=100, maximum=5000,
                  hilfe="Die Platine hält den Motor selbst an, wenn das Programm verstummt - "

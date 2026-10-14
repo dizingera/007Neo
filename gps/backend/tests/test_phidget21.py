@@ -214,6 +214,24 @@ class Phidget21Test(unittest.TestCase):
 
         asyncio.run(ablauf())
 
+    def test_a_small_error_gets_the_minimum_duty_and_none_inside_the_dead_band(self):
+        cfg = PhidgetConfig(bibliothek="phidget21", control="velocity", feedback="encoder",
+                            encoder_counts_per_deg=40.0, gain_p=0.09, gain_i=0.0, gain_d=0.0,
+                            max_duty=0.5, min_duty=0.2, dead_band_deg=0.3)
+        ausgang = actuators.PhidgetOutput(cfg)
+
+        async def ablauf():
+            await ausgang.start()
+            ausgang.command(True, 1.0, actuators.SteerContext(speed_ms=2.0))
+            ausgang._step(0.02)                          # 1 Grad * 0,09 = 9 % -> angehoben auf 20 %
+            self.assertAlmostEqual(self.dll.geschwindigkeit[0], 20.0, places=3)
+            self.dll.drehgeber = 38                      # 0,95 Grad: Abweichung 0,05 -> Totband
+            ausgang._step(0.02)
+            self.assertAlmostEqual(self.dll.geschwindigkeit[0], 0.0, places=3)
+            await ausgang.stop()
+
+        asyncio.run(ablauf())
+
     def test_the_device_search_finds_the_1065_and_suggests_phidget21(self):
         with mock.patch.object(geraete, "_phidget22_kanaele",
                                return_value=([], {}, ["Phidget: Treiber fehlt"])):

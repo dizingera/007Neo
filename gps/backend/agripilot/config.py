@@ -178,7 +178,11 @@ class PhidgetConfig:
     # Grenzen für den Motor
     current_limit_a: float = 2.0     # niedrig halten: das Rad muss von Hand zu übersteuern sein
     max_duty: float = 0.55           # 0..1, Anteil der vollen Leistung
-    acceleration: float = 2.0        # Anteil pro Sekunde
+    # Darunter bleibt ein Lenkmotor an der Haftreibung hängen und "kriecht": das
+    # AgriPilot Terminal fährt nie unter 20 %. Gilt nur, solange noch eine
+    # Abweichung da ist (außerhalb des Totbands), und nur beim eigenen Regelkreis.
+    min_duty: float = 0.20
+    acceleration: float = 12.5       # Anteil pro Sekunde (Terminal: 1250 %/s)
     failsafe_ms: int = 500           # Phidget stoppt selbst, wenn wir verstummen
 
     # Radwinkelsensor

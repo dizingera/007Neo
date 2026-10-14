@@ -496,6 +496,13 @@ class PhidgetOutput(SteerOutput):
         duty = (self.config.gain_p * error
                 + self.config.gain_i * self._integral
                 + self.config.gain_d * derivative)
+        # Mindestleistung gegen die Haftreibung - nur wo noch gelenkt werden
+        # muss: außerhalb des Totbands und nur bei einem Radwinkel als Regelgröße.
+        if (self.mode != "yaw_rate" and abs(error) > self.config.dead_band_deg
+                and 0.0 < abs(duty) < self.config.min_duty):
+            duty = math.copysign(self.config.min_duty, duty)
+        elif self.mode != "yaw_rate" and abs(error) <= self.config.dead_band_deg:
+            duty = 0.0
         duty = _clamp(duty, -self.config.max_duty, self.config.max_duty)
         if self.config.invert_motor:
             duty = -duty
