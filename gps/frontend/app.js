@@ -1843,7 +1843,11 @@ el('btnSaatplanUebernehmen').onclick = async () => {
   const feld = state.live && state.live.field;
   if (!feld) return;
   const antwort = await api('POST', `/api/fields/${feld.id}/saatplan/uebernehmen`);
-  if (antwort) toast(`Saisonspur „${antwort.data.name}“ aktiv`);
+  if (antwort) {
+    toast(saat.plan && saat.plan.saisonspur_b
+      ? `Saisonspur „${antwort.data.name}“ aktiv – an B die Spur „… B“ laden`
+      : `Saisonspur „${antwort.data.name}“ aktiv`);
+  }
 };
 
 el('btnSaatplanLoeschen').onclick = async () => {

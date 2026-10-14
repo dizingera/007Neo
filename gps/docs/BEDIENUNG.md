@@ -202,15 +202,16 @@ Weitere Eingaben: **Sämaschine** (z. B. 3 m), **Fahrgassenweite** (21 m) und
 **Säspuren am Rand vor der Fahrgasse** (3) – sie bleiben beim Feld gespeichert.
 
 **So wird gesät:** von der Startecke (A) so viele Fahrgassen wie passen, alle
-21 m. Von der Gegenseite (B) her nach 3 Säspuren die Fahrgasse (10,5 m vom
-Rand). Je nach Schlagbreite liegen die letzte Fahrgasse von A und die von B
-dann weniger als 21 m auseinander – bis hinunter zu einem Meter (bei einer
-Breite, die ein Vielfaches von 21 m ist, genau 21 m). Dazwischen wird
-aufgefüllt. Der Plan sagt, wie weit die beiden Fahrgassen auseinander liegen
-und wie viel Teilbreite Spritze und Streuer an der Fahrgasse von B abschalten
-(21 m minus Abstand); bei weniger als einer Säbreite Abstand überlappen die
-beiden Fahrgassen-Spuren, dort Sämaschine mit Teilbreite. Die Reihenfolge mit
-Spurnummern steht beim Plan, das Auffüllen ist auf der Karte bernsteinfarben.
+21 m, und nach der letzten Fahrgasse noch eine Säbreite. Dann an der
+Gegenseite (B) anfangen: 3 Säspuren ab der Grenze, die Fahrgasse auf 10,5 m,
+und weiter Richtung A bis zur letzten Säspur von A. So fällt eine Überlappung
+immer auf diese eine Säbreite von A, nie in eine Fahrgasse. Damit das geht,
+liegen die letzte Fahrgasse von A und die von B mindestens zwei Säbreiten (6 m)
+auseinander, höchstens 21 m plus zwei Säbreiten. Der Plan nennt den Abstand,
+die Teilbreite für Spritze und Streuer an der Fahrgasse von B (bei weniger als
+21 m) bzw. wie weit an beiden weiter gestreut werden muss (bei mehr), die Zahl
+der Säspuren von B her und die Überlappung der letzten. Die Reihenfolge steht
+beim Plan; was von B her gesät wird, ist auf der Karte bernsteinfarben.
 
 * **Vorgewende** rundum, so tief wie eine Fahrgassenweite: bei 3 m und 21 m
   sieben Runden – drei Säspuren, die Fahrgasse auf 10,5 m, drei Säspuren.
@@ -226,9 +227,11 @@ Vorschlag. Läuft ein Rand schräg zur Fahrtrichtung (Keil), passen 21 m dort
 nicht durchgehend: Konflikt, Vorschlag Teilbreitenschaltung oder an diesem Rand
 beginnen. Ein zu schmaler Schlag (unter 2 × 21 m) hat kein Hauptfeld.
 
-**Als Saisonspur übernehmen** legt eine AB-Spur „Saatplan …“ durch die erste
-Fahrgasse (10,5 m von der Startkante) an und macht sie aktiv. Sie kennt genau
-die geplanten Fahrgassen – die von A und die von B, beim Auffüllen keine – und
+**Als Saisonspur übernehmen** legt zwei AB-Spuren an: „Saatplan … A“ durch die
+erste Fahrgasse (10,5 m von der Startkante) – sie ist die Saisonspur und kommt
+beim Laden des Feldes – und „Saatplan … B“ durch die Fahrgasse von B. Die
+B-Spur beim Säen von B her laden: dort liegt das Raster um den Rest versetzt. Sie kennt genau
+die geplanten Fahrgassen – die von A und die von B, sonst keine – und
 nimmt sie beim Abgleich mit aufs Tablet. Sie gilt das ganze Jahr: beim Säen zeigt das Band „Fahrgasse“, wann die
 Fahrgassenschaltung dran ist; Spritze und Streuer (21 m) fahren dieselben
 Gassen. Ein neuer Plan und nochmal übernehmen ersetzt die alte Saatplan-Spur.

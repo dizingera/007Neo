@@ -39,7 +39,7 @@ class PlanTests(unittest.TestCase):
         self.assertEqual(set(p["fahrgassen_abstaende"]), {21.0})
         # Vom Gegenrand aus: 168 - 10,5 = 157,5 ist die Vorgewende-Fahrgasse, 21 m nach 136,5.
         self.assertEqual(p["spuren"][0]["versatz_m"], 22.5)
-        self.assertEqual(p["spuren"][-1]["versatz_m"], 145.5)
+        self.assertEqual(max(s["versatz_m"] for s in p["spuren"]), 145.5)
         # Die Saisonspur liegt auf der ersten Fahrgasse (10,5 m von der Startkante).
         self.assertEqual(p["saisonspur"], [[0.0, 10.5], [300.0, 10.5]])
 
@@ -57,32 +57,45 @@ class PlanTests(unittest.TestCase):
         self.assertEqual(gassen, [31.5, 52.5, 73.5, 94.5, 115.5, 136.5])
         f = p["fuellstreifen"]
         self.assertAlmostEqual(f["abstand_m"], 10.0, delta=0.01)
-        self.assertAlmostEqual(f["breite_m"], 7.0, delta=0.01)      # zwischen den Fahrgassen-Spuren
+        self.assertAlmostEqual(f["breite_m"], 4.0, delta=0.01)      # A-Säbreite bis Fahrgasse B
+        self.assertAlmostEqual(f["ueberlappung_m"], 2.0, delta=0.01)
+        # Nach der letzten Fahrgasse von A noch eine Säbreite (139,5 m), dann ist A fertig.
+        self.assertEqual([s["versatz_m"] for s in p["spuren"] if not s.get("von_b")][-2:], [136.5, 139.5])
         self.assertTrue(any("11,0 m Teilbreite" in a for a in f["anpassung"]))
         self.assertTrue(p["reihenfolge"][0].startswith("Von der Startecke (A): so viele Fahrgassen wie passen"))
         self.assertTrue(p["reihenfolge"][1].startswith("An der Gegenseite (B"))
-        self.assertTrue(p["reihenfolge"][2].startswith("Rest zwischen B und A auffüllen (7,0 m"))
+        self.assertTrue(p["reihenfolge"][2].startswith("Von B weiter Richtung A bis zur letzten Säspur von A: 2"))
+        self.assertTrue(any("die Fahrgassen bleiben frei" in a for a in f["anpassung"]))
         self.assertEqual([k for k in p["konflikte"] if k["art"] == "abstand"], [])
         # Die Saisonspur kennt beide: 126 m (A) und 136 m (B) neben der Spur.
         self.assertEqual(p["saisonspur_fahrgassen"][:2], [-136.0, -126.0])
 
-    def test_the_two_last_tramlines_may_be_only_a_metre_apart(self):
+    def test_the_extra_pass_after_a_never_falls_into_the_tramline_of_b(self):
+        # 148 m: eine Fahrgasse bei 136,5 m läge nur 1 m vor der von B (137,5 m) -
+        # die Säbreite danach fiele in die Fahrgasse. Also endet A bei 115,5 m.
         p = self.plan(148.0)
         f = p["fuellstreifen"]
-        self.assertAlmostEqual(f["abstand_m"], 1.0, delta=0.01)
-        self.assertTrue(any("20,0 m Teilbreite" in a for a in f["anpassung"]))
-        self.assertTrue(any("überlappen 2,0 m" in a for a in f["anpassung"]))
-        self.assertEqual(p["saisonspur_fahrgassen"][:2], [-127.0, -126.0])
+        self.assertAlmostEqual(f["abstand_m"], 22.0, delta=0.01)
+        self.assertEqual([s["versatz_m"] for s in p["spuren"] if s["fahrgasse"]][-1], 115.5)
+        self.assertTrue(any("je 0,5 m weiter" in a for a in f["anpassung"]))
+        self.assertEqual(f["anzahl_von_b"], 6)
+        self.assertAlmostEqual(f["ueberlappung_m"], 2.0, delta=0.01)
+        # Die Spur für B liegt auf der Fahrgasse von B und kennt dieselben Fahrgassen.
+        self.assertEqual(p["saisonspur_b"], [[0.0, 137.5], [300.0, 137.5]])
+        self.assertEqual(p["saisonspur_b_fahrgassen"][-2:], [106.0, 127.0])
+        self.assertIn(0.0, p["saisonspur_b_fahrgassen"])
 
     def test_a_whole_number_of_tramline_widths_needs_nothing(self):
         p = self.plan(147.0)
-        self.assertIsNone(p["fuellstreifen"])
+        self.assertEqual((p["fuellstreifen"]["abstand_m"], p["fuellstreifen"]["ueberlappung_m"]), (21.0, 0.0))
+        self.assertEqual(p["fuellstreifen"]["anzahl_von_b"], 5)
         self.assertEqual([s["versatz_m"] for s in p["spuren"] if s["fahrgasse"]],
                          [31.5, 52.5, 73.5, 94.5, 115.5])
 
     def test_without_rest_there_is_no_filler_strip(self):
         p = self.plan(168.0)
-        self.assertIsNone(p["fuellstreifen"])
+        self.assertEqual((p["fuellstreifen"]["abstand_m"], p["fuellstreifen"]["ueberlappung_m"]), (21.0, 0.0))
+        self.assertFalse(any("Teilbreite" in a for a in p["fuellstreifen"]["anpassung"]))
         self.assertEqual(p["saisonspur_fahrgassen"], [-147.0, -126.0, -105.0, -84.0, -63.0, -42.0, -21.0, 0.0])
 
     def test_a_drill_width_that_does_not_fit_the_rule_is_reported(self):
@@ -142,7 +155,11 @@ class EngineTests(unittest.TestCase):
         # Nochmal übernehmen ersetzt, statt eine zweite Saatplan-Spur anzulegen.
         self.motor.saatplan_uebernehmen(self.feld["id"])
         namen = [l["name"] for l in self.store.list_lines(self.feld["id"])]
-        self.assertEqual(len([n for n in namen if n.startswith("Saatplan ")]), 1)
+        self.assertEqual(sorted(n for n in namen if n.startswith("Saatplan ")),
+                         ["Saatplan Süd 300 m · A", "Saatplan Süd 300 m · B"])
+        # A ist die Saisonspur, die beim Laden des Feldes kommt.
+        self.assertEqual(self.store.season_line(self.feld["id"], time.localtime().tm_year)["name"],
+                         "Saatplan Süd 300 m · A")
 
     def test_the_season_line_knows_the_tramlines_from_a_and_from_b(self):
         feld = self.store.save_field({"name": "Schmal", "datum_lat": 48.0, "datum_lon": 9.6,

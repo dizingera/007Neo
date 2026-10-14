@@ -831,16 +831,30 @@ class Engine:
             if alt["name"].startswith(SAATPLAN_PRAEFIX):
                 self.store.delete_line(alt["id"])
         kante = plan.get("kante", "").replace(randspuren_module.NAMENS_PRAEFIX, "", 1)
+        jahr = time.localtime().tm_year
+        # Mit Gegenseite zwei Spuren: B (durch die Fahrgasse von B) für das
+        # Säen von B her - dort liegt das Raster anders - und A für alles
+        # andere. A wird zuletzt gespeichert und ist damit die Saisonspur, die
+        # beim Laden des Feldes kommt. Beide kennen genau die geplanten
+        # Fahrgassen; die Liste läuft mit der Spur auf die Tablets.
+        if plan.get("saisonspur_b"):
+            self.store.save_line({
+                "field_id": field_id,
+                "name": f"{SAATPLAN_PRAEFIX}{kante} · B",
+                "mode": "ab", "points": plan["saisonspur_b"], "spacing_m": plan["breite_m"],
+                "saison": jahr, "fahrgasse_m": plan["fahrgasse_m"],
+                "fahrgassen": plan.get("saisonspur_b_fahrgassen") or [],
+            })
+            time.sleep(0.01)                       # A sicher die neuere
         record = self.store.save_line({
             "field_id": field_id,
-            "name": f"{SAATPLAN_PRAEFIX}{kante} · {plan['fahrgasse_m']:g} m",
+            "name": f"{SAATPLAN_PRAEFIX}{kante} · " + ("A" if plan.get("saisonspur_b") else
+                                                       f"{plan['fahrgasse_m']:g} m"),
             "mode": "ab",
             "points": plan["saisonspur"],
             "spacing_m": plan["breite_m"],
-            "saison": time.localtime().tm_year,
+            "saison": jahr,
             "fahrgasse_m": plan["fahrgasse_m"],
-            # Genau die geplanten Fahrgassen: im Füllstreifen keine, dafür die
-            # Restfahrgasse. Läuft mit der Spur auf die Tablets.
             "fahrgassen": plan.get("saisonspur_fahrgassen") or [],
         })
         if self.field is None or self.field["id"] != field_id:
