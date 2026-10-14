@@ -125,6 +125,28 @@ class PlanTests(unittest.TestCase):
             nur_konfig.aktion()
             self.assertEqual(vorhanden.read_text(encoding="utf-8"), "# meine Einstellungen\n")
 
+    def test_setting_up_as_worker_turns_an_existing_master_config_into_a_worker(self):
+        # Erst direkt das Setup doppelgeklickt (Master), dann Tablet-einrichten.bat.
+        from agripilot import config as config_module
+        with tempfile.TemporaryDirectory() as ordner:
+            daten = Path(ordner) / "daten"
+            daten.mkdir()
+            konfig = daten / "config.yaml"
+            konfig.write_text(exe.standard_konfiguration("TABLET-1", 8080, "master", "", "alter-code"),
+                              encoding="utf-8")
+            cfg = config_module.load(konfig)
+            cfg.corrections.host = "caster.example"          # eigene Einstellungen bleiben
+            cfg.save(konfig)
+            schritte = exe.plan(str(Path(ordner) / "ziel"), daten=str(daten), rolle="client",
+                                master_url="https://agripilot.example", code="1234-5678")
+            [s for s in schritte if s.text.startswith("Konfiguration")][0].aktion()
+            neu = config_module.load(konfig)
+            self.assertFalse(neu.is_master)
+            self.assertEqual(neu.network.master_url, "https://agripilot.example")
+            self.assertEqual(neu.network.sync_token, "1234-5678")
+            self.assertEqual(neu.corrections.host, "caster.example")
+            self.assertEqual(neu.network.device_name, "TABLET-1")
+
     def test_configuration_step_creates_one_when_there_is_none(self):
         with tempfile.TemporaryDirectory() as ordner:
             daten = Path(ordner) / "daten"

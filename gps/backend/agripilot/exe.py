@@ -210,6 +210,25 @@ def setup_starten(pfad: Path) -> None:
     _lauf(["schtasks", "/Run", "/TN", UPDATE_AUFGABE])
 
 
+def arbeiter_eintragen(konfig: Path, master_url: str = "", code: str = "") -> None:
+    """Eine vorhandene Konfiguration zum Arbeiter machen.
+
+    Wer ein Tablet ausdrücklich als Arbeiter einrichtet (Tablet-einrichten.bat),
+    meint das auch dann, wenn dort schon eine Konfiguration liegt - etwa weil
+    das Setup vorher einmal direkt doppelgeklickt wurde und das Tablet so zum
+    Master geworden ist. Rolle, Master-Adresse und Arbeitercode werden gesetzt,
+    alles andere (Empfänger, NTRIP, Lenkmotor) bleibt.
+    """
+    from . import config as config_module
+    cfg = config_module.load(konfig)
+    cfg.network.role = "client"
+    if master_url:
+        cfg.network.master_url = master_url
+    if code:
+        cfg.network.sync_token = code
+    cfg.save(konfig)
+
+
 def plan(ziel: str, port: int = 8080, quelle: Optional[str] = None,
          daten: Optional[str] = None, rechnername: Optional[str] = None,
          still: bool = False, rolle: str = "master", master_url: str = "",
@@ -269,6 +288,8 @@ def plan(ziel: str, port: int = 8080, quelle: Optional[str] = None,
             konfig.write_text(standard_konfiguration(
                 rechnername, port, rolle, master_url,
                 code or (neuer_code() if rolle == "master" else "")), encoding="utf-8")
+        elif rolle == "client":
+            arbeiter_eintragen(konfig, master_url, code)
 
     def firewall() -> None:
         regel = f"AgriPilot {port}"
