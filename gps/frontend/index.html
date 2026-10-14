@@ -250,7 +250,6 @@
           <label>Fahrgassenweite (m)<input type="number" step="0.5" min="6" max="60" name="fahrgasse_m"></label>
           <label>Säspuren am Rand vor der Fahrgasse<input type="number" step="1" min="0" max="20" name="randspuren"></label>
         </div>
-        <label class="switch"><input type="checkbox" id="saatplanRest"> Restfahrgasse im Füllstreifen (ab 5 m)</label>
         <div class="row">
           <button id="btnSaatplanAbHier" class="primary">Ab hier planen</button>
           <span class="note">Traktor an der Startecke, in Richtung der ersten Spur</span>
@@ -276,13 +275,13 @@
         Vorgewende so tief wie eine Fahrgassenweite, an jeder Grenze erst die Säspuren, dann die
         Fahrgasse (bei 3 m und 21 m: 3 Säspuren, Fahrgasse auf 10,5 m, 3 Säspuren), danach das
         Hauptfeld parallel zur Startkante mit einer Fahrgasse alle 21 m.</p>
-      <p><b>Gegenrand und Füllstreifen:</b> von der Startkante aus wird gesät, solange ganze
-        21 m passen. Am Gegenrand liegt dasselbe Band (3 Säspuren ab der Grenze, Fahrgasse auf
-        10,5 m). Der Rest dazwischen ist der <b>Füllstreifen</b> – aufgefüllt, ohne Fahrgasse; ab
-        5 m mit einer <b>Restfahrgasse</b> in der Mitte, auf der Spritze und Streuer nur so breit
-        arbeiten, wie der Streifen ist. Die Reihenfolge steht beim Plan.</p>
-      <p>Auf der Karte: Säspuren dünn, <b>Fahrgassen rot</b> mit ihrem Abstand, der Füllstreifen
-        bernsteinfarben, die Restfahrgasse rot gestrichelt, Vorgewende gestrichelt. Läuft ein Rand
+      <p><b>Gegenseite:</b> von der Startecke (A) so viele Fahrgassen wie passen, alle 21 m.
+        Von der Gegenseite (B) her nach 3 Säspuren die Fahrgasse (10,5 m). Die letzte Fahrgasse
+        von A und die von B liegen dann je nach Schlag weniger als 21 m auseinander – bis zu 1 m.
+        Dazwischen wird aufgefüllt; der Plan sagt, wie viel Teilbreite Spritze und Streuer an der
+        Fahrgasse von B abschalten. Die Reihenfolge steht beim Plan.</p>
+      <p>Auf der Karte: Säspuren dünn, <b>Fahrgassen rot</b> mit ihrem Abstand, das Auffüllen
+        bernsteinfarben, Vorgewende gestrichelt. Läuft ein Rand
         schräg (Keil) oder passt die Randvorgabe nicht zur Sämaschine, ist das ein
         <b>Konflikt</b> mit Vorschlag zur Anpassung.</p>
       <p><b>Als Saisonspur übernehmen</b> legt eine AB-Spur durch eine Fahrgasse an. Sie ist das

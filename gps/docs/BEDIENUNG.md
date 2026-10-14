@@ -201,14 +201,16 @@ Fahrtrichtung zeigt. Am Schreibtisch geht es auch mit einer gewählten Ecke.
 Weitere Eingaben: **Sämaschine** (z. B. 3 m), **Fahrgassenweite** (21 m) und
 **Säspuren am Rand vor der Fahrgasse** (3) – sie bleiben beim Feld gespeichert.
 
-**So wird gesät:** von der Startecke (A) bis zur vorletzten Fahrgasse – die
-letzte, nach der bis zur Fahrgasse an B noch ganze 21 m bleiben. Dann an der
-Gegenseite (B) anfangen: 3 Säspuren ab der Grenze, dann die Fahrgasse auf
-10,5 m. Den Rest zwischen B und A auffüllen – das ist der **Füllstreifen**, ohne
-Fahrgasse. Die Reihenfolge mit Spurnummern steht beim Plan; auf der Karte ist
-der Füllstreifen bernsteinfarben. Wer im Füllstreifen doch eine
-**Restfahrgasse** will, schaltet sie ein (ab 5 m Streifenbreite, in der Mitte,
-Spritze und Streuer dort nur so breit wie der Streifen).
+**So wird gesät:** von der Startecke (A) so viele Fahrgassen wie passen, alle
+21 m. Von der Gegenseite (B) her nach 3 Säspuren die Fahrgasse (10,5 m vom
+Rand). Je nach Schlagbreite liegen die letzte Fahrgasse von A und die von B
+dann weniger als 21 m auseinander – bis hinunter zu einem Meter (bei einer
+Breite, die ein Vielfaches von 21 m ist, genau 21 m). Dazwischen wird
+aufgefüllt. Der Plan sagt, wie weit die beiden Fahrgassen auseinander liegen
+und wie viel Teilbreite Spritze und Streuer an der Fahrgasse von B abschalten
+(21 m minus Abstand); bei weniger als einer Säbreite Abstand überlappen die
+beiden Fahrgassen-Spuren, dort Sämaschine mit Teilbreite. Die Reihenfolge mit
+Spurnummern steht beim Plan, das Auffüllen ist auf der Karte bernsteinfarben.
 
 * **Vorgewende** rundum, so tief wie eine Fahrgassenweite: bei 3 m und 21 m
   sieben Runden – drei Säspuren, die Fahrgasse auf 10,5 m, drei Säspuren.
@@ -226,7 +228,7 @@ beginnen. Ein zu schmaler Schlag (unter 2 × 21 m) hat kein Hauptfeld.
 
 **Als Saisonspur übernehmen** legt eine AB-Spur „Saatplan …“ durch die erste
 Fahrgasse (10,5 m von der Startkante) an und macht sie aktiv. Sie kennt genau
-die geplanten Fahrgassen – im Füllstreifen keine, dafür die Restfahrgasse – und
+die geplanten Fahrgassen – die von A und die von B, beim Auffüllen keine – und
 nimmt sie beim Abgleich mit aufs Tablet. Sie gilt das ganze Jahr: beim Säen zeigt das Band „Fahrgasse“, wann die
 Fahrgassenschaltung dran ist; Spritze und Streuer (21 m) fahren dieselben
 Gassen. Ein neuer Plan und nochmal übernehmen ersetzt die alte Saatplan-Spur.

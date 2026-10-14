@@ -105,7 +105,7 @@ def _r(wert: float) -> float:
 
 
 def planen(grenze: Sequence[Point], von: Point, nach: Point, breite_m: float,
-           fahrgasse_m: float, randspuren_zahl: int = 3, restfahrgasse: bool = False) -> dict:
+           fahrgasse_m: float, randspuren_zahl: int = 3) -> dict:
     """Den ganzen Schlag planen. ``von``→``nach`` ist die Startkante, ``von`` die Startecke."""
     ring = [tuple(map(float, p)) for p in grenze]
     if len(ring) < 3:
@@ -191,13 +191,13 @@ def planen(grenze: Sequence[Point], von: Point, nach: Point, breite_m: float,
                                "laenge_m": _r(sum(distance(a, b) for a, b in stuecke))})
             k += 1
 
-    # -- Gegenrand und Füllstreifen ------------------------------------------
-    # So wird gesät: von der Startkante aus Fahrgasse um Fahrgasse, solange
-    # ganze Fahrgassenweiten passen. Am Gegenrand dasselbe Band wie an der
-    # Startkante (3 Säspuren ab der Grenze, Fahrgasse, ...). Was dazwischen
-    # übrig bleibt, ist der Füllstreifen: aufgefüllt, ohne Fahrgasse - ab
-    # ``KLEINE_LUECKE_M`` mit einer Restfahrgasse in der Mitte, auf der Spritze
-    # und Streuer nur so breit arbeiten, wie der Streifen ist.
+    # -- Gegenrand ----------------------------------------------------------
+    # So wird gesät: von der Startkante (A) so viele Fahrgassen wie passen,
+    # alle F. Von der Gegenseite (B) her nach r Säspuren die Fahrgasse (auf
+    # F/2). Zwischen der letzten Fahrgasse von A und der von B liegt, was übrig
+    # bleibt - bis hinunter zu einem Meter. Dazwischen wird aufgefüllt; Spritze
+    # und Streuer schalten an der Fahrgasse von B so viel Teilbreite ab, wie
+    # die beiden Fahrgassen näher als F beieinander liegen.
     kurs = heading_deg(von, nach)
     parallele = []
     for kante in randspuren.kanten(ring):
@@ -214,51 +214,46 @@ def planen(grenze: Sequence[Point], von: Point, nach: Point, breite_m: float,
     gassen_m: list[float] = [F / 2.0]              # wo Fahrgassen liegen, ab Startkante
     if gegenrand is not None:
         kante, name, d_min, d_max = gegenrand
-        band = (d_min + d_max) / 2.0 - F           # dort beginnt das Band am Gegenrand
-        haupt = [F / 2.0 + j * F for j in range(1, int(tiefe / F) + 2)
-                 if F / 2.0 + j * F + F / 2.0 <= band + TOLERANZ_M]
-        letzte = max(haupt) if haupt else F / 2.0
-        fuell_von = letzte + F / 2.0
-        rest_m = band - fuell_von
+        gasse_b = (d_min + d_max) / 2.0 - F / 2.0  # Fahrgasse von B: r Säspuren vom Rand
+        gassen_a = [F / 2.0 + j * F for j in range(1, int(tiefe / F) + 2)
+                    if F / 2.0 + j * F < gasse_b - TOLERANZ_M]
+        letzte = max(gassen_a) if gassen_a else F / 2.0
         for s in spuren:
-            if s["fahrgasse"] and s["versatz_m"] > letzte + TOLERANZ_M:
-                s["fahrgasse"] = False
-            if s["versatz_m"] > fuell_von + 1e-6:
+            s["fahrgasse"] = any(-w / 2.0 < s["versatz_m"] - g <= w / 2.0 + 1e-6 for g in gassen_a)
+            if s["versatz_m"] > letzte + w / 2.0 + 1e-6:
                 s["fuell"] = True
-        gassen_m += haupt + [(d_min + d_max) / 2.0 - F / 2.0]
-        if rest_m > TOLERANZ_M:
+        # Liegt die letzte Fahrgasse von A schon im Band an B (hinter dem
+        # Hauptfeld), bekommt sie eine eigene Spur, über die Feldlänge ohne die
+        # Vorgewende an den Enden.
+        if gassen_a and not any(s["fahrgasse"] and abs(s["versatz_m"] - letzte) <= w / 2.0 for s in spuren):
+            basis = (von[0] + nrm[0] * letzte, von[1] + nrm[1] * letzte)
+            stuecke = _gekuerzt(_schnitt_mit_polygon(basis, e, ring), vorgewende_m)
+            if stuecke:
+                spuren.append({"nummer": len(spuren) + 1, "versatz_m": _r(letzte), "fahrgasse": True,
+                               "im_band": True,
+                               "stuecke": [[[_r(a[0]), _r(a[1])], [_r(b[0]), _r(b[1])]] for a, b in stuecke],
+                               "laenge_m": _r(sum(distance(a, b) for a, b in stuecke))})
+        gassen_m += gassen_a + [gasse_b]
+        abstand = gasse_b - letzte
+        if abs(abstand - F) > TOLERANZ_M:
+            letzte_spur = next((s for s in spuren if s["fahrgasse"] and abs(s["versatz_m"] - letzte) <= w / 2.0),
+                               None)
             fuell_spuren = [s for s in spuren if s.get("fuell")]
-            text = (f"Füllstreifen {rest_m:.1f} m vor dem {name}: zwischen der vorletzten Fahrgasse "
-                    f"(von A) und dem Band an B passt keine ganze Fahrgassenweite mehr - aufgefüllt, "
-                    f"ohne Fahrgasse.")
-            anpassung = []
-            rest_spur = None
-            if restfahrgasse and rest_m >= KLEINE_LUECKE_M and fuell_spuren:
-                ziel = (fuell_von + band) / 2.0
-                rest_spur = min(fuell_spuren, key=lambda s: abs(s["versatz_m"] - ziel))
-                rest_spur["fahrgasse"] = True
-                rest_spur["rest"] = True
-                z = rest_spur["versatz_m"]
-                gassen_m.append(z)
-                anpassung.append(
-                    f"Restfahrgasse auf Spur {rest_spur['nummer']}: Spritze und Streuer dort nur "
-                    f"{rest_m:.1f} m breit - {z - fuell_von:.1f} m zur Startseite, {band - z:.1f} m "
-                    f"zum {name} hin, die übrigen Teilbreiten zu")
-            elif rest_m >= KLEINE_LUECKE_M:
-                anpassung.append(f"Spritze und Streuer erreichen den Füllstreifen von keiner Fahrgasse ganz: "
-                                 f"an der vorletzten Fahrgasse und an der Fahrgasse am {name} je "
-                                 f"{rest_m / 2:.1f} m weiter arbeiten - oder „Restfahrgasse im "
-                                 f"Füllstreifen“ einschalten")
-            else:
-                anpassung.append(f"Schmaler Rest: an der vorletzten Fahrgasse und an der Fahrgasse am "
-                                 f"{name} je {rest_m / 2:.1f} m weiter streuen und spritzen (Randdüsen)")
-            unten = math.floor((d_min + d_max) / 2.0 / F) * F
-            anpassung.append(f"Zur Einordnung: Randabstand {(d_min + d_max) / 2.0:.1f} m - ohne Rest "
-                             f"ginge es bei {unten:g} m oder {unten + F:g} m")
+            zwischen = abstand - w                 # zwischen den beiden Fahrgassen-Spuren
+            text = (f"Am {name}: die letzte Fahrgasse von A"
+                    + (f" (Spur {letzte_spur['nummer']})" if letzte_spur else "")
+                    + f" und die Fahrgasse von B liegen {abstand:.1f} m auseinander statt {F:g} m.")
+            anpassung = [f"Spritze und Streuer an der Fahrgasse von B {F - abstand:.1f} m Teilbreite "
+                         f"zum Feld hin abschalten - sonst wird das doppelt behandelt"]
+            if zwischen > TOLERANZ_M:
+                anpassung.append(f"Dazwischen {zwischen:.1f} m mit Säspuren auffüllen")
+            elif zwischen < -TOLERANZ_M:
+                anpassung.append(f"Die beiden Fahrgassen-Spuren überlappen {-zwischen:.1f} m - "
+                                 f"Sämaschine dort mit Teilbreite")
             fuellstreifen = {
-                "kante": name, "breite_m": _r(rest_m), "von_m": _r(fuell_von), "bis_m": _r(band),
+                "kante": name, "abstand_m": _r(abstand), "breite_m": _r(max(0.0, zwischen)),
+                "von_m": _r(letzte), "bis_m": _r(gasse_b),
                 "spuren": [s["nummer"] for s in fuell_spuren],
-                "restfahrgasse": rest_spur["nummer"] if rest_spur else None,
                 "text": text, "anpassung": anpassung,
                 "punkte": [[_r(p[0]), _r(p[1])] for p in kante["points"]],
             }
@@ -368,20 +363,23 @@ def planen(grenze: Sequence[Point], von: Point, nach: Point, breite_m: float,
     reihenfolge = []
     haupt_spuren = [s for s in spuren if not s.get("fuell")]
     if haupt_spuren:
-        gassen_haupt = [s for s in haupt_spuren if s["fahrgasse"]]
-        bis = "bis zur vorletzten Fahrgasse" if gegenrand is not None else "bis zum Gegenrand"
+        gassen_haupt = [s for s in spuren if s["fahrgasse"]]
+        bis = haupt_spuren[-1]["nummer"]
+        if any(s.get("im_band") for s in gassen_haupt):
+            bis = max(s["nummer"] for s in gassen_haupt)
         reihenfolge.append(
-            f"Von der Startecke (A) {bis}: Spur 1–{haupt_spuren[-1]['nummer']}, Fahrgassen in Spur "
-            f"{', '.join(str(s['nummer']) for s in gassen_haupt) or 'keine'} (alle {F:g} m)")
+            f"Von der Startecke (A): so viele Fahrgassen wie passen, alle {F:g} m - Spur 1–{bis}, "
+            f"Fahrgassen in Spur {', '.join(str(s['nummer']) for s in gassen_haupt) or 'keine'}")
     if gegenrand is not None:
         reihenfolge.append(f"An der Gegenseite (B, {gegenrand[1]}) anfangen: {r} Säspuren ab der Grenze, "
                            f"dann die Fahrgasse auf {F / 2:.1f} m")
-    if fuellstreifen and fuellstreifen["spuren"]:
-        erste, letzte_f = fuellstreifen["spuren"][0], fuellstreifen["spuren"][-1]
-        reihenfolge.append(f"Rest zwischen B und A auffüllen: Spur {erste}" + (f"–{letzte_f}" if letzte_f != erste else "")
-                           + f" ({fuellstreifen['breite_m']:.1f} m)"
-                           + (f", Restfahrgasse auf Spur {fuellstreifen['restfahrgasse']}"
-                              if fuellstreifen["restfahrgasse"] else ""))
+    if fuellstreifen and fuellstreifen["breite_m"] > TOLERANZ_M:
+        nummern = fuellstreifen["spuren"]
+        spuren_text = ""
+        if nummern:
+            spuren_text = f": Spur {nummern[0]}" + (f"–{nummern[-1]}" if nummern[-1] != nummern[0] else "")
+        reihenfolge.append(f"Rest zwischen B und A auffüllen ({fuellstreifen['breite_m']:.1f} m zwischen "
+                           f"den beiden Fahrgassen-Spuren){spuren_text}")
     reihenfolge.append(f"Vorgewende rundum: {len(ringe)} Runden, Fahrgasse in Runde {r + 1}")
 
     # Die Saisonspur: eine AB-Linie durch die erste Fahrgasse, parallel zur
@@ -417,6 +415,18 @@ def planen(grenze: Sequence[Point], von: Point, nach: Point, breite_m: float,
         "fuellstreifen": fuellstreifen, "reihenfolge": reihenfolge,
         "saisonspur": saisonspur, "saisonspur_fahrgassen": saison_fahrgassen, "start": [_r(von[0]), _r(von[1])], "kurs": _r(heading_deg(von, nach)),
     }
+
+
+def _gekuerzt(stuecke, um_m: float):
+    """Jedes Stück an beiden Enden um ``um_m`` kürzen (das Vorgewende an den Enden)."""
+    ergebnis = []
+    for a, b in stuecke:
+        laenge = distance(a, b)
+        if laenge <= 2 * um_m + 1.0:
+            continue
+        ex, ey = (b[0] - a[0]) / laenge, (b[1] - a[1]) / laenge
+        ergebnis.append(((a[0] + ex * um_m, a[1] + ey * um_m), (b[0] - ex * um_m, b[1] - ey * um_m)))
+    return ergebnis
 
 
 def _deutsch(text: str) -> str:

@@ -21,10 +21,10 @@ def sued(grenze):
 
 
 class PlanTests(unittest.TestCase):
-    def plan(self, breite, saebreite=3.0, weite=21.0, rand=3, rest=False):
+    def plan(self, breite, saebreite=3.0, weite=21.0, rand=3):
         grenze = rechteck(breite)
         o = sued(grenze)
-        return saatplan.planen(grenze, tuple(o["von"]), tuple(o["nach"]), saebreite, weite, rand, rest)
+        return saatplan.planen(grenze, tuple(o["von"]), tuple(o["nach"]), saebreite, weite, rand)
 
     def test_three_passes_then_a_tramline_at_every_edge(self):
         p = self.plan(168.0)                       # 8 Fahrgassenweiten
@@ -50,43 +50,35 @@ class PlanTests(unittest.TestCase):
                 self.assertAlmostEqual(a[0], 21.0, delta=0.05)
                 self.assertAlmostEqual(b[0], 279.0, delta=0.05)
 
-    def test_the_rest_before_the_far_edge_is_a_filler_strip_with_a_rest_tramline(self):
-        # 157 m: Fahrgassen bis 115,5 m, Band am Gegenrand ab 136 m - 10 m Füllstreifen.
-        p = self.plan(157.0, rest=True)
-        self.assertEqual([k for k in p["konflikte"] if k["art"] == "abstand"], [])
-        f = p["fuellstreifen"]
-        self.assertAlmostEqual(f["breite_m"], 10.0, delta=0.01)
-        self.assertEqual((f["von_m"], f["bis_m"]), (126.0, 136.0))
-        gassen = [s["versatz_m"] for s in p["spuren"] if s["fahrgasse"] and not s.get("rest")]
-        self.assertEqual(gassen, [31.5, 52.5, 73.5, 94.5, 115.5])
-        rest = next(s for s in p["spuren"] if s.get("rest"))
-        self.assertEqual(rest["versatz_m"], 130.5)
-        self.assertEqual(f["restfahrgasse"], rest["nummer"])
-        self.assertTrue(all(s.get("fuell") for s in p["spuren"] if s["versatz_m"] > 126.0))
-        self.assertTrue(any("10,0 m breit" in a for a in f["anpassung"]))
-        self.assertTrue(any("147 m oder 168 m" in a for a in f["anpassung"]))
-        self.assertTrue(any(x.startswith("Rest zwischen B und A auffüllen") for x in p["reihenfolge"]))
-        # Die Saisonspur kennt genau diese Fahrgassen (links der Fahrtrichtung: negativ).
-        self.assertEqual(p["saisonspur_fahrgassen"],
-                         [-136.0, -120.0, -105.0, -84.0, -63.0, -42.0, -21.0, 0.0])
-
-    def test_by_default_the_filler_is_sown_without_a_rest_tramline(self):
-        # So wird gesät: von A bis zur vorletzten Fahrgasse, an B 3 Säspuren und Fahrgasse,
-        # den Rest auffüllen - ohne Restfahrgasse.
+    def test_as_many_tramlines_from_a_as_fit_then_three_passes_and_a_tramline_from_b(self):
+        # 157 m: von A Fahrgassen bis 136,5 m, von B nach 3 Säspuren bei 146,5 m - 10 m auseinander.
         p = self.plan(157.0)
-        self.assertIsNone(p["fuellstreifen"]["restfahrgasse"])
-        self.assertFalse(any(s.get("rest") for s in p["spuren"]))
-        self.assertTrue(p["reihenfolge"][0].startswith("Von der Startecke (A) bis zur vorletzten Fahrgasse"))
+        gassen = [s["versatz_m"] for s in p["spuren"] if s["fahrgasse"]]
+        self.assertEqual(gassen, [31.5, 52.5, 73.5, 94.5, 115.5, 136.5])
+        f = p["fuellstreifen"]
+        self.assertAlmostEqual(f["abstand_m"], 10.0, delta=0.01)
+        self.assertAlmostEqual(f["breite_m"], 7.0, delta=0.01)      # zwischen den Fahrgassen-Spuren
+        self.assertTrue(any("11,0 m Teilbreite" in a for a in f["anpassung"]))
+        self.assertTrue(p["reihenfolge"][0].startswith("Von der Startecke (A): so viele Fahrgassen wie passen"))
         self.assertTrue(p["reihenfolge"][1].startswith("An der Gegenseite (B"))
-        self.assertTrue(any("Restfahrgasse im Füllstreifen" in a for a in p["fuellstreifen"]["anpassung"]))
-        self.assertEqual(p["saisonspur_fahrgassen"],
-                         [-136.0, -105.0, -84.0, -63.0, -42.0, -21.0, 0.0])
+        self.assertTrue(p["reihenfolge"][2].startswith("Rest zwischen B und A auffüllen (7,0 m"))
+        self.assertEqual([k for k in p["konflikte"] if k["art"] == "abstand"], [])
+        # Die Saisonspur kennt beide: 126 m (A) und 136 m (B) neben der Spur.
+        self.assertEqual(p["saisonspur_fahrgassen"][:2], [-136.0, -126.0])
 
-    def test_a_narrow_rest_gets_no_rest_tramline(self):
-        p = self.plan(150.0, rest=True)            # 3 m Rest
-        self.assertAlmostEqual(p["fuellstreifen"]["breite_m"], 3.0, delta=0.01)
-        self.assertIsNone(p["fuellstreifen"]["restfahrgasse"])
-        self.assertFalse(any(s.get("rest") for s in p["spuren"]))
+    def test_the_two_last_tramlines_may_be_only_a_metre_apart(self):
+        p = self.plan(148.0)
+        f = p["fuellstreifen"]
+        self.assertAlmostEqual(f["abstand_m"], 1.0, delta=0.01)
+        self.assertTrue(any("20,0 m Teilbreite" in a for a in f["anpassung"]))
+        self.assertTrue(any("überlappen 2,0 m" in a for a in f["anpassung"]))
+        self.assertEqual(p["saisonspur_fahrgassen"][:2], [-127.0, -126.0])
+
+    def test_a_whole_number_of_tramline_widths_needs_nothing(self):
+        p = self.plan(147.0)
+        self.assertIsNone(p["fuellstreifen"])
+        self.assertEqual([s["versatz_m"] for s in p["spuren"] if s["fahrgasse"]],
+                         [31.5, 52.5, 73.5, 94.5, 115.5])
 
     def test_without_rest_there_is_no_filler_strip(self):
         p = self.plan(168.0)
@@ -152,24 +144,25 @@ class EngineTests(unittest.TestCase):
         namen = [l["name"] for l in self.store.list_lines(self.feld["id"])]
         self.assertEqual(len([n for n in namen if n.startswith("Saatplan ")]), 1)
 
-    def test_the_season_line_knows_the_filler_strip_and_the_rest_tramline(self):
+    def test_the_season_line_knows_the_tramlines_from_a_and_from_b(self):
         feld = self.store.save_field({"name": "Schmal", "datum_lat": 48.0, "datum_lon": 9.6,
                                       "boundary": rechteck(157.0)})
         start = next(o["id"] for o in self.motor.saatplan(feld["id"])["optionen"]
                      if o["text"].startswith("Ecke Südwest") and "Süd" in o["kante"])
         self.motor.saatplan_planen(feld["id"], {"start": start, "breite_m": 3, "fahrgasse_m": 21,
-                                                "randspuren": 3, "restfahrgasse": True})
+                                                "randspuren": 3})
         spur = self.motor.saatplan_uebernehmen(feld["id"])
-        self.assertIn(-120.0, self.store.get_line(spur["id"])["fahrgassen"])   # Restfahrgasse
+        self.assertEqual(self.store.get_line(spur["id"])["fahrgassen"][:2], [-136.0, -126.0])
         linie = self.motor.line
         linie.spacing = 3.0
-        self.assertTrue(linie.ist_fahrgasse(-35))       # 105 m: Fahrgasse im Hauptfeld
-        self.assertTrue(linie.ist_fahrgasse(-40))       # 120 m: Restfahrgasse (130,5 m ab Rand)
-        self.assertFalse(linie.ist_fahrgasse(-42))      # 126 m: hier wäre sie ohne Plan - Füllstreifen
-        self.assertTrue(linie.ist_fahrgasse(-45))       # 135 m: Fahrgasse am Gegenrand (146,5 m)
-        # Mit der Spritze (21 m) liegt jede Spur auf einer Fahrgasse oder ist die Restfahrgasse.
+        self.assertTrue(linie.ist_fahrgasse(-35))       # 105 m neben der Spur: Fahrgasse von A
+        self.assertTrue(linie.ist_fahrgasse(-42))       # 126 m: die letzte Fahrgasse von A
+        self.assertFalse(linie.ist_fahrgasse(-43))      # dazwischen wird aufgefüllt
+        self.assertFalse(linie.ist_fahrgasse(-44))
+        self.assertTrue(linie.ist_fahrgasse(-45))       # 135 m: Fahrgasse von B (146,5 m ab A)
+        # Mit der Spritze (21 m) liegt jede Spur auf einer Fahrgasse.
         linie.spacing = 21.0
-        self.assertTrue(all(linie.ist_fahrgasse(-k) for k in range(0, 6)))
+        self.assertTrue(all(linie.ist_fahrgasse(-k) for k in range(0, 7)))
         self.assertEqual(self.motor.state()["line"]["fahrgassen"][-1], 0.0)
 
     def test_planning_from_where_the_tractor_stands(self):
