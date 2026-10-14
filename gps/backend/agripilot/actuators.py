@@ -41,6 +41,9 @@ _FRAME = struct.Struct("<2sBBhHhB")
 _MAGIC = b"AP"
 _VERSION = 1
 
+MOTORTEST_MAX = 0.35            # höchstens so viel der vollen Leistung im Motortest
+MOTORTEST_DAUER_MAX_S = 1.0     # und höchstens so lange am Stück
+
 _TREIBER_FEHLT = (
     "Phidget-Treiber fehlt - die Python-Bibliothek allein genügt nicht. "
     "Windows: Phidgets-Installer des Herstellers, Linux: libphidget22"
@@ -265,6 +268,8 @@ class PhidgetOutput(SteerOutput):
         self.mode = config.feedback
         self.bibliothek = "phidget22"
         self._geraet21 = None
+        self._test_duty = 0.0
+        self._test_bis = 0.0
 
         self._target_angle = 0.0
         self._engaged = False
@@ -420,8 +425,60 @@ class PhidgetOutput(SteerOutput):
                 self._safe_stop()
             await asyncio.sleep(interval)
 
+    async def motortest(self, richtung: int, anteil: float, dauer_s: float) -> dict:
+        """Den Motor kurz und schwach in eine Richtung drehen lassen - ein Test
+        der Verbindung, nicht der Lenkung.
+
+        Nur wenn die Lenkung nicht scharf ist, höchstens ``MOTORTEST_MAX`` der
+        Leistung und höchstens ``MOTORTEST_DAUER_MAX_S`` Sekunden. Der Regelkreis
+        schaltet danach von selbst wieder auf Stillstand. Zurück kommt, wie weit
+        sich der Drehgeber bewegt hat - bewegt sich der Motor, aber der Drehgeber
+        nicht, ist er nicht am Motor angeschlossen oder zählt nicht.
+        """
+        if not self.ready or self.motor is None:
+            raise RuntimeError(f"Lenkmotor nicht bereit: {self.status}")
+        if self._engaged:
+            raise RuntimeError("Die Lenkung ist scharf - erst ausschalten")
+        anteil = _clamp(abs(float(anteil)), 0.05, MOTORTEST_MAX)
+        dauer_s = _clamp(float(dauer_s), 0.1, MOTORTEST_DAUER_MAX_S)
+        vorher = self._drehgeber_roh()
+        vorzeichen = (1.0 if richtung >= 0 else -1.0) * (-1.0 if self.config.invert_motor else 1.0)
+        self._test_duty = vorzeichen * anteil
+        self._test_bis = time.time() + dauer_s
+        await asyncio.sleep(dauer_s + 0.2)
+        self._test_bis = 0.0
+        self._safe_stop()
+        nachher = self._drehgeber_roh()
+        return {
+            "richtung": "rechts" if richtung >= 0 else "links",
+            "leistung": anteil, "dauer_s": dauer_s,
+            "drehgeber_vorher": vorher, "drehgeber_nachher": nachher,
+            "drehgeber_bewegt": None if vorher is None or nachher is None else nachher - vorher,
+            "bibliothek": self.bibliothek,
+        }
+
+    def _drehgeber_roh(self) -> Optional[int]:
+        """Zählstand des Drehgebers am Motor, auch wenn er nicht die Rückmeldung ist."""
+        try:
+            if self.encoder is None and self.bibliothek == "phidget21" and self._geraet21 is not None:
+                from . import phidget21
+                return phidget21.Drehgeber(self._geraet21, self.config.encoder_channel).getPosition()
+            if self.encoder is not None:
+                return int(self.encoder.getPosition())
+        except Exception:  # noqa: BLE001
+            return None
+        return None
+
     def _step(self, dt: float) -> None:
         if self.motor is None:
+            return
+        if time.time() < self._test_bis and not self._engaged:
+            try:
+                self.motor.setTargetVelocity(self._test_duty)
+                self.motor.resetFailsafe()
+            except Exception as exc:  # noqa: BLE001
+                self.last_error_text = str(exc)
+                self._test_bis = 0.0
             return
         measured = self.measured_angle()
         if not self._engaged:

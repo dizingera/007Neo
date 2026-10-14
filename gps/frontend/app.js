@@ -2093,6 +2093,25 @@ el('btnGeraeteUebernehmen').onclick = async () => {
   el('geraeteRow').hidden = true;
 };
 
+/* Motortest: kurz und schwach in eine Richtung, danach steht der Motor wieder.
+ * Der Drehgeber zeigt, ob wirklich etwas gedreht hat. */
+async function motorTest(richtung) {
+  const info = el('motorTestInfo');
+  info.textContent = 'Motor läuft kurz …';
+  const antwort = await api('POST', '/api/steering/motortest',
+    { richtung, leistung: parseFloat(el('motorLeistung').value), dauer_s: 0.5 });
+  if (!antwort) { info.textContent = 'Motortest nicht ausgeführt.'; return; }
+  const d = antwort.data;
+  info.textContent = d.drehgeber_bewegt === null
+    ? `Motor ${d.richtung}: kein Drehgeber auslesbar.`
+    : d.drehgeber_bewegt === 0
+      ? `Motor ${d.richtung}: Drehgeber hat sich NICHT bewegt (${d.drehgeber_vorher}). ` +
+        'Hat der Motor gedreht? Wenn ja: Drehgeber nicht angeschlossen; wenn nein: Leistung erhöhen.'
+      : `Motor ${d.richtung}: Drehgeber ${d.drehgeber_bewegt > 0 ? '+' : ''}${d.drehgeber_bewegt} Zählwerte.`;
+}
+el('btnMotorLinks').onclick = () => motorTest('links');
+el('btnMotorRechts').onclick = () => motorTest('rechts');
+
 el('btnCentre').onclick = async () => {
   if (!confirm('Stehen die Räder gerade? Diese Stellung wird als Mitte gemerkt.')) return;
   const result = await api('POST', '/api/steering/centre');
@@ -2494,6 +2513,7 @@ function renderSystem() {
   const steering = state.live.steering;
   const output = system.steering_output;
   // Die Mitte lässt sich nur lernen, wo ein Drehgeber zählt.
+  el('motorTestRow').hidden = !(output && output.typ === 'phidget' && output.bereit);
   el('steerRow').hidden = !(output && output.mitte_gelernt !== undefined);
   if (!el('steerRow').hidden) {
     el('steerInfo').textContent =

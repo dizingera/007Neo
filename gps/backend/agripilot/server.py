@@ -1038,6 +1038,24 @@ def create_app(config=None) -> FastAPI:
         engine.note("Lenkung: Mitte gelernt")
         return ok(result)
 
+    @api.post("/api/steering/motortest")
+    async def motortest(payload: dict = Body(default={})):
+        """Den Lenkmotor kurz und schwach drehen (Menü → System → Lenkmotor testen)."""
+        output = application.steering.output
+        if not hasattr(output, "motortest"):
+            raise HTTPException(400, "Dieser Lenkausgang kennt keinen Motortest "
+                                     "(Positionsregler: Regelungsart auf „Eigener Regelkreis“ stellen)")
+        if application.steering.armed:
+            raise HTTPException(400, "Die Lenkung ist scharf - erst ausschalten")
+        try:
+            ergebnis = await output.motortest(
+                1 if str(payload.get("richtung", "rechts")) == "rechts" else -1,
+                float(payload.get("leistung", 0.15)), float(payload.get("dauer_s", 0.5)))
+        except (RuntimeError, ValueError) as exc:
+            raise HTTPException(400, str(exc)) from exc
+        engine.note(f"Motortest {ergebnis['richtung']}: Drehgeber {ergebnis['drehgeber_bewegt']}")
+        return ok(ergebnis)
+
     @api.post("/api/steering/disarm")
     async def disarm_steering():
         application.steering.disarm()

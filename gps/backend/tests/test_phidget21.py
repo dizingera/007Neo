@@ -176,6 +176,44 @@ class Phidget21Test(unittest.TestCase):
         asyncio.run(ablauf())
         self.assertFalse(self.dll.offen)
 
+    def test_the_motor_test_pulses_weakly_reports_the_encoder_and_stops(self):
+        cfg = PhidgetConfig(bibliothek="phidget21", control="velocity", feedback="yaw_rate")
+        ausgang = actuators.PhidgetOutput(cfg)
+
+        async def ablauf():
+            await ausgang.start()
+            self.assertTrue(ausgang.ready, ausgang.status)
+            laeuft = asyncio.create_task(ausgang._control_loop())
+            ausgang.running = True
+            await asyncio.sleep(0.05)
+            gesehen = []
+
+            async def beobachten():
+                for _ in range(8):
+                    gesehen.append(self.dll.geschwindigkeit.get(0))
+                    self.dll.drehgeber += 25
+                    await asyncio.sleep(0.05)
+
+            b = asyncio.create_task(beobachten())
+            # 90 % verlangt, gedeckelt auf 35 %; 5 s verlangt, gedeckelt auf 1 s.
+            ergebnis = await ausgang.motortest(-1, 0.9, 5.0)
+            await b
+            ausgang.running = False
+            await laeuft
+            self.assertEqual(ergebnis["richtung"], "links")
+            self.assertAlmostEqual(ergebnis["leistung"], actuators.MOTORTEST_MAX)
+            self.assertAlmostEqual(ergebnis["dauer_s"], actuators.MOTORTEST_DAUER_MAX_S)
+            self.assertGreater(ergebnis["drehgeber_bewegt"], 0)       # Encoder lief mit, obwohl nicht Rückmeldung
+            self.assertIn(-35.0, [round(g, 1) for g in gesehen if g is not None])
+            self.assertEqual(self.dll.geschwindigkeit[0], 0.0)        # danach steht der Motor
+            # Scharf: kein Test.
+            ausgang.command(True, 0.0, actuators.SteerContext())
+            with self.assertRaises(RuntimeError):
+                await ausgang.motortest(1, 0.1, 0.1)
+            await ausgang.stop()
+
+        asyncio.run(ablauf())
+
     def test_the_device_search_finds_the_1065_and_suggests_phidget21(self):
         with mock.patch.object(geraete, "_phidget22_kanaele",
                                return_value=([], {}, ["Phidget: Treiber fehlt"])):

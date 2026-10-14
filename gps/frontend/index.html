@@ -494,6 +494,20 @@
     </div>
     <p class="note" id="imuNote" hidden>Zum Nullen auf ebenem Boden stehen – ein Grad
       Montagefehler sind bei 3 m Antennenhöhe schon 5 cm Dauerversatz.</p>
+    <div class="row" id="motorTestRow" hidden>
+      <button id="btnMotorLinks">◀ Motor links</button>
+      <button id="btnMotorRechts">Motor rechts ▶</button>
+      <label>Leistung
+        <select id="motorLeistung">
+          <option value="0.10">10 %</option>
+          <option value="0.15" selected>15 %</option>
+          <option value="0.25">25 %</option>
+          <option value="0.35">35 %</option>
+        </select>
+      </label>
+      <span class="note" id="motorTestInfo" role="status" aria-atomic="true">Kurz und schwach, nur
+        mit ausgeschalteter Lenkung. Fahrzeug steht, Not-Aus griffbereit.</span>
+    </div>
     <div class="row" id="steerRow" hidden>
       <button id="btnCentre">Lenkung: Mitte lernen</button>
       <span class="note" id="steerInfo"></span>

@@ -409,6 +409,13 @@ Unter Phidget21 kann die 1065 weniger als neuere Platinen:
 * **keine einstellbare Stromgrenze**,
 * **kein Positionsregler** – AgriPilot regelt selbst (50-mal je Sekunde).
 
+**Motor testen:** **Menü → System → Lenkmotor testen** (erscheint, sobald der
+Lenkmotor bereit ist). ◀ / ▶ dreht den Motor 0,5 s mit 10–35 % Leistung und zeigt,
+wie weit sich der Drehgeber bewegt hat. Das geht nur mit ausgeschalteter Lenkung
+und braucht die Freigabe der Lenkautomatik nicht – dafür muss unter
+Einstellungen → Lenkung der **Ausgang „Phidget“** stehen (Geräte suchen →
+übernehmen, danach AgriPilot neu starten). Fahrzeug steht, Not-Aus griffbereit.
+
 Wichtig: **das AgriPilot Terminal vorher schließen.** Solange es die Platine
 offen hat, findet AgriPilot sie nicht. Die Zählwerte des Drehgebers je Grad
 Radeinschlag (**Drehgeber: Zählwerte je Grad**) einmal ausmessen, nicht schätzen.
