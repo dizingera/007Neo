@@ -2188,12 +2188,19 @@ async function motorTest(richtung) {
     { richtung, leistung: parseFloat(el('motorLeistung').value), dauer_s: 0.5 });
   if (!antwort) { info.textContent = 'Motortest nicht ausgeführt.'; return; }
   const d = antwort.data;
-  info.textContent = d.drehgeber_bewegt === null
+  const technik = [
+    d.zaehlwerte_je_s !== null && d.zaehlwerte_je_s !== undefined ? `${d.zaehlwerte_je_s} Zählwerte/s` : null,
+    d.strom_max_a ? `Strom bis ${String(d.strom_max_a).replace('.', ',')} A` : null,
+    d.beschleunigung_ist !== undefined
+      ? `Beschleunigung ${d.beschleunigung_ist} (Bereich ${d.beschleunigung_bereich.join('–')})` : null,
+  ].filter(Boolean).join(' · ');
+  info.textContent = (d.drehgeber_bewegt === null
     ? `Motor ${d.richtung}: kein Drehgeber auslesbar.`
     : d.drehgeber_bewegt === 0
       ? `Motor ${d.richtung}: Drehgeber hat sich NICHT bewegt (${d.drehgeber_vorher}). ` +
         'Hat der Motor gedreht? Wenn ja: Drehgeber nicht angeschlossen; wenn nein: Leistung erhöhen.'
-      : `Motor ${d.richtung}: Drehgeber ${d.drehgeber_bewegt > 0 ? '+' : ''}${d.drehgeber_bewegt} Zählwerte.`;
+      : `Motor ${d.richtung}: Drehgeber ${d.drehgeber_bewegt > 0 ? '+' : ''}${d.drehgeber_bewegt} Zählwerte.`) +
+    (technik ? ` · ${technik}` : '');
 }
 el('btnMotorLinks').onclick = () => motorTest('links');
 el('btnMotorRechts').onclick = () => motorTest('rechts');

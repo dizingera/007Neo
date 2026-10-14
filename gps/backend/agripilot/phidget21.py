@@ -191,6 +191,14 @@ class MotorControl21:
         _pruefen(self.dll, self.dll.CPhidgetMotorControl_setAcceleration(
             self.handle, int(kanal), ctypes.c_double(prozent_je_s)), "Beschleunigung")
 
+    def beschleunigung_ist(self, kanal: int) -> float:
+        return self._kommazahl("CPhidgetMotorControl_getAcceleration", int(kanal))
+
+    def bremsen(self, kanal: int, prozent: float) -> None:
+        """Bremsen beim Abbremsen - das AgriPilot Terminal setzt es auf 0."""
+        _pruefen(self.dll, self.dll.CPhidgetMotorControl_setBraking(
+            self.handle, int(kanal), ctypes.c_double(prozent)), "Bremsen")
+
     def drehgeber(self, kanal: int) -> int:
         return self._zahl("CPhidgetMotorControl_getEncoderPosition", int(kanal))
 
@@ -247,6 +255,25 @@ class Motor:
 
     def setAcceleration(self, anteil_je_s: float) -> None:  # noqa: N802
         self.geraet.beschleunigung(self.kanal, anteil_je_s * 100.0)
+        try:
+            self.geraet.bremsen(self.kanal, 0.0)           # wie im Terminal: kein Bremsen beim Abbremsen
+        except Exception:  # noqa: BLE001 - nicht jede Platine kennt es
+            pass
+
+    def diagnose(self) -> dict:
+        """Was die Platine tatsächlich eingestellt hat - für die Fehlersuche."""
+        werte = {}
+        try:
+            werte["beschleunigung_ist"] = round(self.geraet.beschleunigung_ist(self.kanal), 1)
+            kleinste, groesste = self.geraet.beschleunigung_grenzen(self.kanal)
+            werte["beschleunigung_bereich"] = [round(kleinste, 1), round(groesste, 1)]
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            werte["strom_a"] = round(self.geraet.strom(self.kanal), 2)
+        except Exception:  # noqa: BLE001
+            pass
+        return werte
 
     def getMinCurrentLimit(self) -> float:  # noqa: N802
         return 0.0

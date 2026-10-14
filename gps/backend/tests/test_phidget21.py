@@ -81,6 +81,14 @@ class AttrappeDLL:
         self.beschleunigung[kanal] = wert.value
         return 0
 
+    def CPhidgetMotorControl_getAcceleration(self, handle, kanal, ref):
+        return self._setzen(ref, self.beschleunigung.get(kanal, 0.0))
+
+    def CPhidgetMotorControl_setBraking(self, handle, kanal, wert):
+        self.bremsen = getattr(self, "bremsen", {})
+        self.bremsen[kanal] = wert.value
+        return 0
+
     def CPhidgetMotorControl_getAccelerationMin(self, handle, kanal, ref):
         return self._setzen(ref, 24.51)
 
@@ -205,6 +213,12 @@ class Phidget21Test(unittest.TestCase):
             ausgang.running = False
             await laeuft
             self.assertEqual(ergebnis["richtung"], "links")
+            # Was die Platine wirklich eingestellt hat, für die Fehlersuche.
+            self.assertAlmostEqual(ergebnis["beschleunigung_ist"], 1250.0)
+            self.assertEqual(ergebnis["beschleunigung_bereich"], [24.5, 6125.0])
+            self.assertAlmostEqual(ergebnis["strom_max_a"], 1.2)
+            self.assertEqual(self.dll.bremsen[0], 0.0)                 # Bremsen aus, wie im Terminal
+            self.assertGreater(ergebnis["zaehlwerte_je_s"], 0)
             self.assertAlmostEqual(ergebnis["leistung"], actuators.MOTORTEST_MAX)
             self.assertAlmostEqual(ergebnis["dauer_s"], actuators.MOTORTEST_DAUER_MAX_S)
             self.assertGreater(ergebnis["drehgeber_bewegt"], 0)       # Encoder lief mit, obwohl nicht Rückmeldung

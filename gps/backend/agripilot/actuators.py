@@ -275,6 +275,7 @@ class PhidgetOutput(SteerOutput):
         self._test_duty = 0.0
         self._test_bis = 0.0
         self._anschlag: Optional[list] = None      # [kleinster, größter] Zählstand beim Ausmessen
+        self._test_strom_max = 0.0
 
         self._target_angle = 0.0
         self._engaged = False
@@ -449,18 +450,26 @@ class PhidgetOutput(SteerOutput):
         vorher = self._drehgeber_roh()
         vorzeichen = (1.0 if richtung >= 0 else -1.0) * (-1.0 if self.config.invert_motor else 1.0)
         self._test_duty = vorzeichen * anteil
+        self._test_strom_max = 0.0
         self._test_bis = time.time() + dauer_s
         await asyncio.sleep(dauer_s + 0.2)
         self._test_bis = 0.0
         self._safe_stop()
         nachher = self._drehgeber_roh()
-        return {
+        bewegt = None if vorher is None or nachher is None else nachher - vorher
+        ergebnis = {
             "richtung": "rechts" if richtung >= 0 else "links",
             "leistung": anteil, "dauer_s": dauer_s,
             "drehgeber_vorher": vorher, "drehgeber_nachher": nachher,
-            "drehgeber_bewegt": None if vorher is None or nachher is None else nachher - vorher,
+            "drehgeber_bewegt": bewegt,
+            "zaehlwerte_je_s": None if bewegt is None else round(abs(bewegt) / dauer_s),
+            "strom_max_a": round(self._test_strom_max, 2),
             "bibliothek": self.bibliothek,
         }
+        diagnose = getattr(self.motor, "diagnose", None)
+        if diagnose is not None:
+            ergebnis.update(diagnose())
+        return ergebnis
 
     async def _impuls(self, vorzeichen: float, anteil: float, dauer_s: float) -> Optional[int]:
         """Ein kurzer Impuls; zurück kommt, wie weit sich der Drehgeber bewegt hat."""
@@ -567,6 +576,9 @@ class PhidgetOutput(SteerOutput):
             try:
                 self.motor.setTargetVelocity(self._test_duty)
                 self.motor.resetFailsafe()
+                diagnose = getattr(self.motor, "diagnose", None)
+                if diagnose is not None:
+                    self._test_strom_max = max(self._test_strom_max, diagnose().get("strom_a", 0.0))
             except Exception as exc:  # noqa: BLE001
                 self.last_error_text = str(exc)
                 self._test_bis = 0.0
