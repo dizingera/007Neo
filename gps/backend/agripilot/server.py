@@ -1056,6 +1056,49 @@ def create_app(config=None) -> FastAPI:
         engine.note(f"Motortest {ergebnis['richtung']}: Drehgeber {ergebnis['drehgeber_bewegt']}")
         return ok(ergebnis)
 
+    @api.get("/api/abstimmung")
+    async def abstimmung_lesen():
+        return ok(engine.abstimmung.status())
+
+    @api.post("/api/abstimmung")
+    async def abstimmung_modus(payload: dict = Body(...)):
+        """Lenk-Assistent: aus, beobachten (nur Vorschläge) oder automatisch."""
+        return guard(engine.abstimmung_modus, str(payload.get("modus", "aus")))
+
+    @api.post("/api/abstimmung/zurueck")
+    async def abstimmung_zurueck():
+        return guard(engine.abstimmung_zuruecksetzen)
+
+    @api.post("/api/steering/einmessen")
+    async def motor_einmessen():
+        """Losbrechleistung des Lenkmotors am Stand messen."""
+        output = application.steering.output
+        if not hasattr(output, "einmessen"):
+            raise HTTPException(400, "Dieser Lenkausgang lässt sich nicht einmessen")
+        if application.steering.armed:
+            raise HTTPException(400, "Die Lenkung ist scharf - erst ausschalten")
+        try:
+            ergebnis = await output.einmessen()
+        except (RuntimeError, ValueError) as exc:
+            raise HTTPException(400, str(exc)) from exc
+        engine.note(f"Motor eingemessen: Losbrechleistung {ergebnis['losbrech_rechts']}/{ergebnis['losbrech_links']}")
+        return ok(ergebnis)
+
+    @api.post("/api/steering/anschlag")
+    async def anschlag_messen(payload: dict = Body(default={})):
+        """Zählwerte je Grad ausmessen: start, dann von Hand von Anschlag zu Anschlag, dann ende."""
+        output = application.steering.output
+        if not hasattr(output, "anschlag_start"):
+            raise HTTPException(400, "Dieser Lenkausgang lässt sich nicht ausmessen")
+        if application.steering.armed:
+            raise HTTPException(400, "Die Lenkung ist scharf - erst ausschalten")
+        try:
+            if str(payload.get("aktion")) == "start":
+                return ok(output.anschlag_start())
+            return ok(output.anschlag_ende(float(payload.get("gesamtwinkel_deg", 70.0))))
+        except (RuntimeError, ValueError) as exc:
+            raise HTTPException(400, str(exc)) from exc
+
     @api.post("/api/steering/disarm")
     async def disarm_steering():
         application.steering.disarm()

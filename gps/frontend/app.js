@@ -2093,6 +2093,92 @@ el('btnGeraeteUebernehmen').onclick = async () => {
   el('geraeteRow').hidden = true;
 };
 
+/* Lenk-Assistent: Zustand anzeigen, Modus wählen, Motor und Anschläge am Stand einmessen. */
+function renderAbstimmung() {
+  const a = state.live && state.live.abstimmung;
+  if (!a || el('lenkAssistent').hidden) return;
+  const wahl = el('abstModus');
+  if (document.activeElement !== wahl) wahl.value = a.modus;
+  const zahl = (x, n = 2) => Number(x).toLocaleString('de-DE', { maximumFractionDigits: n });
+  if (a.modus === 'aus') {
+    el('abstInfo').textContent = 'Aus. Zum Einschalten „Nur Vorschläge“ oder „Stellt selbst nach“ wählen ' +
+      'und mit eingeschalteter Lenkung geradeaus fahren.';
+    return;
+  }
+  const zeilen = [`Verstärkung ${zahl(a.steer_gain)} · Vorhalt ${a.actuator_latency_ms} ms` +
+    (a.ausgangswerte ? ` (Ausgang: ${zahl(a.ausgangswerte.steer_gain)} / ${a.ausgangswerte.actuator_latency_ms} ms)` : '')];
+  zeilen.push(a.befund
+    ? `Letzte Bewertung: ${{ schwingt: 'pendelt', traege: 'zu träge', gut: 'gut' }[a.befund.art] || a.befund.art}` +
+      ` (${zahl(a.befund.effektiv_m * 100, 0)} cm effektiv)`
+    : `Sammelt Messwerte … ${zahl(a.sammelt_s, 0)} von ${a.fenster_s} s ruhige Geradeausfahrt`);
+  if (a.hinweis) zeilen.push(a.hinweis);
+  (a.schritte || []).slice(-3).forEach((s) => zeilen.push(
+    `${s.was === 'steer_gain' ? 'Verstärkung' : s.was === 'actuator_latency_ms' ? 'Vorhalt' : s.was}` +
+    ` ${s.von ? zahl(s.von) + ' → ' + zahl(s.nach) : ''} ${s.grund}`));
+  el('abstInfo').textContent = zeilen.join('\n');
+}
+setInterval(() => {
+  if (!el('sheet').hidden && document.querySelector('.tab.active').dataset.tab === 'system') renderAbstimmung();
+}, 2000);
+
+el('abstModus').onchange = async (event) => {
+  const antwort = await api('POST', '/api/abstimmung', { modus: event.target.value });
+  if (antwort) toast(event.target.value === 'aus' ? 'Lenk-Assistent aus'
+    : event.target.value === 'beobachten' ? 'Lenk-Assistent macht Vorschläge' : 'Lenk-Assistent stellt selbst nach');
+};
+el('btnAbstZurueck').onclick = async () => {
+  if (await api('POST', '/api/abstimmung/zurueck')) toast('Ausgangswerte wiederhergestellt');
+};
+
+let einmessErgebnis = null;
+function einmessAnbieten(werte, text) {
+  einmessErgebnis = werte;
+  el('einmessInfo').textContent = text;
+  el('btnEinmessUebernehmen').hidden = !werte;
+}
+el('btnEinmessen').onclick = async () => {
+  el('einmessInfo').textContent = 'Motor wird eingemessen … (etwa 10 Sekunden, der Motor dreht kurz hin und her)';
+  el('btnEinmessUebernehmen').hidden = true;
+  const antwort = await api('POST', '/api/steering/einmessen');
+  if (!antwort) { el('einmessInfo').textContent = 'Nicht eingemessen.'; return; }
+  const d = antwort.data;
+  const l = (x) => (x === null ? 'keine Bewegung' : `${Math.round(x * 100)} %`);
+  const text = `Losbrechleistung rechts ${l(d.losbrech_rechts)}, links ${l(d.losbrech_links)}. ` +
+    (d.mindestleistung_vorschlag ? `Mindestleistung ${Math.round(d.mindestleistung_vorschlag * 100)} % vorgeschlagen. ` : '') +
+    (d.hinweis || '');
+  einmessAnbieten(d.mindestleistung_vorschlag ? { 'phidget.min_duty': d.mindestleistung_vorschlag } : null, text);
+};
+let anschlagLaeuft = false;
+el('btnAnschlag').onclick = async () => {
+  if (!anschlagLaeuft) {
+    const antwort = await api('POST', '/api/steering/anschlag', { aktion: 'start' });
+    if (!antwort) return;
+    anschlagLaeuft = true;
+    el('btnAnschlag').textContent = 'Anschläge fertig';
+    el('btnEinmessUebernehmen').hidden = true;
+    el('einmessInfo').textContent = 'Jetzt von Hand bis zum linken, dann bis zum rechten Anschlag lenken, ' +
+      'danach „Anschläge fertig“ drücken. Der Motor bleibt stromlos.';
+    return;
+  }
+  anschlagLaeuft = false;
+  el('btnAnschlag').textContent = 'Anschläge messen';
+  const antwort = await api('POST', '/api/steering/anschlag',
+    { aktion: 'ende', gesamtwinkel_deg: parseFloat(el('anschlagWinkel').value) });
+  if (!antwort) { el('einmessInfo').textContent = 'Nicht gemessen.'; return; }
+  const d = antwort.data;
+  einmessAnbieten({ 'phidget.counts_per_deg': d.zaehlwerte_je_grad, 'phidget.encoder_counts_per_deg': d.zaehlwerte_je_grad },
+    `${d.zaehlwerte} Zählwerte über ${d.gesamtwinkel_deg}° = ${String(d.zaehlwerte_je_grad).replace('.', ',')} Zählwerte je Grad. ` +
+    'Der Gesamteinschlag zählt: bitte oben den echten Wert der Räder am Boden eintragen.');
+};
+el('btnEinmessUebernehmen').onclick = async () => {
+  if (!einmessErgebnis) return;
+  if (await api('POST', '/api/settings', { aenderungen: einmessErgebnis })) {
+    toast('Übernommen');
+    el('btnEinmessUebernehmen').hidden = true;
+    einmessErgebnis = null;
+  }
+};
+
 /* Motortest: kurz und schwach in eine Richtung, danach steht der Motor wieder.
  * Der Drehgeber zeigt, ob wirklich etwas gedreht hat. */
 async function motorTest(richtung) {
@@ -2514,6 +2600,9 @@ function renderSystem() {
   const output = system.steering_output;
   // Die Mitte lässt sich nur lernen, wo ein Drehgeber zählt.
   el('motorTestRow').hidden = !(output && output.typ === 'phidget' && output.bereit);
+  el('lenkAssistent').hidden = !(output && output.bereit);
+  el('einmessBereich').hidden = !(output && output.typ === 'phidget');
+  renderAbstimmung();
   el('steerRow').hidden = !(output && output.mitte_gelernt !== undefined);
   if (!el('steerRow').hidden) {
     el('steerInfo').textContent =

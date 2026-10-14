@@ -43,6 +43,10 @@ _VERSION = 1
 
 MOTORTEST_MAX = 0.35            # höchstens so viel der vollen Leistung im Motortest
 MOTORTEST_DAUER_MAX_S = 1.0     # und höchstens so lange am Stück
+EINMESS_IMPULS_S = 0.35         # so lang ist ein Impuls beim Einmessen
+EINMESS_REGELTAKT_S = 0.12      # Zugabe, damit der Regelkreis den Impuls sicher durchläuft
+EINMESS_AUSROLLEN_S = 0.25      # nach dem Impuls ausrollen lassen, dann ablesen
+EINMESS_MIN_ZAEHLWERTE = 12     # so viel muss sich der Drehgeber bewegen, damit der Motor als angelaufen gilt
 
 _TREIBER_FEHLT = (
     "Phidget-Treiber fehlt - die Python-Bibliothek allein genügt nicht. "
@@ -270,6 +274,7 @@ class PhidgetOutput(SteerOutput):
         self._geraet21 = None
         self._test_duty = 0.0
         self._test_bis = 0.0
+        self._anschlag: Optional[list] = None      # [kleinster, größter] Zählstand beim Ausmessen
 
         self._target_angle = 0.0
         self._engaged = False
@@ -457,6 +462,87 @@ class PhidgetOutput(SteerOutput):
             "bibliothek": self.bibliothek,
         }
 
+    async def _impuls(self, vorzeichen: float, anteil: float, dauer_s: float) -> Optional[int]:
+        """Ein kurzer Impuls; zurück kommt, wie weit sich der Drehgeber bewegt hat."""
+        vorher = self._drehgeber_roh()
+        self._test_duty = vorzeichen * (-1.0 if self.config.invert_motor else 1.0) * anteil
+        self._test_bis = time.time() + dauer_s
+        await asyncio.sleep(dauer_s + EINMESS_REGELTAKT_S)
+        self._test_bis = 0.0
+        self._safe_stop()
+        await asyncio.sleep(EINMESS_AUSROLLEN_S)   # ausrollen lassen, dann ablesen
+        nachher = self._drehgeber_roh()
+        return None if vorher is None or nachher is None else nachher - vorher
+
+    async def einmessen(self) -> dict:
+        """Den Motor am Stand einmessen: ab welcher Leistung er anläuft.
+
+        Abwechselnd nach rechts und links, jeweils ein kurzer Impuls, in kleinen
+        Stufen von 8 % aufwärts bis ``MOTORTEST_MAX``. Die erste Stufe, bei der
+        sich der Drehgeber merklich bewegt, ist die Losbrechleistung. Daraus
+        folgt die Mindestleistung für den Regelkreis (Losbrechleistung plus ein
+        Viertel Reserve). Die Räder stehen dabei möglichst in der Mitte: abwechselnd
+        rechts und links bleibt die Lenkung in etwa dort.
+        """
+        if not self.ready or self.motor is None:
+            raise RuntimeError(f"Lenkmotor nicht bereit: {self.status}")
+        if self._engaged:
+            raise RuntimeError("Die Lenkung ist scharf - erst ausschalten")
+        if self._drehgeber_roh() is None:
+            raise RuntimeError("Kein Drehgeber auslesbar - ohne ihn lässt sich der Motor nicht einmessen")
+        schwelle = EINMESS_MIN_ZAEHLWERTE
+        los = {1: None, -1: None}
+        tempo = {1: 0.0, -1: 0.0}
+        stufe = 0.08
+        while stufe <= MOTORTEST_MAX + 1e-9 and None in los.values():
+            for richtung in (1, -1):
+                if los[richtung] is not None:
+                    continue
+                bewegt = await self._impuls(richtung, stufe, EINMESS_IMPULS_S)
+                if bewegt is not None and abs(bewegt) >= schwelle:
+                    los[richtung] = round(stufe, 2)
+                    tempo[richtung] = abs(bewegt) / EINMESS_IMPULS_S
+            stufe = round(stufe + 0.03, 2)
+        gefunden = [v for v in los.values() if v is not None]
+        vorschlag = None
+        if gefunden:
+            vorschlag = round(min(0.5, max(0.12, max(gefunden) * 1.25)), 2)
+        return {
+            "losbrech_rechts": los[1], "losbrech_links": los[-1],
+            "zaehlwerte_je_s_rechts": round(tempo[1]), "zaehlwerte_je_s_links": round(tempo[-1]),
+            "mindestleistung_vorschlag": vorschlag,
+            "hinweis": ("" if gefunden and None not in los.values() else
+                        "In mindestens einer Richtung hat sich bis zur Höchstleistung des Tests nichts "
+                        "bewegt - Motor, Kupplung oder Drehgeber prüfen."),
+        }
+
+    def anschlag_start(self) -> dict:
+        """Ausmessen von Anschlag zu Anschlag: ab jetzt wird der kleinste und größte
+        Zählstand des Drehgebers mitgeschrieben. Gelenkt wird von Hand, der Motor
+        bleibt stromlos."""
+        if not self.ready or self.motor is None:
+            raise RuntimeError(f"Lenkmotor nicht bereit: {self.status}")
+        if self._engaged:
+            raise RuntimeError("Die Lenkung ist scharf - erst ausschalten")
+        roh = self._drehgeber_roh()
+        if roh is None:
+            raise RuntimeError("Kein Drehgeber auslesbar")
+        self._anschlag = [roh, roh]
+        return {"start": roh}
+
+    def anschlag_ende(self, gesamtwinkel_deg: float) -> dict:
+        if self._anschlag is None:
+            raise RuntimeError("Das Ausmessen wurde nicht gestartet")
+        klein, gross = self._anschlag
+        self._anschlag = None
+        spanne = gross - klein
+        if spanne < 50:
+            raise RuntimeError(f"Der Drehgeber hat sich kaum bewegt ({spanne} Zählwerte) - "
+                               "von Anschlag zu Anschlag lenken")
+        winkel = max(5.0, float(gesamtwinkel_deg))
+        return {"klein": klein, "gross": gross, "zaehlwerte": spanne, "gesamtwinkel_deg": winkel,
+                "zaehlwerte_je_grad": round(spanne / winkel, 2)}
+
     def _drehgeber_roh(self) -> Optional[int]:
         """Zählstand des Drehgebers am Motor, auch wenn er nicht die Rückmeldung ist."""
         try:
@@ -472,6 +558,11 @@ class PhidgetOutput(SteerOutput):
     def _step(self, dt: float) -> None:
         if self.motor is None:
             return
+        if self._anschlag is not None:
+            roh = self._drehgeber_roh()
+            if roh is not None:
+                self._anschlag[0] = min(self._anschlag[0], roh)
+                self._anschlag[1] = max(self._anschlag[1], roh)
         if time.time() < self._test_bis and not self._engaged:
             try:
                 self.motor.setTargetVelocity(self._test_duty)

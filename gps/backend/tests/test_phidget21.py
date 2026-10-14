@@ -69,8 +69,12 @@ class AttrappeDLL:
     def CPhidgetMotorControl_getSensorCount(self, handle, ref):
         return self._setzen(ref, 2)
 
+    losbrech = None                  # Leistung in %, ab der sich der Motor bewegt; None = Drehgeber steht
+
     def CPhidgetMotorControl_setVelocity(self, handle, kanal, wert):
         self.geschwindigkeit[kanal] = wert.value
+        if self.losbrech is not None and abs(wert.value) >= self.losbrech:
+            self.drehgeber += int(wert.value)            # je Aufruf (50 Hz) ein Stück weiter
         return 0
 
     def CPhidgetMotorControl_setAcceleration(self, handle, kanal, wert):
@@ -231,6 +235,80 @@ class Phidget21Test(unittest.TestCase):
             await ausgang.stop()
 
         asyncio.run(ablauf())
+
+    def _ausgang(self):
+        cfg = PhidgetConfig(bibliothek="phidget21", control="velocity", feedback="encoder")
+        return actuators.PhidgetOutput(cfg)
+
+    def test_calibration_finds_the_breakaway_duty_and_suggests_a_minimum(self):
+        self.dll.losbrech = 22.0
+        ausgang = self._ausgang()
+
+        async def ablauf():
+            await ausgang.start()
+            laeuft = asyncio.create_task(ausgang._control_loop())
+            ausgang.running = True
+            with mock.patch.object(actuators, "EINMESS_IMPULS_S", 0.06), \
+                    mock.patch.object(actuators, "EINMESS_REGELTAKT_S", 0.03), \
+                    mock.patch.object(actuators, "EINMESS_AUSROLLEN_S", 0.02):
+                ergebnis = await ausgang.einmessen()
+            ausgang.running = False
+            await laeuft
+            await ausgang.stop()
+            return ergebnis
+
+        ergebnis = asyncio.run(ablauf())
+        self.assertEqual(ergebnis["losbrech_rechts"], 0.23)            # Stufen 8, 11, 14, 17, 20, 23 %
+        self.assertEqual(ergebnis["losbrech_links"], 0.23)
+        self.assertAlmostEqual(ergebnis["mindestleistung_vorschlag"], 0.29)
+        self.assertEqual(ergebnis["hinweis"], "")
+        self.assertEqual(self.dll.geschwindigkeit[0], 0.0)
+
+    def test_calibration_reports_a_motor_that_never_moves_the_encoder(self):
+        self.dll.losbrech = None
+        ausgang = self._ausgang()
+
+        async def ablauf():
+            await ausgang.start()
+            laeuft = asyncio.create_task(ausgang._control_loop())
+            ausgang.running = True
+            with mock.patch.object(actuators, "EINMESS_IMPULS_S", 0.03), \
+                    mock.patch.object(actuators, "EINMESS_REGELTAKT_S", 0.02), \
+                    mock.patch.object(actuators, "EINMESS_AUSROLLEN_S", 0.01):
+                ergebnis = await ausgang.einmessen()
+            ausgang.running = False
+            await laeuft
+            await ausgang.stop()
+            return ergebnis
+
+        ergebnis = asyncio.run(ablauf())
+        self.assertIsNone(ergebnis["mindestleistung_vorschlag"])
+        self.assertIn("nichts bewegt", ergebnis["hinweis"])
+
+    def test_the_stops_are_measured_by_hand_and_give_counts_per_degree(self):
+        ausgang = self._ausgang()
+
+        async def ablauf():
+            await ausgang.start()
+            laeuft = asyncio.create_task(ausgang._control_loop())
+            ausgang.running = True
+            self.dll.drehgeber = 100
+            ausgang.anschlag_start()
+            for stand in (-4000, 2000, 5000, 11000, 100):          # von Hand von Anschlag zu Anschlag
+                self.dll.drehgeber = stand
+                await asyncio.sleep(0.04)
+            ergebnis = ausgang.anschlag_ende(70.0)
+            ausgang.running = False
+            await laeuft
+            await ausgang.stop()
+            return ergebnis
+
+        ergebnis = asyncio.run(ablauf())
+        self.assertEqual((ergebnis["klein"], ergebnis["gross"]), (-4000, 11000))
+        self.assertEqual(ergebnis["zaehlwerte"], 15000)
+        self.assertAlmostEqual(ergebnis["zaehlwerte_je_grad"], 214.29, places=2)
+        with self.assertRaises(RuntimeError):
+            ausgang.anschlag_ende(70.0)                               # nicht gestartet
 
     def test_the_device_search_finds_the_1065_and_suggests_phidget21(self):
         with mock.patch.object(geraete, "_phidget22_kanaele",

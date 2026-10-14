@@ -420,6 +420,40 @@ Wichtig: **das AgriPilot Terminal vorher schließen.** Solange es die Platine
 offen hat, findet AgriPilot sie nicht. Die Zählwerte des Drehgebers je Grad
 Radeinschlag (**Drehgeber: Zählwerte je Grad**) einmal ausmessen, nicht schätzen.
 
+## Lenk-Assistent (Menü → System)
+
+Der Assistent merkt, wie die Lenkung die Spur hält, und stellt die Spurregelung in
+kleinen Schritten nach. Er wertet die Querabweichung aus, solange die Lenkung
+lenkt und das Fahrzeug **ruhig geradeaus** fährt (3–21 km/h, keine Wende, kein
+Spurwechsel, kein Versatz in den letzten Sekunden), in Fenstern von 20 Sekunden:
+
+* **pendelt** (gleichbleibendes Hin und Her um die Spur, oder es schaukelt sich
+  auf): die **Verstärkung** sinkt um 15 %. Hilft das an der Untergrenze nicht,
+  wird der **Vorhalt** für die Lenkverzögerung um 40 ms größer (höchstens 300 ms).
+  Verlässt die Maschine die Spur, nachdem sie sie gehalten hat, gilt das auch als
+  Pendeln - ohne auf ein Fenster zu warten.
+* **zu träge** (große Abweichung ohne Pendeln): die Verstärkung steigt um 15 %,
+  als **Versuch**. Nach einem Fenster zum Einschwingen wird verglichen: bringt es
+  nichts, geht der Schritt zurück, und der Assistent sagt, dass es keine Frage der
+  Reglerstärke ist (Lenkmitte, Hang oder Versatz prüfen).
+* **gut:** nichts ändern.
+
+Modus: **Aus**, **Nur Vorschläge** (zeigt, was er ändern würde) oder **Stellt selbst
+nach**. Es gibt höchstens einen Schritt je Fenster und zwölf je Einschalten; die
+Verstärkung bleibt zwischen 0,3 und 2,0. **„Auf die Ausgangswerte zurück“**
+stellt die Werte vom Einschalten wieder her. An der Hardware (Strom, Failsafe,
+Anschläge) ändert der Assistent nichts.
+
+**Motor einmessen** (am Stand, Lenkung aus, Räder in der Mitte, Not-Aus griffbereit,
+nur beim Phidget-Lenkmotor): Der Motor dreht abwechselnd rechts und links in
+kleinen Impulsen und stufenweise stärker (8 % bis 35 %). Die erste Stufe, bei der
+der Drehgeber mitzählt, ist die **Losbrechleistung**; daraus wird die
+**Mindestleistung** vorgeschlagen. **Anschläge messen:** starten, von Hand von
+Anschlag zu Anschlag lenken, beenden – mit dem Gesamteinschlag der Räder (Vorgabe
+70°) ergeben sich die **Zählwerte je Grad**. **Ergebnis übernehmen** schreibt sie in
+die Einstellungen. Der Wert „Gesamteinschlag“ bestimmt das Ergebnis: möglichst
+den echten Einschlag der Räder am Boden eintragen.
+
 ## Neigungssensor nullen
 
 Einmal beim Einbau und danach, wenn der Sensor bewegt wurde: auf **ebenem**

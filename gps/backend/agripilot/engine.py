@@ -22,6 +22,7 @@ import time
 from dataclasses import asdict
 from typing import Any, Optional
 
+from . import abstimmung as abstimmung_module
 from . import geo, headland as headland_module, randspuren as randspuren_module, saatplan as saatplan_module, storage
 from .actuators import SteerContext
 from .config import Config
@@ -123,6 +124,19 @@ class Engine:
         self._abdeckung_at = 0.0          # zuletzt abgetastet (Sekunden)
         self._abdeckung: Optional[float] = None
         self._steering_was_engaged = False
+
+        # Lenk-Assistent: stellt Verstärkung und Vorhalt der Spurregelung in
+        # kleinen Schritten nach (abstimmung.py). Der Modus überlebt den Neustart.
+        self.abstimmung = abstimmung_module.Lenkabstimmung(
+            lesen=lambda: {"steer_gain": self.profile.steer_gain,
+                           "actuator_latency_ms": self.profile.actuator_latency_ms},
+            setzen=lambda werte: self.update_profile(werte, stempeln=False))
+        gespeichert = self.store.get_setting("lenkabstimmung") or {}
+        if gespeichert.get("modus") in ("beobachten", "automatisch"):
+            self.abstimmung.ausgangswerte = gespeichert.get("ausgangswerte")
+            self.abstimmung.modus = gespeichert["modus"]
+        self._abst_spur = (None, 0.0)           # (Spurnummer, seit wann)
+        self._nudge_zeit = 0.0
 
         self.record_mode: Optional[str] = None          # "boundary" | "curve"
         self._recording: list[geo.Point] = []
@@ -245,6 +259,36 @@ class Engine:
         self.store.set_setting("vehicle_profiles_deleted", grab)
         if war_aktiv:
             self.select_profile(rest[0]["id"])
+
+    def abstimmung_modus(self, modus: str) -> dict:
+        """Lenk-Assistent aus / nur Vorschläge / stellt selbst nach."""
+        self.abstimmung.einschalten(modus)
+        self.store.set_setting("lenkabstimmung", {
+            "modus": self.abstimmung.modus, "ausgangswerte": self.abstimmung.ausgangswerte})
+        self.note(f"Lenk-Assistent: {modus}")
+        return self.abstimmung.status()
+
+    def abstimmung_zuruecksetzen(self) -> dict:
+        self.abstimmung.zuruecksetzen()
+        self.note("Lenk-Assistent: Ausgangswerte wiederhergestellt")
+        return self.abstimmung.status()
+
+    def _abstimmung_beobachten(self, lenkt: bool, fix) -> None:
+        """Dem Assistenten die Querabweichung geben - aber nur, wo sie etwas über
+        die Regelung sagt: geradeaus, ohne Wende, ohne frischen Spurwechsel."""
+        if self.abstimmung.modus == "aus":
+            return
+        jetzt = time.time()
+        nummer = self.guidance.pass_number
+        if nummer != self._abst_spur[0]:
+            self._abst_spur = (nummer, jetzt)
+        ruhig = (self.turn is None and self.line is not None and self.line.mode != "contour"
+                 and self.guidance.active and abs(self.guidance.heading_error_deg) < 15.0
+                 and jetzt - self._abst_spur[1] > 5.0 and jetzt - self._nudge_zeit > 5.0)
+        self.abstimmung.beobachten(jetzt, self.guidance.cross_track_m, fix.speed_ms, lenkt, ruhig)
+        if self.abstimmung.modus == "automatisch" and self.abstimmung.schritte:
+            self.store.set_setting("lenkabstimmung", {
+                "modus": self.abstimmung.modus, "ausgangswerte": self.abstimmung.ausgangswerte})
 
     def update_profile(self, values: dict, stempeln: bool = True) -> VehicleProfile:
         """Das Gespann ändern. Antenne und Lenkung gehen an den gewählten Traktor, der Rest
@@ -1040,6 +1084,7 @@ class Engine:
         """
         if self.line is None:
             raise RuntimeError("Keine Spur aktiv")
+        self._nudge_zeit = time.time()      # der Lenk-Assistent wertet danach eine Weile nicht
         # "Rechts" heißt rechts vom Sitz aus. Auf einer rückwärts gefahrenen
         # AB-Spur und auf dem Ring gegen den Uhrzeigersinn liegt rechts vom
         # Fahrer links vom Muster - die Führung weiß das (right_sign), also
@@ -1759,6 +1804,7 @@ class Engine:
         self.steering.rueckwaerts = (self.heading_filter.rueckwaerts
                                      and not self.heading_filter.bestaetigung_offen)
         command = self.steering.update(self.guidance, fix, context)
+        self._abstimmung_beobachten(command.engaged, fix)
         # On the simulator, close the loop so autosteer can be demonstrated and
         # tuned without a machine.
         #
@@ -1911,6 +1957,8 @@ class Engine:
                 "compensation": self.config.imu.terrain_compensation,
             } if self.imu is not None else None),
             "steering": self.steering.status() if self.steering else None,
+            "abstimmung": (self.abstimmung.status() if self.abstimmung.modus != "aus"
+                           else {"modus": "aus"}),
             "messages": self.messages[-6:],
         }
 

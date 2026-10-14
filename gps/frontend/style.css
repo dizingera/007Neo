@@ -602,3 +602,5 @@ label.button { display: inline-flex; align-items: center; cursor: pointer; }
   border-radius: 8px; padding: 10px 12px; margin: 10px 0; }
 .saat-fuell p { margin: 0 0 6px; }
 .saat-fuell ul { margin: 0; padding-left: 20px; }
+
+#abstInfo, #einmessInfo { white-space: pre-line; }

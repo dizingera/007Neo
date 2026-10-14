@@ -508,6 +508,37 @@
       <span class="note" id="motorTestInfo" role="status" aria-atomic="true">Kurz und schwach, nur
         mit ausgeschalteter Lenkung. Fahrzeug steht, Not-Aus griffbereit.</span>
     </div>
+    <section class="karte" id="lenkAssistent" hidden>
+      <h3>Lenk-Assistent</h3>
+      <p class="note">Merkt, wie die Lenkung die Spur hält, und stellt Verstärkung und Vorhalt in
+        kleinen Schritten nach. Nur bei ruhiger Geradeausfahrt und nur innerhalb fester Grenzen;
+        „zurück“ stellt die Werte vom Einschalten wieder her.</p>
+      <div class="row">
+        <label>Modus
+          <select id="abstModus">
+            <option value="aus">Aus</option>
+            <option value="beobachten">Nur Vorschläge</option>
+            <option value="automatisch">Stellt selbst nach</option>
+          </select>
+        </label>
+        <button id="btnAbstZurueck">Auf die Ausgangswerte zurück</button>
+      </div>
+      <p class="note" id="abstInfo" role="status" aria-atomic="true"></p>
+      <div id="einmessBereich">
+        <div class="row">
+          <button id="btnEinmessen">Motor einmessen</button>
+          <button id="btnAnschlag">Anschläge messen</button>
+          <label>Gesamteinschlag der Räder (°)
+            <input type="number" id="anschlagWinkel" value="70" min="10" max="120" step="1">
+          </label>
+        </div>
+        <p class="note" id="einmessInfo" role="status" aria-atomic="true">Am Stand, Lenkung aus, Räder
+          in der Mitte, Not-Aus griffbereit. „Motor einmessen“ dreht kurz abwechselnd links und rechts
+          und findet die Mindestleistung. „Anschläge messen“: starten, von Hand von Anschlag zu
+          Anschlag lenken, dann beenden - daraus folgen die Zählwerte je Grad.</p>
+        <div class="row"><button id="btnEinmessUebernehmen" class="primary" hidden>Ergebnis übernehmen</button></div>
+      </div>
+    </section>
     <div class="row" id="steerRow" hidden>
       <button id="btnCentre">Lenkung: Mitte lernen</button>
       <span class="note" id="steerInfo"></span>
