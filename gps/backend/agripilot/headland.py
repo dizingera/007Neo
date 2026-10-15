@@ -648,7 +648,7 @@ class TurnFollower:
         abstand = max(1.0, distance(position, ziel))
         einschlag = math.degrees(math.atan2(
             2.0 * profile.wheelbase_m * math.sin(math.radians(kursfehler)), abstand))
-        einschlag = max(-profile.max_steer_deg, min(profile.max_steer_deg, einschlag))
+        einschlag = profile.einschlag_begrenzen(einschlag)
 
         return GuidanceState(
             active=True,

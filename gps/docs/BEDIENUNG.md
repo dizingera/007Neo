@@ -520,6 +520,28 @@ schaukelt sich auf (im Simulator auf ±3,5 m, mit der Lenkung im Sekundentakt
 an und aus). Auf gerader Spur läuft das Gerät ohnehin in der Achsspur; ein
 seitlicher Versatz des Geräts wird als Versatz der Achse mitgenommen.
 
+## Regelart und Lenkanschlag (Menü → Traktor & Gerät → Lenkung)
+
+**Lenkanschlag links und rechts getrennt.** Viele Traktoren schlagen zu einer
+Seite weiter ein als zur anderen. „davon links“ und „davon rechts“ begrenzen
+den Einschlag je Seite; 0 heißt: der gemeinsame Höchstwinkel gilt. Die Grenzen
+gelten in der Spurführung, in der Wende und bei der Prüfung, ob eine Wende
+überhaupt fahrbar ist.
+
+**Regelart.** *Stanley* (Voreinstellung) schaut auf den Augenblick: Abweichung
+und Kurswinkel jetzt. *Vorausschauend* rechnet mit einem Fahrzeugmodell, wie
+träge die Lenkung dem Befehl folgt, und lenkt die Krümmung einer Kurve vorab
+ein (Vorsteuerung). Im Simulator (Kurve mit 40 m Radius) blieb die Abweichung
+bei 2 m/s bei rund 6 cm statt 25 cm, bei 4 m/s bei rund 11 cm statt 41 cm; auf
+gerader Spur bei 0,5 cm statt knapp 3 cm. Am Traktor ist das noch nicht
+geprüft – im Zweifel zurück auf Stanley.
+
+**Trägheit der Lenkung (s).** Wie lange der Radwinkel braucht, um einem Befehl
+zu zwei Dritteln zu folgen (Voreinstellung 0,3 s). Nur für „Vorausschauend“.
+Pendelt die Maschine langsam um die Spur, den Wert erhöhen; lenkt sie zu
+zögerlich, senken. Die Verstärkung wirkt wie gewohnt und kann weiter mit dem
+Lenk-Assistenten abgestimmt werden.
+
 ## Abstimmung bei Tempo, Latenz und Teilbreiten (Menü → Maschine)
 
 Drei Werte, die aus dem Cerea-Handbuch übernommen sind und erst zählen, wenn die

@@ -1386,8 +1386,11 @@ class Engine:
         # größter Einschlag geben den kleinsten Kreis; ein enger geplanter Bogen
         # wird nicht "ungefähr" gefahren, sondern verlassen.
         engster = headland_module.engster_radius(pfad)
+        # Der Anschlag der Seite, zu der gewendet wird.
+        links, rechts = self.profile.einschlag_grenzen()
+        anschlag = links if einstellung.richtung == "links" else rechts
         kleinster = self.profile.wheelbase_m / math.tan(
-            math.radians(max(5.0, min(60.0, self.profile.max_steer_deg))))
+            math.radians(max(5.0, min(60.0, anschlag))))
         fahrbar = engster >= kleinster * 0.98
         self.turn_preview = pfad
         self.turn_preview_ok = im_feld

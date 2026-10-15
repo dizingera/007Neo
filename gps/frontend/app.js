@@ -1587,7 +1587,7 @@ async function myterraAuswahlLaden() {
 
 function fillProfileFrom(profile) {
   formularSauber('profileForm');
-  document.querySelectorAll('#profileForm input').forEach((input) => {
+  document.querySelectorAll('#profileForm input, #profileForm select').forEach((input) => {
     if (profile[input.name] === undefined) return;
     if (input.type === 'checkbox') input.checked = !!profile[input.name];
     else input.value = profile[input.name];
@@ -1623,7 +1623,7 @@ el('btnDeleteProfile').onclick = async () => {
 
 el('btnSaveProfile').onclick = async () => {
   const payload = {};
-  document.querySelectorAll('#profileForm input').forEach((input) => {
+  document.querySelectorAll('#profileForm input, #profileForm select').forEach((input) => {
     payload[input.name] = input.type === 'checkbox' ? input.checked
       : input.type === 'number' ? parseFloat(input.value) : input.value;
   });
@@ -2568,7 +2568,7 @@ function fillProfile() {
   if (!profile) return;
   el('autoSections').checked = !!(state.live && state.live.auto_sections);
   if (formularOffen('profileForm')) return;
-  document.querySelectorAll('#profileForm input').forEach((input) => {
+  document.querySelectorAll('#profileForm input, #profileForm select').forEach((input) => {
     if (profile[input.name] === undefined) return;
     if (input.type === 'checkbox') input.checked = !!profile[input.name];
     else input.value = profile[input.name];

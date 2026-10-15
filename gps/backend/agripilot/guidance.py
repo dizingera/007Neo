@@ -70,6 +70,17 @@ class VehicleProfile:
     trailed: bool = False           # gezogenes Gerät statt starrer Anbau
     hitch_length_m: float = 4.0     # Zugpunkt bis Geräteachse (nur gezogen)
     max_steer_deg: float = 35.0
+    # Viele Traktoren schlagen nicht nach beiden Seiten gleich weit ein. 0 heißt:
+    # wie max_steer_deg. Begrenzt den Einschlag der Führung und den engsten
+    # Wendekreis je Richtung.
+    max_steer_left_deg: float = 0.0
+    max_steer_right_deg: float = 0.0
+    # Regelart der Spurführung: "stanley" (schaut auf jetzt) oder "voraus"
+    # (Fahrzeugmodell, rechnet die Trägheit der Lenkung und die Kurve voraus -
+    # siehe vorausregler.py). lenk_traegheit_s: wie lange der Radwinkel braucht,
+    # um einem Befehl zu zwei Dritteln zu folgen.
+    regelart: str = "stanley"
+    lenk_traegheit_s: float = 0.3
     steer_gain: float = 0.9         # Stanley k: higher = harder pull back to line
     steer_softening: float = 1.2    # m/s added to the denominator; tames low speed
     max_steer_rate_deg_s: float = 25.0  # how fast the steering actuator may move
@@ -97,6 +108,17 @@ class VehicleProfile:
     # Maschinen aus 1.5.6 lesbar, die ihn noch selbst tragen.
     traktor: str = ""
     anbaugeraet: str = ""
+
+    def einschlag_grenzen(self) -> tuple[float, float]:
+        """Größter Einschlag nach links und nach rechts (Grad, positiv)."""
+        links = self.max_steer_left_deg if self.max_steer_left_deg > 0 else self.max_steer_deg
+        rechts = self.max_steer_right_deg if self.max_steer_right_deg > 0 else self.max_steer_deg
+        return links, rechts
+
+    def einschlag_begrenzen(self, einschlag_deg: float) -> float:
+        """Einschlag (+ = rechts) auf den Anschlag der jeweiligen Seite begrenzen."""
+        links, rechts = self.einschlag_grenzen()
+        return max(-links, min(rechts, einschlag_deg))
 
     @property
     def spacing_m(self) -> float:
@@ -182,7 +204,8 @@ class VehicleProfile:
 # ein, nicht für jedes Gerät neu. Der Rest der VehicleProfile gehört zum Gerät.
 TRAKTOR_FELDER = (
     "antenna_forward_m", "antenna_right_m", "antenna_height_m",
-    "wheelbase_m", "max_steer_deg", "max_steer_rate_deg_s",
+    "wheelbase_m", "max_steer_deg", "max_steer_left_deg", "max_steer_right_deg", "max_steer_rate_deg_s",
+    "regelart", "lenk_traegheit_s",
     "steer_gain", "steer_softening", "speed_gain_limit_kmh", "speed_gain_rest",
     "actuator_latency_ms",
 )
@@ -254,6 +277,7 @@ class GuidanceLine:
         # +1 rechts der Spurrichtung, -1 links, 0 = keine Randspur. Setzt die
         # Engine beim Laden aus der Feldgrenze (siehe rand_seite).
         self.rand_innen = 0.0
+        self._vorausregler = None      # nur bei regelart "voraus", hält den geschätzten Radwinkel
         # Saatplan: wo genau die Fahrgassen liegen, in Metern neben der Spur
         # (rechts der Richtung positiv). Leer = alle fahrgasse_m.
         self.fahrgassen_liste: list[float] = []
@@ -420,7 +444,14 @@ class GuidanceLine:
             right_sign = 1.0 if innen[0] * rx + innen[1] * ry >= 0 else -1.0
         signed_xte = cross_track * right_sign
 
-        steer = self._steer_angle(signed_xte, heading_error, speed_ms, profile)
+        if profile.regelart == "voraus" and self.mode != "turn":
+            if self._vorausregler is None:
+                from .vorausregler import Vorausregler
+                self._vorausregler = Vorausregler()
+            kruemmung = self._kruemmung(position, vehicle_heading, along) if self.mode != "ab" else 0.0
+            steer = self._vorausregler.einschlag(signed_xte, heading_error, speed_ms, profile, kruemmung)
+        else:
+            steer = self._steer_angle(signed_xte, heading_error, speed_ms, profile)
 
         return GuidanceState(
             active=True,
@@ -435,6 +466,40 @@ class GuidanceLine:
             lightbar=lightbar_offset(signed_xte),
             right_sign=right_sign,
         )
+
+    def _kruemmung(self, position: Point, vehicle_heading: float, along: float,
+                   abstand_m: float = 5.0, voraus_m: float = 0.0) -> float:
+        """Krümmung der Spur am Fahrzeug (1/m, + Rechtskurve in Fahrtrichtung).
+
+        Ein Kreis durch drei Punkte auf der Spur - 5 m dahinter, am Fahrzeug,
+        5 m davor. Über den Kurswinkel zweier Punkte zu gehen wäre ungenau: eine
+        Kurvenspur besteht aus kurzen Geraden, und je nachdem, wie viele Knicke
+        dazwischen liegen, springt das Ergebnis um die Hälfte.
+        """
+        h = math.radians(vehicle_heading)
+        vor = (math.sin(h), math.cos(h))
+        fuss = []
+        for s in (voraus_m - abstand_m, voraus_m, voraus_m + abstand_m):
+            punkt = (position[0] + vor[0] * s, position[1] + vor[1] * s)
+            try:
+                if self.mode == "contour":
+                    seitlich, kurs, _, innen = self._contour_lateral(punkt)
+                    # innen zeigt zur Spur hin (nach innen gemessen): Fußpunkt.
+                    fuss.append((punkt[0] - innen[0] * seitlich, punkt[1] - innen[1] * seitlich)
+                                if innen is not None else punkt)
+                else:
+                    seitlich, kurs, _ = self._curve_lateral(punkt)
+                    rx, ry = _right_vector(kurs)
+                    fuss.append((punkt[0] - rx * seitlich, punkt[1] - ry * seitlich))
+            except Exception:  # noqa: BLE001 - am Ende der Kurve: keine Vorsteuerung
+                return 0.0
+        (x1, y1), (x2, y2), (x3, y3) = fuss
+        kreuz = (x2 - x1) * (y3 - y2) - (y2 - y1) * (x3 - x2)
+        seiten = distance(fuss[0], fuss[1]) * distance(fuss[1], fuss[2]) * distance(fuss[0], fuss[2])
+        if seiten < 1e-6:
+            return 0.0
+        # Im Uhrzeigersinn (rechts herum) ist das Kreuzprodukt negativ.
+        return -2.0 * kreuz / seiten
 
     def _steer_angle(self, cross_track: float, heading_error: float,
                      speed_ms: float, profile: VehicleProfile) -> float:
@@ -451,8 +516,7 @@ class GuidanceLine:
                        abs(speed_ms) + profile.steer_softening)
         )
         steer = heading_error * faktor - approach
-        limit = profile.max_steer_deg
-        return max(-limit, min(limit, steer))
+        return profile.einschlag_begrenzen(steer)
 
     # -- drawing helpers --------------------------------------------------
 
