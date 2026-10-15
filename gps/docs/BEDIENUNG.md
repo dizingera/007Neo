@@ -740,8 +740,17 @@ spielt sie ein.
   Suche das, das Programm arbeitet normal weiter. Abschalten: `update_online: false`
   in der Konfiguration (Abschnitt `server`).
 
-Die Versionen liegen als **Releases im Repo** (Etikett `agripilot-vX.Y.Z`, Datei
-`AgriPilot-Setup.exe`); veröffentlicht wird mit `python scripts/release.py`.
+**Arbeiter holen das Update vom Master.** Ein Tablet, das als Arbeiter eingerichtet
+ist, fragt zuerst seinen Master: der gibt das Programm heraus, mit dem er selbst
+läuft. Also: neue Version am Master-PC installieren, dann am Tablet **Online nach
+neuer Version suchen** → **Jetzt aktualisieren**. Das geht im Hof-WLAN wie über den
+Tunnel draußen auf dem Feld, mit demselben Arbeitercode wie der Abgleich; der Hinweis
+lautet dann „Vom Master übernommen“. Hat der Master nichts Neueres, wird wie bisher
+GitHub gefragt. Wirksam ab der ersten Version, die so etwas kann (1.5.35) – auf ein
+älteres Tablet kommt diese einmal noch per Setup-Datei.
+
+Die Versionen liegen außerdem als **Releases im Repo** (Etikett `agripilot-vX.Y.Z`,
+Datei `AgriPilot-Setup.exe`); veröffentlicht wird mit `python scripts/release.py`.
 
 ## Änderungen einspielen (Menü → System → Aktualisierung)
 

@@ -56,6 +56,8 @@ from . import __version__ as VERSION
 MINDESTLAENGE_AUSSEN = 8
 SPERRE_VERSUCHE = 8             # falsche Versuche ...
 SPERRE_FENSTER_S = 900.0        # ... innerhalb von 15 Minuten sperren den Absender
+# Was über einen Tunnel hereinkommen darf: der Abgleich und das Update für die Arbeiter.
+VON_AUSSEN_ERLAUBT = frozenset({"/api/sync", "/api/sync/setup", "/api/sync/setup/datei"})
 
 FRONTEND_DIR = (Path(getattr(sys, "_MEIPASS", "")) / "frontend"
                 if getattr(sys, "frozen", False)
@@ -306,9 +308,23 @@ class Application:
         return [f"http://{ip}:{self.config.server.port}" for ip in gefunden]
 
     def online_pruefen(self) -> dict:
-        """Neue Version suchen (blockiert kurz: im Faden aufrufen)."""
+        """Neue Version suchen (blockiert kurz: im Faden aufrufen).
+
+        Ein Arbeiter fragt zuerst seinen Master - der gibt sein eigenes Programm
+        heraus, auch über den Tunnel. Erst wenn der nichts Neueres hat, GitHub.
+        """
         cfg = self.config.server
+        vom_master = None
+        if not self.config.is_master and self.config.network.master_url:
+            vom_master, info = onlineupdate_module.vom_master(
+                VERSION, self.config.network.master_url, self.config.network.sync_token)
+            if vom_master["verfuegbar"]:
+                self.online_stand, self.online_info = vom_master, info
+                vom_master["geprueft"] = time.time()
+                return vom_master
         ergebnis, info = onlineupdate_module.suche(VERSION, cfg.update_repo, cfg.update_api)
+        if ergebnis["fehler"] and vom_master is not None and not vom_master["fehler"]:
+            ergebnis = vom_master          # GitHub nicht erreichbar, der Master schon: aktuell
         self.online_stand, self.online_info = ergebnis, info
         ergebnis["geprueft"] = time.time()
         return ergebnis
@@ -325,6 +341,23 @@ class Application:
             except Exception as exc:  # noqa: BLE001 - Suchen darf nie etwas mitreißen
                 self.engine.note(f"Update-Suche: {exc}")
             await asyncio.sleep(12 * 3600)
+
+    def eigenes_setup(self) -> tuple[int, str]:
+        """Größe und SHA-256 der laufenden AgriPilot.exe - sie ist zugleich das Setup.
+        Einmal gerechnet und gemerkt, solange die Datei gleich bleibt."""
+        import hashlib
+        pfad = Path(sys.executable)
+        stat = pfad.stat()
+        schluessel = (stat.st_size, stat.st_mtime_ns)
+        gemerkt = getattr(self, "_eigenes_setup", None)
+        if gemerkt and gemerkt[0] == schluessel:
+            return gemerkt[1]
+        h = hashlib.sha256()
+        with open(pfad, "rb") as f:
+            for block in iter(lambda: f.read(1024 * 1024), b""):
+                h.update(block)
+        self._eigenes_setup = (schluessel, (stat.st_size, h.hexdigest()))
+        return self._eigenes_setup[1]
 
     # -- Sicherung --------------------------------------------------------
 
@@ -571,7 +604,7 @@ def create_app(config=None) -> FastAPI:
         Im eigenen Netz fällt die Sperre nicht auf.
         """
         von_aussen = any(k in request.headers for k in ("cf-connecting-ip", "cf-ray", "x-forwarded-for"))
-        if von_aussen and request.url.path != "/api/sync":
+        if von_aussen and request.url.path not in VON_AUSSEN_ERLAUBT:
             return JSONResponse({"detail": "Von außen ist nur der Abgleich erreichbar"}, status_code=403)
         return await call_next(request)
 
@@ -1523,9 +1556,8 @@ def create_app(config=None) -> FastAPI:
 
     # -- master sync endpoint ---------------------------------------------
 
-    @api.post("/api/sync")
-    async def sync_endpoint(request: Request, payload: dict = Body(...)) -> dict:
-        """Called by client tractors. Push their changes, hand back ours."""
+    def arbeiter_pruefen(request: Request) -> None:
+        """Darf dieser Arbeiter an den Master? Wirft, wenn nicht."""
         if not config.is_master:
             raise HTTPException(400, "Dieses Gerät ist kein Master")
         # Mit Code im Heimnetz wie von außen: ohne passenden Code kein Abgleich. Ohne
@@ -1555,6 +1587,29 @@ def create_app(config=None) -> FastAPI:
                 gesetzt and hmac.compare_digest(glatt(mitgebracht), glatt(gesetzt))):
             fehler.append(jetzt)
             raise HTTPException(401, "Arbeitercode fehlt oder ist falsch")
+
+    @api.get("/api/sync/setup")
+    async def sync_setup_info(request: Request) -> dict:
+        """Welche Version der Master als Update für die Arbeiter bereithält: sich selbst."""
+        arbeiter_pruefen(request)
+        if not update_module.als_programm():
+            raise HTTPException(404, "Der Master läuft nicht als Programm - kein Update zum Verteilen")
+        groesse, sha = await asyncio.to_thread(application.eigenes_setup)
+        return {"version": VERSION, "groesse": groesse, "sha256": sha}
+
+    @api.get("/api/sync/setup/datei")
+    async def sync_setup_datei(request: Request):
+        arbeiter_pruefen(request)
+        if not update_module.als_programm():
+            raise HTTPException(404, "Der Master läuft nicht als Programm - kein Update zum Verteilen")
+        from fastapi.responses import FileResponse
+        return FileResponse(sys.executable, media_type="application/octet-stream",
+                            filename=f"AgriPilot-Setup-{VERSION}.exe")
+
+    @api.post("/api/sync")
+    async def sync_endpoint(request: Request, payload: dict = Body(...)) -> dict:
+        """Called by client tractors. Push their changes, hand back ours."""
+        arbeiter_pruefen(request)
         device = payload.get("device") or {}
         if device.get("id"):
             store.touch_device(device["id"], device.get("name", device["id"]),

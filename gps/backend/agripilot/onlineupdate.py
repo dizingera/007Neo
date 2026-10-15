@@ -107,6 +107,58 @@ def suche(aktuell: str, repo: str = STANDARD_REPO,
     return ergebnis, info
 
 
+MASTER_INFO = "/api/sync/setup"
+MASTER_DATEI = "/api/sync/setup/datei"
+
+
+def vom_master(aktuell: str, master_url: str, code: str = "",
+               timeout: float = 10.0) -> tuple[dict, Optional[dict]]:
+    """Beim Master nachsehen: er gibt sein eigenes Programm als Update heraus.
+
+    So kommt ein Arbeiter an die neue Version, sobald der Master sie hat - im
+    Hof-WLAN wie über den Tunnel draußen auf dem Feld, ohne GitHub. Mit dem
+    Arbeitercode wie beim Abgleich.
+    """
+    ergebnis = {"aktuell": aktuell, "neu": None, "verfuegbar": False, "notizen": "",
+                "groesse": 0, "fehler": "", "quelle": "Master"}
+    basis = (master_url or "").rstrip("/")
+    if not basis:
+        ergebnis["fehler"] = "Keine Master-Adresse eingetragen"
+        return ergebnis, None
+    kopf = {**KOPF, "Accept": "application/json"}
+    if code:
+        kopf["X-AgriPilot-Token"] = code
+    anfrage = urllib.request.Request(basis + MASTER_INFO, headers=kopf)
+    try:
+        with urllib.request.urlopen(anfrage, timeout=timeout) as antwort:
+            daten = json.loads(antwort.read())
+    except urllib.error.HTTPError as exc:
+        ergebnis["fehler"] = ("Arbeitercode fehlt oder ist falsch" if exc.code in (401, 403)
+                              else f"Der Master antwortet mit Fehler {exc.code}")
+        return ergebnis, None
+    except (urllib.error.URLError, TimeoutError, OSError, ValueError):
+        ergebnis["fehler"] = "Master nicht erreichbar"
+        return ergebnis, None
+    zahlen = version_zahlen(str(daten.get("version") or ""))
+    sha = str(daten.get("sha256") or "").lower()
+    if not zahlen or not sha:
+        ergebnis["fehler"] = "Der Master bietet kein Update an"
+        return ergebnis, None
+    info = {
+        "zahlen": zahlen,
+        "version": ".".join(str(z) for z in zahlen),
+        "notizen": "Vom Master übernommen",
+        "url": basis + MASTER_DATEI,
+        "groesse": int(daten.get("groesse") or 0),
+        "sha256": sha,
+        "pruefsumme_url": "",
+        "kopf": {k: v for k, v in kopf.items() if k != "Accept"},
+    }
+    ergebnis.update(neu=info["version"], notizen=info["notizen"], groesse=info["groesse"],
+                    verfuegbar=zahlen > version_zahlen(aktuell))
+    return ergebnis, info
+
+
 def pruefen(aktuell: str, repo: str = STANDARD_REPO, api: str = STANDARD_API) -> dict:
     return suche(aktuell, repo, api)[0]
 
@@ -126,7 +178,7 @@ def herunterladen(info: dict, ordner: Path, timeout: float = 30.0,
     teil = ordner / (ziel.name + ".teil")
     hash_ = hashlib.sha256()
     gelesen = 0
-    anfrage = urllib.request.Request(info["url"], headers=KOPF)
+    anfrage = urllib.request.Request(info["url"], headers=info.get("kopf") or KOPF)
     try:
         with urllib.request.urlopen(anfrage, timeout=timeout) as antwort, open(teil, "wb") as aus:
             gesamt = int(antwort.headers.get("Content-Length") or info.get("groesse") or 0)
