@@ -301,6 +301,9 @@ GRUPPEN: list[Gruppe] = [
             Feld("phidget.was_invert", "Radwinkelsensor umkehren", "schalter"),
             Feld("phidget.encoder_channel", "Kanal des Drehgebers", "ganzzahl",
                  minimum=0, maximum=7),
+            Feld("phidget.encoder_invert", "Drehgeber umkehren", "schalter", sofort=True,
+                 hilfe="Wenn der Drehgeber beim Lenken nach rechts herunterzählt. Stellt "
+                       "„Lenkung einrichten → Drehrichtung prüfen“ von selbst richtig."),
             Feld("phidget.encoder_counts_per_deg", "Drehgeber: Zählwerte je Grad", "zahl",
                  minimum=0.1, maximum=10000.0),
             Feld("phidget.gain_p", "Eigener Regler P", "zahl", minimum=0.0, maximum=10.0),

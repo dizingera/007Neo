@@ -29,6 +29,7 @@ from fastapi.staticfiles import StaticFiles
 
 from . import config as config_module
 from . import checklist as checklist_module
+from . import lenkung_einrichten
 from . import settings as settings_module
 from . import export, geraete as geraete_module, imu as imu_module
 from . import recorder as recorder_module, shapefile as shapefile_module, sync
@@ -174,6 +175,18 @@ class Application:
         self._korrekturen_starten()
         quelle = self.corrections or self.rtcm_client
         return quelle.adresse if quelle is not None and quelle.adresse else "aus"
+
+    async def lenkung_neu_bauen(self) -> str:
+        """Den Lenkausgang mit der aktuellen Konfiguration neu aufbauen - nach
+        "Gefundene Geräte übernehmen" soll niemand das Programm neu starten müssen.
+        Nie bei scharfer Lenkung."""
+        if self.steering.armed:
+            return "Lenkung ist scharf - Ausgang bleibt"
+        await self.steering.stop()
+        self.steering = self._lenkung_bauen()
+        self.engine.steering = self.steering
+        await self.steering.start()
+        return self.steering.output.status
 
     def _lenkung_bauen(self) -> SteeringController:
         """Lenkausgang zur Quelle: im Simulator lenkt die Engine selbst, ohne Motor."""
@@ -522,6 +535,13 @@ class Application:
             "devices": self.store.list_devices(),
         }
 
+
+# Nach diesen Einstellungen wird der Lenkausgang neu aufgebaut (ohne Neustart).
+LENKAUSGANG_SCHLUESSEL = {
+    "steering.output", "steering.host", "steering.port",
+    "phidget.bibliothek", "phidget.serial_number", "phidget.motor_channel",
+    "phidget.control", "phidget.feedback", "phidget.encoder_channel", "phidget.was_channel",
+}
 
 def _host_of(url: str) -> str:
     from urllib.parse import urlparse
@@ -1056,6 +1076,82 @@ def create_app(config=None) -> FastAPI:
         engine.note(f"Motortest {ergebnis['richtung']}: Drehgeber {ergebnis['drehgeber_bewegt']}")
         return ok(ergebnis)
 
+    # -- Lenkung einrichten (Menü → Einbau) -------------------------------
+
+    def _einrichtung() -> dict:
+        return store.get_setting("lenkung_einrichtung") or {}
+
+    def _einrichtung_merken(schritt: str, werte) -> None:
+        stand = _einrichtung()
+        stand[schritt] = werte
+        store.set_setting("lenkung_einrichtung", stand)
+
+    def _notaus_abgehakt() -> bool:
+        stand = application.checklist.zusammenfassung(application.checklist_state())
+        return next((s["fertig"] for s in stand["schritte"] if s["id"] == "lenkmotor"), False)
+
+    @api.get("/api/lenkung/einrichten")
+    async def lenkung_einrichten_lesen():
+        ausgang = application.steering.output.status_dict()
+        return ok({
+            "schritte": lenkung_einrichten.status(
+                _einrichtung(), ausgang, bool(config.steering.enabled), _notaus_abgehakt(),
+                engine.abstimmung.status()),
+            "ausgang": ausgang,
+            "einstellungen": {"invert_motor": config.phidget.invert_motor,
+                              "encoder_invert": config.phidget.encoder_invert,
+                              "min_duty": config.phidget.min_duty,
+                              "encoder_counts_per_deg": config.phidget.encoder_counts_per_deg},
+        })
+
+    @api.post("/api/lenkung/einrichten/richtung-test")
+    async def richtung_testen():
+        output = application.steering.output
+        if not hasattr(output, "richtung_testen"):
+            raise HTTPException(400, "Kein Phidget-Lenkmotor verbunden - erst Schritt 1")
+        if application.steering.armed:
+            raise HTTPException(400, "Die Lenkung ist scharf - erst ausschalten")
+        try:
+            ergebnis = await output.richtung_testen()
+        except (RuntimeError, ValueError) as exc:
+            raise HTTPException(400, str(exc)) from exc
+        application.richtung_bewegt = ergebnis["bewegt"]
+        return ok(ergebnis)
+
+    @api.post("/api/lenkung/einrichten/richtung")
+    async def richtung_festlegen(payload: dict = Body(...)):
+        """Der Fahrer sagt, wohin die Räder beim Test gingen - daraus folgen die Schalter."""
+        try:
+            ergebnis = lenkung_einrichten.richtung_auswerten(
+                str(payload.get("gesehen", "")), getattr(application, "richtung_bewegt", None),
+                config.phidget.invert_motor, config.phidget.encoder_invert)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        if ergebnis["aenderungen"]:
+            try:
+                settings_module.uebernehmen(config, ergebnis["aenderungen"])
+            except settings_module.EinstellungsFehler as exc:
+                raise HTTPException(400, str(exc)) from exc
+            engine.note(f"Lenkrichtung eingestellt: {ergebnis['aenderungen']}")
+        if ergebnis["erledigt"]:
+            _einrichtung_merken("richtung", {"invert_motor": config.phidget.invert_motor,
+                                             "encoder_invert": config.phidget.encoder_invert})
+        application.richtung_bewegt = None
+        return ok(ergebnis)
+
+    @api.post("/api/lenkung/einrichten/erledigt")
+    async def einrichtung_erledigt(payload: dict = Body(...)):
+        schritt = str(payload.get("schritt", ""))
+        if schritt not in ("mindestleistung", "zaehlwerte", "probefahrt"):
+            raise HTTPException(400, "Unbekannter Schritt")
+        _einrichtung_merken(schritt, payload.get("werte") or True)
+        return ok({"schritt": schritt})
+
+    @api.post("/api/lenkung/einrichten/neu")
+    async def einrichtung_neu():
+        store.set_setting("lenkung_einrichtung", {})
+        return ok({})
+
     @api.get("/api/abstimmung")
     async def abstimmung_lesen():
         return ok(engine.abstimmung.status())
@@ -1296,6 +1392,9 @@ def create_app(config=None) -> FastAPI:
         # Den Caster wechselt man auch auf dem Feld - dafür startet niemand den Dienst neu.
         if any(k.startswith("corrections.") for k in aenderungen):
             ergebnis["korrekturen"] = await application.korrekturen_wechseln()
+        # Ein anderer Lenkausgang (Gerätesuche übernommen) gilt sofort.
+        if any(k in LENKAUSGANG_SCHLUESSEL for k in aenderungen):
+            ergebnis["lenkung"] = await application.lenkung_neu_bauen()
         return ok({**ergebnis, "werte": settings_module.werte(config)})
 
     def _caster_angaben(payload: dict):

@@ -193,6 +193,9 @@ class PhidgetConfig:
 
     # Drehgeber
     encoder_channel: int = 0
+    # Zählt der Drehgeber beim Lenken nach rechts herunter, ist er umzukehren -
+    # sonst misst der Regler verkehrt herum (Lenkung einrichten → Drehrichtung).
+    encoder_invert: bool = False
     encoder_counts_per_deg: float = 40.0
 
     # Regler auf die Rückmeldung

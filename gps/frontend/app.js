@@ -2921,7 +2921,168 @@ el('btnSaveSettings').onclick = async () => {
     : `Gespeichert in ${antwort.data.datei} · sofort wirksam`;
 };
 
+/* Lenkung einrichten: sieben Schritte, jeder mit seinem Werkzeug. Was ein
+ * Schritt braucht, steht in ihm selbst; spätere bleiben gesperrt, bis die
+ * früheren erledigt sind (nur der Not-Aus-Schritt steht frei). */
+const EINRICHTEN_TEXT = {
+  verbindung: 'Sucht die Phidget-Motorsteuerung (Phidget21 oder Phidget22) und stellt den Lenkausgang darauf ein. Das AgriPilot Terminal vorher schließen.',
+  richtung: 'Der Motor lenkt kurz nach rechts. Sag dann, wohin die Räder gingen - AgriPilot stellt Motor- und Drehgeberrichtung selbst richtig. Danach zur Kontrolle noch einmal.',
+  mindestleistung: 'Kurze Impulse links und rechts, stufenweise stärker: ab wann läuft der Motor an? Daraus die Mindestleistung.',
+  zaehlwerte: 'Starten, von Hand bis zum linken und rechten Anschlag lenken, beenden. Mit dem Gesamteinschlag der Räder am Boden ergeben sich die Zählwerte je Grad.',
+  notaus: 'Not-Aus einbauen und prüfen, dann unten in der Liste „Lenkmotor anbauen“ abhaken.',
+  freigabe: 'Erst jetzt darf die Automatik lenken. Scharf geschaltet wird weiterhin von dir, mit geraden Rädern.',
+  probefahrt: 'Auf einer AB-Spur mit 5–8 km/h geradeaus, Lenkung scharf. Der Lenk-Assistent schaut zu und schlägt vor; erledigt, sobald er „gut“ meldet.',
+};
+let einrichtenStand = null;
+let einrichtenErgebnis = null;
+
+async function renderEinrichten() {
+  const antwort = await fetch('/api/lenkung/einrichten').then((r) => r.json()).catch(() => null);
+  if (!antwort || !antwort.data) return;
+  einrichtenStand = antwort.data;
+  const liste = el('einrichtenListe');
+  liste.innerHTML = '';
+  einrichtenStand.schritte.forEach((s, i) => {
+    const li = document.createElement('li');
+    li.className = s.fertig ? 'fertig' : s.moeglich ? '' : 'gesperrt';
+    li.innerHTML = `<div class="kopf"><span class="haken">${s.fertig ? '✓' : i + 1}</span><span></span></div>` +
+      '<p class="schritt-text"></p><div class="tasten"></div>';
+    li.querySelector('.kopf span:last-child').textContent = s.titel;
+    li.querySelector('.schritt-text').textContent = EINRICHTEN_TEXT[s.id] || '';
+    const tasten = li.querySelector('.tasten');
+    const taste = (text, fn, primaer) => {
+      const b = document.createElement('button');
+      b.textContent = text;
+      if (primaer) b.className = 'primary';
+      b.disabled = !s.moeglich;
+      b.onclick = fn;
+      tasten.appendChild(b);
+      return b;
+    };
+    if (s.id === 'verbindung') taste('Geräte suchen und übernehmen', einrichtenVerbinden, !s.fertig);
+    if (s.id === 'richtung') {
+      taste('Kurz nach rechts lenken', einrichtenRichtungTest, !s.fertig);
+    }
+    if (s.id === 'mindestleistung') taste('Motor einmessen', einrichtenEinmessen, !s.fertig);
+    if (s.id === 'zaehlwerte') {
+      taste(anschlagLaeuftE ? 'Anschläge fertig' : 'Anschläge messen', einrichtenAnschlag, !s.fertig);
+    }
+    if (s.id === 'notaus') taste('Zur Einbau-Liste', () => el('setupList').scrollIntoView({ behavior: 'smooth' }));
+    if (s.id === 'freigabe') taste('Lenkung freigeben', einrichtenFreigeben, !s.fertig);
+    if (s.id === 'probefahrt') taste('Lenk-Assistent: Vorschläge an', einrichtenProbefahrt, !s.fertig);
+    liste.appendChild(li);
+  });
+}
+
+function einrichtenMelden(text, knoepfe) {
+  const info = el('einrichtenInfo');
+  info.textContent = text;
+  (knoepfe || []).forEach(([beschriftung, fn]) => {
+    const b = document.createElement('button');
+    b.textContent = beschriftung;
+    b.style.margin = '6px 8px 0 0';
+    b.onclick = fn;
+    info.appendChild(document.createElement('br'));
+    info.appendChild(b);
+  });
+}
+
+async function einrichtenVerbinden() {
+  einrichtenMelden('Suche Geräte …');
+  const funde = await fetch('/api/geraete/suchen').then((r) => r.json()).catch(() => null);
+  const vorschlag = funde && (funde.vorschlag || (funde.data && funde.data.vorschlag));
+  const phidget = vorschlag && Object.fromEntries(Object.entries(vorschlag)
+    .filter(([k]) => k.startsWith('phidget.') || k === 'steering.output'));
+  if (!phidget || !phidget['steering.output']) {
+    const probleme = (funde && (funde.probleme || (funde.data && funde.data.probleme))) || [];
+    einrichtenMelden('Keine Lenkmotorsteuerung gefunden. ' + probleme.filter((p) => /phidget/i.test(p)).join(' · '));
+    return;
+  }
+  const antwort = await api('POST', '/api/settings', { aenderungen: phidget });
+  if (antwort) einrichtenMelden(`Übernommen: ${antwort.data.lenkung || 'Lenkausgang eingestellt'}.`);
+  renderEinrichten();
+}
+
+async function einrichtenRichtungTest() {
+  einrichtenMelden('Motor lenkt kurz nach rechts …');
+  const antwort = await api('POST', '/api/lenkung/einrichten/richtung-test');
+  if (!antwort) { einrichtenMelden('Test nicht ausgeführt.'); return; }
+  const b = antwort.data.bewegt;
+  einrichtenMelden(`Drehgeber: ${b === null ? 'nicht auslesbar' : (b > 0 ? '+' : '') + b + ' Zählwerte'}. Wohin sind die Räder gegangen?`,
+    [['Nach rechts', () => einrichtenRichtung('rechts')], ['Nach links', () => einrichtenRichtung('links')],
+     ['Gar nicht', () => einrichtenRichtung('nichts')]]);
+}
+
+async function einrichtenRichtung(gesehen) {
+  const antwort = await api('POST', '/api/lenkung/einrichten/richtung', { gesehen });
+  if (antwort) einrichtenMelden(antwort.data.text);
+  renderEinrichten();
+}
+
+async function einrichtenEinmessen() {
+  einrichtenMelden('Motor wird eingemessen … (etwa 10 Sekunden, der Motor dreht kurz hin und her)');
+  const antwort = await api('POST', '/api/steering/einmessen');
+  if (!antwort) { einrichtenMelden('Nicht eingemessen.'); return; }
+  const d = antwort.data;
+  const l = (x) => (x === null ? 'keine Bewegung' : `${Math.round(x * 100)} %`);
+  if (!d.mindestleistung_vorschlag) { einrichtenMelden(`Rechts ${l(d.losbrech_rechts)}, links ${l(d.losbrech_links)}. ${d.hinweis}`); return; }
+  einrichtenMelden(`Läuft an bei rechts ${l(d.losbrech_rechts)}, links ${l(d.losbrech_links)}. ` +
+    `Mindestleistung ${Math.round(d.mindestleistung_vorschlag * 100)} %.`,
+    [['Übernehmen', async () => {
+      if (await api('POST', '/api/settings', { aenderungen: { 'phidget.min_duty': d.mindestleistung_vorschlag } })) {
+        await api('POST', '/api/lenkung/einrichten/erledigt', { schritt: 'mindestleistung', werte: { min_duty: d.mindestleistung_vorschlag } });
+        einrichtenMelden('Mindestleistung übernommen.');
+        renderEinrichten();
+      }
+    }]]);
+}
+
+let anschlagLaeuftE = false;
+async function einrichtenAnschlag() {
+  if (!anschlagLaeuftE) {
+    if (!(await api('POST', '/api/steering/anschlag', { aktion: 'start' }))) return;
+    anschlagLaeuftE = true;
+    einrichtenMelden('Jetzt von Hand bis zum linken, dann bis zum rechten Anschlag lenken, danach „Anschläge fertig“.');
+    renderEinrichten();
+    return;
+  }
+  anschlagLaeuftE = false;
+  const winkel = parseFloat(el('einrichtenWinkel').value || '70');
+  const antwort = await api('POST', '/api/steering/anschlag', { aktion: 'ende', gesamtwinkel_deg: winkel });
+  renderEinrichten();
+  if (!antwort) { einrichtenMelden('Nicht gemessen.'); return; }
+  const d = antwort.data;
+  einrichtenMelden(`${d.zaehlwerte} Zählwerte über ${d.gesamtwinkel_deg}° = ${String(d.zaehlwerte_je_grad).replace('.', ',')} Zählwerte je Grad.`,
+    [['Übernehmen', async () => {
+      const werte = { 'phidget.counts_per_deg': d.zaehlwerte_je_grad, 'phidget.encoder_counts_per_deg': d.zaehlwerte_je_grad };
+      if (await api('POST', '/api/settings', { aenderungen: werte })) {
+        await api('POST', '/api/lenkung/einrichten/erledigt', { schritt: 'zaehlwerte', werte: { zaehlwerte_je_grad: d.zaehlwerte_je_grad } });
+        einrichtenMelden('Zählwerte je Grad übernommen.');
+        renderEinrichten();
+      }
+    }]]);
+}
+
+async function einrichtenFreigeben() {
+  const antwort = await api('POST', '/api/settings', { aenderungen: { 'steering.enabled': true } });
+  if (antwort) einrichtenMelden('Lenkung freigegeben. Scharf schaltest du sie weiter selbst - mit geraden Rädern.');
+  renderEinrichten();
+}
+
+async function einrichtenProbefahrt() {
+  if (await api('POST', '/api/abstimmung', { modus: 'beobachten' })) {
+    einrichtenMelden('Lenk-Assistent macht Vorschläge (Menü → System). Jetzt auf einer AB-Spur 5–8 km/h geradeaus fahren, ' +
+      'Lenkung scharf, Not-Aus in Reichweite. Nach 20 Sekunden ruhiger Fahrt kommt die erste Bewertung.');
+  }
+  renderEinrichten();
+}
+
+el('btnEinrichtenNeu').onclick = async () => {
+  if (await api('POST', '/api/lenkung/einrichten/neu')) { einrichtenMelden(''); renderEinrichten(); }
+};
+
 function renderSetup(stand) {
+  renderEinrichten();
   const host = el('setupList');
   el('setupBar').style.width =
     `${stand.gesamt ? (100 * stand.fertig) / stand.gesamt : 0}%`;

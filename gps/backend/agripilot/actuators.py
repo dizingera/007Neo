@@ -525,6 +525,17 @@ class PhidgetOutput(SteerOutput):
                         "bewegt - Motor, Kupplung oder Drehgeber prüfen."),
         }
 
+    async def richtung_testen(self, anteil: float = 0.2, dauer_s: float = 0.4) -> dict:
+        """Ein Impuls "nach rechts" (so wie der Regler es meint, mit der
+        eingestellten Motor-Umkehr). Zurück: wie weit der Drehgeber roh gezählt hat."""
+        if not self.ready or self.motor is None:
+            raise RuntimeError(f"Lenkmotor nicht bereit: {self.status}")
+        if self._engaged:
+            raise RuntimeError("Die Lenkung ist scharf - erst ausschalten")
+        anteil = _clamp(abs(float(anteil)), 0.05, MOTORTEST_MAX)
+        bewegt = await self._impuls(1.0, anteil, _clamp(float(dauer_s), 0.1, MOTORTEST_DAUER_MAX_S))
+        return {"bewegt": bewegt, "leistung": anteil}
+
     def anschlag_start(self) -> dict:
         """Ausmessen von Anschlag zu Anschlag: ab jetzt wird der kleinste und größte
         Zählstand des Drehgebers mitgeschrieben. Gelenkt wird von Hand, der Motor
@@ -650,6 +661,8 @@ class PhidgetOutput(SteerOutput):
                 return -angle if self.config.was_invert else angle
             if self.encoder is not None:
                 counts = self.encoder.getPosition() - self._encoder_centre
+                if getattr(self.config, "encoder_invert", False):
+                    counts = -counts
                 return counts / max(1e-6, self.config.encoder_counts_per_deg)
         except Exception:  # noqa: BLE001
             return None

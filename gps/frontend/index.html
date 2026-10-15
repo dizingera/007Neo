@@ -467,6 +467,19 @@
   </section>
 
   <section class="tab-panel" data-panel="setup" hidden>
+    <section class="karte" id="lenkEinrichten">
+      <h3>Lenkung einrichten</h3>
+      <p class="note">Schritt für Schritt von der Verbindung bis zur Probefahrt. Am Stand: Lenkung
+        aus, Räder in der Mitte, Not-Aus griffbereit.</p>
+      <ol class="einrichten" id="einrichtenListe"></ol>
+      <label class="note">Gesamteinschlag der Räder am Boden, von Anschlag zu Anschlag (°) – für Schritt 4
+        <input type="number" id="einrichtenWinkel" value="70" min="10" max="120" step="1">
+      </label>
+      <p class="note" id="einrichtenInfo" role="status" aria-atomic="true"></p>
+      <div class="row">
+        <button id="btnEinrichtenNeu">Von vorn beginnen</button>
+      </div>
+    </section>
     <div class="row">
       <div class="progress" aria-hidden="true"><div class="progress-bar" id="setupBar"></div></div>
       <!-- Eine Statusmeldung, nicht zwei: der Balken zeigt dasselbe wie der

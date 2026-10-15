@@ -420,6 +420,32 @@ Wichtig: **das AgriPilot Terminal vorher schließen.** Solange es die Platine
 offen hat, findet AgriPilot sie nicht. Die Zählwerte des Drehgebers je Grad
 Radeinschlag (**Drehgeber: Zählwerte je Grad**) einmal ausmessen, nicht schätzen.
 
+## Lenkung einrichten (Menü → Einbau)
+
+Oben im Reiter Einbau führt **„Lenkung einrichten“** in sieben Schritten von der
+Verbindung bis zur Probefahrt. Jeder Schritt hat seinen Knopf und bekommt einen
+Haken, wenn er erledigt ist; spätere bleiben gesperrt, bis die früheren fertig
+sind (nur der Not-Aus-Schritt steht frei). Am Stand arbeiten: Lenkung aus, Räder
+in der Mitte, Not-Aus griffbereit.
+
+1. **Lenkmotor verbinden** – sucht die Phidget-Steuerung (Phidget21 oder 22) und
+   stellt den Lenkausgang darauf ein, ohne Neustart. AgriPilot Terminal vorher zu.
+2. **Drehrichtung prüfen** – der Motor lenkt kurz „nach rechts“; du sagst, wohin
+   die Räder gingen (rechts / links / gar nicht). AgriPilot stellt daraus
+   **Motor-Drehrichtung** und **Drehgeber umkehren** selbst richtig und will zur
+   Kontrolle einen zweiten Test. Das ist der wichtigste Schritt: stimmt die
+   Richtung von Motor und Drehgeber nicht überein, lenkt die Regelung vom Ziel
+   weg statt hin.
+3. **Mindestleistung einmessen** – wie „Motor einmessen“ unten (Losbrechleistung).
+4. **Zählwerte je Grad messen** – Anschläge von Hand anfahren; den
+   Gesamteinschlag der Räder am Boden darüber eintragen.
+5. **Not-Aus und Einbau** – unten in der Einbau-Liste „Lenkmotor anbauen“ abhaken.
+6. **Lenkung freigeben** – erst jetzt darf die Automatik lenken.
+7. **Probefahrt** – schaltet den Lenk-Assistenten auf „Nur Vorschläge“; auf einer
+   AB-Spur 5–8 km/h geradeaus, Lenkung scharf. Erledigt, sobald er „gut“ meldet.
+
+„Von vorn beginnen“ löscht die Haken (nicht die Einstellungen).
+
 ## Lenk-Assistent (Menü → System)
 
 Der Assistent merkt, wie die Lenkung die Spur hält, und stellt die Spurregelung in
