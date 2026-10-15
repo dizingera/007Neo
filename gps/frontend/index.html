@@ -1,0 +1,697 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#05090c">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="manifest" href="manifest.webmanifest">
+<!-- Leeres Icon: spart auf einem Pi ohne Internet die vergebliche Anfrage -->
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<title>AgriPilot</title>
+<link rel="stylesheet" href="fonts/fonts.css">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- Die Kabine: der Blick über die Haube. Alles Wichtige liegt als Glas über
+     dem Feld; die Handlungsspalte rechts ist nach Wichtigkeit von unten nach
+     oben sortiert - unten liegt die Hand am montierten Tablet ohnehin. -->
+<main class="stage" id="stage">
+  <div class="buehne" id="buehne">
+    <div class="feld" id="feld"><canvas id="map"></canvas></div>
+    <div class="himmel"></div>
+    <div class="vignette"></div>
+  </div>
+
+  <!-- Lichtbalken: die eine Anzeige, die man im Augenwinkel lesen kann. Eine
+       Lampe sind 5 cm; die Zahl darunter sagt es genau. -->
+  <div class="balken" id="balken">
+    <div class="leds" id="lightbar"></div>
+    <div class="mitte"></div>
+    <div class="abw"><span class="pfeil" id="xtePfeil">●</span><b id="xte">--</b><small>cm</small></div>
+    <!-- Ob die Maschine gerade selbst lenkt, steht dort, wo der Blick ohnehin ist. -->
+    <div class="lenkstatus" id="lenkStatus" role="status" aria-live="polite" hidden></div>
+  </div>
+
+  <div class="chips l">
+    <span class="chip titel" id="fieldLabel">Kein Feld</span>
+    <span class="chip" id="lineLabel">Keine Spur</span>
+    <div class="hint" id="hint"></div>
+  </div>
+  <div class="chips r">
+    <span class="chip" id="fixChip"><i></i>kein GPS</span>
+    <span class="chip" id="netChip"><i></i>--</span>
+  </div>
+
+  <div class="ansicht">
+    <button class="rund" id="zoomIn" title="Näher" aria-label="Näher">+</button>
+    <button class="rund" id="zoomOut" title="Weiter" aria-label="Weiter">−</button>
+    <button class="rund" id="viewMode" title="Ansicht" aria-label="Ansicht wechseln">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 18l6-12 3 6 3-4 6 10z"/></svg>
+    </button>
+    <button class="rund" id="tagNacht" title="Tag / Nacht" aria-label="Tag oder Nacht">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1"/></svg>
+    </button>
+  </div>
+
+  <!-- Unten links nur die Zahlen, die man beim Fahren braucht - flach, damit
+       die Mitte frei bleibt: dort stehen Traktor, Gerät und Feld. -->
+  <div class="ruf" id="ruf"></div>
+  <div class="unten">
+    <div class="glas cluster">
+      <div class="kmh"><b id="speed">--</b><span>km/h</span></div>
+      <div><b id="pass">--</b><span id="passLabel">Spur</span></div>
+      <div><b id="area">--</b><span>ha</span></div>
+      <div id="tiltBox" hidden><b id="tilt">--</b><span id="tiltLabel">° Hang</span></div>
+      <div class="spark" aria-hidden="true"><svg viewBox="0 0 200 40" preserveAspectRatio="none"><line class="null" x1="0" y1="20" x2="200" y2="20"/><path class="band" d="M0 17 H200 V23 H0 Z"/><path id="spark" d=""/></svg></div>
+      <div class="sections" id="sections" hidden></div>
+    </div>
+    <!-- Bis zum Vorgewende, nicht bis zur Grenze: dort endet die Arbeit. -->
+    <div class="glas vg" id="restBox" hidden>
+      <div class="zeile"><span id="restLabel">bis Vorgewende</span><b id="rest">--</b></div>
+      <div class="bar"><i id="restBar"></i></div>
+    </div>
+  </div>
+
+  <!-- Die Leiste rechts: schmal, damit das Feld Platz hat. Oben das Menü, in
+       der Mitte die Spurwerkzeuge, unten - wo die Hand am montierten Tablet
+       liegt - Markieren und Lenkung. -->
+  <nav class="leiste" id="leiste" aria-label="Bedienung">
+    <button class="taste" id="btnMenu"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg><span>Menü</span></button>
+    <!-- Spur anlegen braucht man einmal je Feld: die vier Werkzeuge klappen
+         neben der Leiste auf, statt ständig Platz zu belegen. -->
+    <button class="taste" id="btnSpur" aria-expanded="false" aria-controls="werkzeuge"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 20L10 4M18 20L14 4M12 6v2M12 11v2M12 16v2"/></svg><span>Spur</span></button>
+    <div class="werkzeuge" id="werkzeuge" role="group" aria-label="Spur anlegen" hidden>
+      <button class="taste" id="btnAB"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 19V5M19 19V5M5 12h14"/></svg><span>A setzen</span></button>
+      <button class="taste" id="btnAPlus"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 19V5M5 12h9M17 9v6M14 12h6"/></svg><span>A+</span></button>
+      <button class="taste" id="btnContour"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l9 6.5-3.5 10.5h-11L3 9.5z"/><path d="M12 8l5 3.5-2 6H9l-2-6z"/></svg><span>Kontur</span></button>
+      <button class="taste" id="btnCurve"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 15c3-8 6-8 9 0s6 8 9 0"/></svg><span>Kurve</span></button>
+      <!-- Saatplan: an die Startecke fahren, in Fahrtrichtung ausrichten, drücken. -->
+      <button class="taste" id="btnSaatplanHier"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20V4h16"/><path d="M8 20V8M12 20V8M16 20V8" stroke-dasharray="2 2"/><path d="M4 4l4 4"/></svg><span>Saatplan</span></button>
+    </div>
+    <div class="gruppe paar" role="group" aria-label="Spur verschieben">
+      <button class="taste" id="btnNudgeLeft" aria-label="Spur 10 cm nach links"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg><span>10 cm</span></button>
+      <button class="taste" id="btnNudgeRight" aria-label="Spur 10 cm nach rechts"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5l7 7-7 7"/></svg><span>10 cm</span></button>
+    </div>
+    <div class="gruppe paar" role="group" aria-label="Fahrt">
+      <button class="taste turn" id="btnTurn"><span class="fuellung" id="turnFill"></span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12a8 8 0 1 1 3 6.3M4 18v-6h6"/></svg><span>Wende</span></button>
+      <!-- Wenn die Anlage vorwärts und rückwärts verwechselt: der Traktor zeigt dann gegen die Fahrt. -->
+      <button class="taste" id="btnRichtung" title="Fahrtrichtung umdrehen"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 20V4M4 8l4-4 4 4M16 4v16M12 16l4 4 4-4"/></svg><span id="richtungText">Richtung</span></button>
+    </div>
+    <!-- Fahrgasse: sitzt zwischen Richtung und Markieren, wo der Blick beim Säen
+         ohnehin hinwandert. Nur sichtbar, solange die aktuelle Spur eine ist. -->
+    <div class="fahrgasse-hinweis" id="fahrgasseHinweis" role="status" aria-live="assertive" hidden>
+      <b>Fahrgasse</b><small>Spur <span id="fahrgasseSpur">-</span> · Fahrgassenschaltung setzen</small>
+    </div>
+    <!-- Wende: Richtung, ausgelassene Spuren und Form wählen; geplant wird sofort,
+         das Ergebnis steht im Fenster, gestartet wird mit einem Druck. -->
+    <div class="wendefenster" id="wendeFenster" role="dialog" aria-label="Wende planen" hidden>
+      <div class="wf-kopf">Wende</div>
+      <div class="wf-gruppe"><span>Richtung</span>
+        <div class="wf-wahl" id="wfRichtung">
+          <button data-wert="links">↶ Links</button><button data-wert="rechts">Rechts ↷</button>
+        </div></div>
+      <div class="wf-gruppe"><span>Spuren auslassen</span>
+        <div class="wf-wahl" id="wfAuslassen">
+          <button data-wert="0">0</button><button data-wert="1">1</button><button data-wert="2">2</button><button data-wert="3">3</button>
+        </div></div>
+      <div class="wf-gruppe"><span>Form</span>
+        <div class="wf-wahl" id="wfForm">
+          <button data-wert="omega">Ω-Wende</button><button data-wert="u">U-Wende</button>
+        </div></div>
+      <p class="wf-ergebnis" id="wfErgebnis" role="status" aria-live="polite"></p>
+      <div class="wf-knoepfe">
+        <button id="wfStarten" class="primary" disabled>Wende starten</button>
+        <button id="wfZu">Schließen</button>
+      </div>
+    </div>
+    <div class="unten-rechts">
+      <button class="taste mark" id="btnJob" role="switch" aria-checked="false"><i></i><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h16M6 20V9l6-5 6 5v11M10 20v-6h4v6"/></svg><span>Markieren<small id="jobText">aus</small></span></button>
+      <button class="taste lenk" id="btnSteer" role="switch" aria-checked="false"><i></i><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3"/><path d="M3 12h6M15 12h6M12 15v6"/></svg><span>Lenkung<small id="steerText">aus</small></span></button>
+    </div>
+  </nav>
+</main>
+
+<!-- Menü-Ebenen -->
+<div class="sheet" id="sheet" role="dialog" aria-modal="true" aria-label="Menü" hidden>
+  <div class="sheet-head">
+    <!-- Vorn, was der Fahrer im Feld braucht; hinter dem Trenner die Werkstatt. -->
+    <div class="tabs" role="tablist" aria-label="Menü-Reiter">
+      <button data-tab="fields" class="tab active" role="tab" aria-selected="true">Felder</button>
+      <button data-tab="lines" class="tab" role="tab" aria-selected="false" tabindex="-1">Spuren</button>
+      <button data-tab="jobs" class="tab" role="tab" aria-selected="false" tabindex="-1">Arbeiten</button>
+      <button data-tab="machine" class="tab" role="tab" aria-selected="false" tabindex="-1">Traktor &amp; Gerät</button>
+      <button data-tab="headland" class="tab" role="tab" aria-selected="false" tabindex="-1">Vorgewende</button>
+      <button data-tab="saatplan" class="tab" role="tab" aria-selected="false" tabindex="-1">Saatplan</button>
+      <span class="tab-trenner" aria-hidden="true">Werkstatt</span>
+      <button data-tab="settings" class="tab werkstatt" role="tab" aria-selected="false" tabindex="-1">Einstellungen</button>
+      <button data-tab="system" class="tab werkstatt" role="tab" aria-selected="false" tabindex="-1">System</button>
+      <button data-tab="setup" class="tab werkstatt" role="tab" aria-selected="false" tabindex="-1">Einbau</button>
+    </div>
+    <button class="close" id="sheetClose" aria-label="Menü schließen"><span aria-hidden="true">✕</span> Schließen</button>
+  </div>
+
+  <section class="tab-panel" data-panel="fields">
+    <div class="row">
+      <input id="newFieldName" placeholder="Name des Feldes, z.B. Oberes Feld">
+      <button id="btnNewField" class="primary">Feld hier anlegen</button>
+    </div>
+    <div class="row">
+      <label class="button" for="shpDateien">Shapefile einlesen (.shp, .dbf, .prj)</label>
+      <input type="file" id="shpDateien" accept=".shp,.dbf,.prj,.shx,.cpg" multiple hidden>
+      <span class="note" id="shpInfo" role="status" aria-atomic="true"></span>
+    </div>
+    <div class="row">
+      <button id="btnRandspurenAlle">Spuren an allen Feldrändern anlegen</button>
+      <span class="note" id="randspurenInfo" role="status" aria-atomic="true"></span>
+    </div>
+    <details class="erklaerung">
+      <summary>Erklärung</summary>
+      <p><b>Feld hier anlegen</b> verankert das Feld an der aktuellen Position. Danach mit
+        <b>Kontur</b> die Grenze einmal umfahren – daraus kommt die Hektarzahl, und dieselbe
+        Linie ist die Kontur, auf der geführt wird.</p>
+      <p><b>Shapefile:</b> aus dem Flächenantrag oder einem anderen Lenksystem alle drei
+        Dateien zusammen auswählen. Je Fläche entsteht ein Feld, der Name kommt aus der
+        Tabelle. ETRS89/UTM (32N, 33N) und WGS84 werden verstanden; ein Feld gleichen Namens
+        bekommt die neue Grenze, seine Spuren bleiben.</p>
+      <p><b>Spuren an den Feldrändern:</b> aus der Grenze wird jede gerade Kante ab 20 m eine
+        AB-Spur und jeder gebogene Rand ab 20 m eine Kurvenspur (Name „Rand Nord 245 m“).
+        Läuft eine gerade Kante sanft in einen Bogen aus (zusammen bis 45°), ist sie eine
+        Kurvenspur, die dem Rand bis zur Ecke folgt; abgerundete Ecken trennen weiter zwei Kanten.
+        Spur 0 liegt wie bei der Kontur auf der Grenze. Nochmal drücken aktualisiert sie –
+        Versatz und Saison bleiben, auch wenn die Spur dabei einen neuen Namen bekommt;
+        selbst angelegte Spuren werden nie angefasst.</p>
+      <p>Zu jedem Feld gehören seine <b>Spuren</b>. Eine davon kann die <b>Saisonspur</b>
+        sein: mit der Fahrgassenweite gespeichert, wird sie beim Laden des Feldes das ganze
+        Jahr automatisch aktiv – die Fahrgassen liegen dann bei jedem Gerät an derselben
+        Stelle.</p>
+    </details>
+    <div class="row">
+      <button class="fahrgassen-taste">Fahrgassenweite: 21 m</button>
+      <span class="note">gilt für neue Saisonspuren</span>
+    </div>
+    <div class="list" id="fieldList"></div>
+  </section>
+
+  <section class="tab-panel" data-panel="lines" hidden>
+    <details class="erklaerung">
+      <summary>Erklärung</summary>
+      <p><b>A+</b> (Taste rechts) legt eine Spur durch die aktuelle Position in die Richtung,
+        in die der Traktor gerade fährt – praktisch, wenn kein Platz für einen B-Punkt ist.</p>
+      <p><b>Kontur</b> (Taste rechts) ist die Feldgrenze selbst: Ring 0 ist die Grenze, jeder
+        weitere Ring liegt eine Arbeitsbreite weiter innen. Für das Vorgewende und krumme
+        Schläge. Sie wird nicht gespeichert, sondern jedes Mal neu aus der Grenze gebildet.</p>
+      <p><b>Fahrgassen:</b> „Als Saisonspur“ legt auf diese Spur Fahrgassen im Abstand der
+        Fahrgassenweite (Spritze/Streuer). Sie liegen fest in Metern ab Spur 0 und bleiben das
+        ganze Jahr an derselben Stelle – beim Säen, Düngen und Spritzen, egal mit welcher
+        Arbeitsbreite. Eine andere Fahrgassenweite gilt nur für neu gesetzte Saisonspuren.</p>
+    </details>
+    <div class="row">
+      <button class="fahrgassen-taste">Fahrgassenweite: 21 m</button>
+      <span class="note">gilt für neue Saisonspuren</span>
+    </div>
+    <div class="list" id="lineList"></div>
+  </section>
+
+  <section class="tab-panel" data-panel="jobs" hidden>
+    <div class="row">
+      <input id="arbeitName" placeholder="Bezeichnung der nächsten Arbeit, z.B. Grubbern">
+      <a class="button" id="btnJobsCsv" href="/api/jobs.csv">Alle Arbeiten als CSV</a>
+    </div>
+    <div class="row">
+      <button id="btnMyterraExport" class="primary">Neue Arbeiten für MyTerra exportieren</button>
+      <label class="switch"><input type="checkbox" id="myterraAlle"> auch schon übergebene</label>
+    </div>
+    <p class="note" id="myterraInfo" role="status" aria-atomic="true">MyTerra: wird geladen …</p>
+    <details class="erklaerung">
+      <summary>Erklärung</summary>
+      <p>Die Bezeichnung steht später in der Liste und im CSV fürs Büro. Sie wird gemerkt,
+        bis eine andere eingetragen wird. Gestartet wird die Arbeit mit <b>Markieren</b>
+        rechts in der Kabine. Traktor und Gerät kommen aus <b>Traktor &amp; Gerät</b> und
+        gehen mit nach MyTerra.</p>
+    </details>
+    <div class="list" id="jobList"></div>
+  </section>
+
+  <section class="tab-panel" data-panel="saatplan" hidden>
+    <p class="note" id="saatplanFeld">Kein Feld geladen.</p>
+    <div class="karten">
+      <section class="karte">
+        <h3>Vorgabe</h3>
+        <div class="formular" id="saatplanForm">
+          <label class="breit">Startecke und Fahrtrichtung
+            <select name="start" id="saatplanStart"></select>
+          </label>
+          <label>Sämaschine (m)<input type="number" step="0.1" min="1" max="60" name="breite_m"></label>
+          <label>Fahrgassenweite (m)<input type="number" step="0.5" min="6" max="60" name="fahrgasse_m"></label>
+          <label>Säspuren am Rand vor der Fahrgasse<input type="number" step="1" min="0" max="20" name="randspuren"></label>
+        </div>
+        <div class="row">
+          <button id="btnSaatplanAbHier" class="primary">Ab hier planen</button>
+          <span class="note">Traktor an der Startecke, in Richtung der ersten Spur</span>
+        </div>
+        <div class="row">
+          <button id="btnSaatplanPlanen">Mit gewählter Ecke planen</button>
+          <label class="switch"><input type="checkbox" id="saatplanZeigen" checked> Plan auf der Karte</label>
+        </div>
+      </section>
+      <section class="karte" id="saatplanErgebnis" hidden>
+        <h3>Plan</h3>
+        <p id="saatplanZusammenfassung"></p>
+        <div id="saatplanKonflikte"></div>
+        <div class="row">
+          <button id="btnSaatplanUebernehmen" class="primary">Als Saisonspur übernehmen</button>
+          <button id="btnSaatplanLoeschen">Plan verwerfen</button>
+        </div>
+      </section>
+    </div>
+    <details class="erklaerung">
+      <summary>Erklärung</summary>
+      <p>Der <b>Saatplan</b> rechnet vor der Aussaat den ganzen Schlag durch: rundum ein
+        Vorgewende so tief wie eine Fahrgassenweite, an jeder Grenze erst die Säspuren, dann die
+        Fahrgasse (bei 3 m und 21 m: 3 Säspuren, Fahrgasse auf 10,5 m, 3 Säspuren), danach das
+        Hauptfeld parallel zur Startkante mit einer Fahrgasse alle 21 m.</p>
+      <p><b>Ablauf:</b> von der Startecke (A) so viele Fahrgassen wie passen, alle 21 m, nach der
+        letzten noch eine Säbreite. Dann an der Gegenseite (B): 3 Säspuren, die Fahrgasse auf
+        10,5 m, und weiter Richtung A bis zur letzten Säspur von A. Eine Überlappung fällt so immer
+        auf diese Säbreite, nie in eine Fahrgasse. Der Plan nennt den Abstand der beiden letzten
+        Fahrgassen und die Teilbreite für Spritze und Streuer an der Fahrgasse von B.</p>
+      <p><b>Übernehmen</b> legt zwei Spuren an: „Saatplan … A“ (Saisonspur, kommt beim Laden des
+        Feldes) und „Saatplan … B“ für das Säen von B her – dort liegt das Raster anders.</p>
+      <p>Auf der Karte: Säspuren dünn, <b>Fahrgassen rot</b> mit ihrem Abstand, das Auffüllen
+        bernsteinfarben, Vorgewende gestrichelt. Läuft ein Rand
+        schräg (Keil) oder passt die Randvorgabe nicht zur Sämaschine, ist das ein
+        <b>Konflikt</b> mit Vorschlag zur Anpassung.</p>
+      <p><b>Als Saisonspur übernehmen</b> legt eine AB-Spur durch eine Fahrgasse an. Sie ist das
+        ganze Jahr beim Laden des Feldes aktiv; beim Säen zeigt das Band „Fahrgasse“, wann die
+        Fahrgassenschaltung dran ist, und Spritze und Streuer fahren dieselben Gassen.</p>
+    </details>
+  </section>
+
+  <section class="tab-panel" data-panel="headland" hidden>
+    <div class="karten" id="headlandForm">
+      <section class="karte">
+        <h3>Vorgewende</h3>
+        <div class="formular">
+          <label>Vorgewendespuren<input type="number" step="1" min="0" max="12" name="spuren"></label>
+          <label>Breite je Spur (m, 0 = Arbeitsbreite)<input type="number" step="0.1" min="0" max="80" name="breite_m"></label>
+          <label>Alarmabstand (m)<input type="number" step="1" min="1" max="200" name="alarm_abstand_m"></label>
+          <label>Arbeitsreihenfolge
+            <select name="reihenfolge">
+              <option value="egal">keine Vorgabe</option>
+              <option value="zuerst">Vorgewende zuerst</option>
+              <option value="zuletzt">Vorgewende zuletzt</option>
+            </select>
+          </label>
+        </div>
+      </section>
+      <section class="karte">
+        <h3>Wenden</h3>
+        <div class="formular">
+          <label>Kleinster Wendekreis (m)<input type="number" step="0.5" min="1.5" max="30" name="radius_m"></label>
+          <label>Wiedereinfahrt (Spuren weiter)<input type="number" step="1" min="1" max="8" name="ueberspringen"></label>
+          <label>Wendemuster
+            <select name="muster">
+              <option value="omega">Ω-Wende (weiter Bogen)</option>
+              <option value="u">U-Wende (kompakt)</option>
+            </select>
+          </label>
+          <label>Wenderichtung
+            <select name="richtung">
+              <option value="links">nach links</option>
+              <option value="rechts">nach rechts</option>
+            </select>
+          </label>
+        </div>
+      </section>
+    </div>
+    <div class="schalter" id="headlandSwitches">
+      <label class="switch"><input type="checkbox" name="aktiv">
+        Vorgewende anzeigen</label>
+      <label class="switch"><input type="checkbox" name="alarm_aktiv">
+        Annäherungsalarm</label>
+      <label class="switch"><input type="checkbox" name="nur_im_feld">
+        Sicherheitsprüfung: Route muss im Feld liegen</label>
+    </div>
+    <div class="row">
+      <button id="btnSaveHeadland" class="primary">Übernehmen</button>
+      <span class="note" id="headlandInfo" role="status" aria-atomic="true"></span>
+    </div>
+    <details class="erklaerung">
+      <summary>Erklärung</summary>
+      <p>Die <b>Tiefe</b> ist die Zahl der Spuren mal der Arbeitsbreite – sie wandert mit
+        dem Gerät mit. Die Restdistanz oben zählt bis zum <i>Beginn</i> des Vorgewendes,
+        nicht bis zur Grenze: dort endet die Arbeit und beginnt die Wende.</p>
+      <p><b>Arbeitsreihenfolge:</b> das Programm erzwingt nichts, es sieht nur hin. Ob das
+        Vorgewende bearbeitet ist, liest es aus der markierten Fläche – es zählt nur, was
+        mit <b>Markieren</b> gefahren wurde.</p>
+      <p><b>Ω-Wende</b> holt nach vorn aus und braucht mehr Tiefe, fährt dafür weichere
+        Radien. Die <b>U-Wende</b> kommt mit weniger Tiefe aus. Wendekreis für den John Deere
+        rund 4,2 m (kleinster fahrbarer 3,7 m).</p>
+      <p><b>Die Wende wird nur gelenkt.</b> Fahrstufe und Gas bleiben beim Fahrer, rückwärts
+        fährt kein Muster. Die Sicherheitsprüfung verlangt, dass <i>jeder</i> Punkt der Route
+        im Feld liegt. Wer sie abschaltet, fährt auf eigene Verantwortung.</p>
+    </details>
+  </section>
+
+  <section class="tab-panel" data-panel="machine" hidden>
+    <p class="note kopfnote">Gefahren wird mit dem Gespann aus <b>Traktor</b> und <b>Gerät</b>.
+      Beide werden getrennt gewählt – ein Traktor zieht viele Geräte, seine Antenne und
+      Lenkung stellst du nur einmal ein.</p>
+    <datalist id="mtTraktoren"></datalist>
+    <datalist id="mtGeraete"></datalist>
+    <div class="karten">
+      <section class="karte" aria-labelledby="kopfTraktor">
+        <h3 id="kopfTraktor">Traktor</h3>
+        <div class="auswahl">
+          <select id="traktorSelect" aria-label="Traktor wählen"></select>
+          <button id="btnNewTraktor">Neuer Traktor</button>
+          <button id="btnDeleteTraktor" class="danger">Löschen</button>
+        </div>
+        <div class="formular" id="traktorForm">
+          <label class="ganz">Name (wie in MyTerra)<input type="text" name="name" list="mtTraktoren" autocomplete="off"></label>
+          <fieldset>
+            <legend>Antenne – gemessen ab Mitte Hinterachse</legend>
+            <label>nach vorn (m)<input type="number" step="0.01" name="antenna_forward_m"></label>
+            <label>nach rechts (m)<input type="number" step="0.01" name="antenna_right_m"></label>
+            <label>Höhe über Boden (m)<input type="number" step="0.01" name="antenna_height_m"></label>
+          </fieldset>
+          <fieldset>
+            <legend>Lenkung</legend>
+            <label>Lenkschärfe<input type="number" step="0.05" name="steer_gain"></label>
+            <label>Radstand (m)<input type="number" step="0.01" name="wheelbase_m"></label>
+            <label>Max. Lenkeinschlag (°)<input type="number" step="1" name="max_steer_deg"></label>
+            <label>davon links (°, 0 = gleich)<input type="number" step="1" min="0" max="60" name="max_steer_left_deg"></label>
+            <label>davon rechts (°, 0 = gleich)<input type="number" step="1" min="0" max="60" name="max_steer_right_deg"></label>
+            <label>Regelart
+              <select name="regelart">
+                <option value="stanley">Stanley (schaut auf jetzt)</option>
+                <option value="voraus">Vorausschauend (Modell, Kurven vorgesteuert)</option>
+              </select>
+            </label>
+            <label>Trägheit der Lenkung (s)<input type="number" step="0.05" min="0.05" max="2" name="lenk_traegheit_s"></label>
+          </fieldset>
+          <fieldset>
+            <legend>Abstimmung bei Tempo</legend>
+            <label>Absenkung ab (km/h)<input type="number" step="0.5" min="0" name="speed_gain_limit_kmh"></label>
+            <label>Restfaktor<input type="number" step="0.05" min="0.05" max="1" name="speed_gain_rest"></label>
+            <label>Latenz (ms)<input type="number" step="10" min="0" max="2000" name="actuator_latency_ms"></label>
+          </fieldset>
+        </div>
+        <div class="row">
+          <button id="btnSaveTraktor" class="primary">Traktor übernehmen</button>
+        </div>
+        <details class="erklaerung">
+          <summary>Erklärung</summary>
+          <p><b>Antenne:</b> die wichtigsten Werte. Gemessen ab Mitte Hinterachse – stimmen sie
+            nicht, liegt jede Spur um genau diesen Betrag daneben. Die Höhe ist der Maßstab
+            des Hangausgleichs.</p>
+          <p><b>Lenkschärfe:</b> höher zieht härter auf die Spur zurück. <b>Radstand</b> und
+            <b>Lenkeinschlag</b> ergeben den kleinsten Wendekreis.</p>
+          <p><b>Absenkung ab / Restfaktor:</b> dieselbe Einstellung, die im Schritttempo sauber
+            nachführt, schaukelt bei zwölf km/h auf. Ab der Schwelle wird die Lenkung weicher,
+            bei doppelter Schwelle bleibt der Restfaktor stehen (0 = aus). <b>Latenz:</b> Zeit
+            von der Position bis zur Radbewegung; bei Nachlaufen in schnellen Kurven in
+            50-ms-Schritten erhöhen.</p>
+        </details>
+      </section>
+
+      <section class="karte" aria-labelledby="kopfGeraet">
+        <h3 id="kopfGeraet">Gerät</h3>
+        <div class="auswahl">
+          <select id="profileSelect" aria-label="Gerät wählen"></select>
+          <button id="btnNewProfile">Neues Gerät</button>
+          <button id="btnDeleteProfile" class="danger">Löschen</button>
+        </div>
+        <div class="formular" id="profileForm">
+          <label>Bezeichnung<input type="text" name="name"></label>
+          <label>Gerät in MyTerra<input type="text" name="anbaugeraet" list="mtGeraete" autocomplete="off"></label>
+          <fieldset>
+            <legend>Arbeitsbreite und Teilbreiten</legend>
+            <label>Arbeitsbreite (m)<input type="number" step="0.01" name="width_m"></label>
+            <label>Überlappung (m)<input type="number" step="0.01" name="overlap_m"></label>
+            <label>Teilbreiten<input type="number" step="1" min="1" max="24" name="sections"></label>
+            <label>Abschalten ab (Anteil)<input type="number" step="0.05" min="0.05" max="1" name="section_pcc"></label>
+          </fieldset>
+          <fieldset>
+            <legend>Anbau</legend>
+            <label>Gerät hinter Achse (m)<input type="number" step="0.01" name="tool_trailing_m"></label>
+            <label>Gerät seitlich (m)<input type="number" step="0.01" name="tool_offset_m"></label>
+            <label class="switch"><input type="checkbox" name="trailed"> gezogen (Anhängerkinematik)</label>
+            <label>Deichsellänge (m)<input type="number" step="0.1" min="0.5" name="hitch_length_m"></label>
+          </fieldset>
+        </div>
+        <div class="row">
+          <button id="btnSaveProfile" class="primary">Gerät übernehmen</button>
+          <label class="switch"><input type="checkbox" id="autoSections" checked>
+            Teilbreiten automatisch schalten</label>
+        </div>
+        <details class="erklaerung">
+          <summary>Erklärung</summary>
+          <p><b>Arbeitsbreite</b> legt den Spurabstand fest – vor dem Start eintragen.
+            <b>Abschalten ab:</b> eine offene Teilbreite schließt erst, wenn dieser Anteil
+            überdeckt ist; das verhindert Flackern am Fahrspurrand.</p>
+          <p><b>Gerät hinter Achse</b> bestimmt, wo markiert wird. Gelenkt wird immer auf die
+            Hinterachse, nie auf das Gerät.</p>
+          <p><b>Gezogen:</b> ein gezogenes Gerät schwenkt erst ein, während es gezogen wird,
+            und steht in der Kurve innerhalb der Fahrspur. Die <b>Deichsellänge</b> ist der
+            Abstand vom Zugpunkt bis zur Geräteachse.</p>
+          <p><b>Gerät in MyTerra:</b> derselbe Name wie in MyTerra – dann ist das Gerät bei
+            der Freigabe einer Arbeit schon ausgefüllt.</p>
+        </details>
+      </section>
+    </div>
+  </section>
+
+  <section class="tab-panel" data-panel="settings" hidden>
+    <div class="row sticky-save">
+      <button id="btnSaveSettings" class="primary">Übernehmen</button>
+      <span class="note" id="settingsInfo" role="status" aria-atomic="true"></span>
+    </div>
+    <div id="settingsGroups"></div>
+  </section>
+
+  <section class="tab-panel" data-panel="setup" hidden>
+    <section class="karte" id="lenkEinrichten">
+      <h3>Lenkung einrichten</h3>
+      <p class="note">Schritt für Schritt von der Verbindung bis zur Probefahrt. Am Stand: Lenkung
+        aus, Räder in der Mitte, Not-Aus griffbereit.</p>
+      <ol class="einrichten" id="einrichtenListe"></ol>
+      <label class="note">Gesamteinschlag der Räder am Boden, von Anschlag zu Anschlag (°) – für Schritt 4
+        <input type="number" id="einrichtenWinkel" value="70" min="10" max="120" step="1">
+      </label>
+      <p class="note" id="einrichtenInfo" role="status" aria-atomic="true"></p>
+      <div class="row">
+        <button id="btnEinrichtenNeu">Von vorn beginnen</button>
+      </div>
+    </section>
+    <div class="row">
+      <div class="progress" aria-hidden="true"><div class="progress-bar" id="setupBar"></div></div>
+      <!-- Eine Statusmeldung, nicht zwei: der Balken zeigt dasselbe wie der
+           Text daneben und bleibt deshalb für Vorlesehilfen stumm. -->
+      <span class="note" id="setupCount" role="status" aria-atomic="true"></span>
+    </div>
+    <p class="note">Von oben nach unten abhaken. Was das Programm selbst prüfen kann, prüft
+      es laufend mit – ein Schritt mit rotem Befund lässt sich nicht abhaken.</p>
+    <div class="list" id="setupList"></div>
+    <div class="row ende">
+      <button id="btnSetupReset" class="danger">Alle Bestätigungen zurücksetzen</button>
+    </div>
+  </section>
+
+  <section class="tab-panel" data-panel="system" hidden>
+    <!-- Zuerst der Zustand: der eigentliche Grund, diesen Reiter zu öffnen. -->
+    <h3 class="abschnitt">Zustand</h3>
+    <div class="list" id="systemList"></div>
+
+    <h3 class="abschnitt">Sensoren und Lenkung</h3>
+    <div class="row" id="imuRow" hidden>
+      <button id="btnLevel" class="primary">Neigungssensor nullen</button>
+      <label class="switch"><input type="checkbox" id="compensation" checked>
+        Hangausgleich aktiv</label>
+    </div>
+    <p class="note" id="imuNote" hidden>Zum Nullen auf ebenem Boden stehen – ein Grad
+      Montagefehler sind bei 3 m Antennenhöhe schon 5 cm Dauerversatz.</p>
+    <div class="row" id="motorTestRow" hidden>
+      <button id="btnMotorLinks">◀ Motor links</button>
+      <button id="btnMotorRechts">Motor rechts ▶</button>
+      <label>Leistung
+        <select id="motorLeistung">
+          <option value="0.10">10 %</option>
+          <option value="0.15" selected>15 %</option>
+          <option value="0.25">25 %</option>
+          <option value="0.35">35 %</option>
+        </select>
+      </label>
+      <span class="note" id="motorTestInfo" role="status" aria-atomic="true">Kurz und schwach, nur
+        mit ausgeschalteter Lenkung. Fahrzeug steht, Not-Aus griffbereit.</span>
+    </div>
+    <section class="karte" id="lenkAssistent" hidden>
+      <h3>Lenk-Assistent</h3>
+      <p class="note">Merkt, wie die Lenkung die Spur hält, und stellt Verstärkung und Vorhalt in
+        kleinen Schritten nach. Nur bei ruhiger Geradeausfahrt und nur innerhalb fester Grenzen;
+        „zurück“ stellt die Werte vom Einschalten wieder her.</p>
+      <div class="row">
+        <label>Modus
+          <select id="abstModus">
+            <option value="aus">Aus</option>
+            <option value="beobachten">Nur Vorschläge</option>
+            <option value="automatisch">Stellt selbst nach</option>
+          </select>
+        </label>
+        <button id="btnAbstZurueck">Auf die Ausgangswerte zurück</button>
+      </div>
+      <p class="note" id="abstInfo" role="status" aria-atomic="true"></p>
+      <div id="einmessBereich">
+        <div class="row">
+          <button id="btnEinmessen">Motor einmessen</button>
+          <button id="btnAnschlag">Anschläge messen</button>
+          <label>Gesamteinschlag der Räder (°)
+            <input type="number" id="anschlagWinkel" value="70" min="10" max="120" step="1">
+          </label>
+        </div>
+        <p class="note" id="einmessInfo" role="status" aria-atomic="true">Am Stand, Lenkung aus, Räder
+          in der Mitte, Not-Aus griffbereit. „Motor einmessen“ dreht kurz abwechselnd links und rechts
+          und findet die Mindestleistung. „Anschläge messen“: starten, von Hand von Anschlag zu
+          Anschlag lenken, dann beenden - daraus folgen die Zählwerte je Grad.</p>
+        <div class="row"><button id="btnEinmessUebernehmen" class="primary" hidden>Ergebnis übernehmen</button></div>
+      </div>
+    </section>
+    <div class="row" id="steerRow" hidden>
+      <button id="btnCentre">Lenkung: Mitte lernen</button>
+      <span class="note" id="steerInfo"></span>
+    </div>
+    <div class="row">
+      <label class="switch"><input type="checkbox" id="warnton" checked>
+        Warnton und Vibration</label>
+      <button id="btnWarnProbe">Probe</button>
+    </div>
+    <div class="row">
+      <button id="btnBackup">Jetzt sichern</button>
+      <span class="note" id="backupInfo">Sicherung: wird geladen …</span>
+    </div>
+
+    <h3 class="abschnitt">Angeschlossene Geräte</h3>
+    <div class="row">
+      <button id="btnGeraete" class="primary">Geräte suchen</button>
+      <span class="note" id="geraeteInfo" role="status" aria-atomic="true"></span>
+    </div>
+    <div class="list" id="geraeteList"></div>
+    <div class="row" id="geraeteRow" hidden>
+      <button id="btnGeraeteUebernehmen" class="primary">Gefundene Geräte übernehmen</button>
+      <span class="note" id="geraeteVorschlag"></span>
+    </div>
+    <details class="erklaerung">
+      <summary>Erklärung</summary>
+      <p>Sucht den Empfänger (F9P an USB), den Neigungssensor (Tinkerforge über den Brick
+        Daemon) und die Lenksteuerung (Phidget). Was gefunden wird, lässt sich mit einem Druck
+        in die Einstellungen übernehmen – Empfänger und Sensor werden sofort neu verbunden.</p>
+    </details>
+
+    <h3 class="abschnitt">Daten zwischen Master und Arbeitern</h3>
+    <p class="note" id="datenRolle"></p>
+    <div class="row">
+      <button id="btnDatenExport" class="primary">Datenpaket erstellen (.zip)</button>
+      <label class="switch"><input type="checkbox" id="datenMitArbeiten">
+        mit bearbeiteten Flächen</label>
+      <label class="button" for="datenImport">Datenpaket einspielen (.zip)</label>
+      <input type="file" id="datenImport" accept=".zip" hidden>
+    </div>
+    <p class="note" id="datenInfo" role="status" aria-atomic="true"></p>
+    <details class="erklaerung">
+      <summary>Erklärung</summary>
+      <p>Das Paket enthält Felder (Umrisse), Spuren, Traktoren und Geräte. Auf dem Master
+        erstellen, per USB-Stick zum Tablet bringen und dort einspielen – es überschreibt
+        nichts, was auf dem Tablet neuer ist. Mit Netz läuft der Abgleich von selbst.</p>
+    </details>
+
+    <!-- Selten gebraucht: zugeklappt, damit der Reiter nicht sieben Bildschirme lang ist. -->
+    <details class="setting-group werkzeug">
+      <summary>Aktualisierung <span class="note inline" id="updateStand" role="status" aria-atomic="true">–</span></summary>
+      <div class="werkzeug-inhalt">
+        <div class="row" id="updateOnlineZeile">
+          <button id="btnUpdateSuchen" class="primary">Online nach neuer Version suchen</button>
+          <button id="btnUpdateOnline" hidden>Jetzt aktualisieren</button>
+        </div>
+        <p class="note" id="updateOnlineInfo" role="status" aria-atomic="true"></p>
+        <div class="row" id="updatePaketZeile">
+          <label class="button" for="updatePaket">Update-Paket einspielen (.zip)</label>
+          <input type="file" id="updatePaket" accept=".zip" hidden>
+          <button id="btnUpdateGit" hidden>Aus GitHub holen</button>
+          <button id="btnUpdateNeustart">Neu starten</button>
+          <button id="btnUpdateZurueck" class="danger" hidden>Vorigen Stand zurückholen</button>
+        </div>
+        <p class="note" id="updatePaketNote">Auf dem PC <code>python scripts/make_update.py</code>
+          aufrufen, die Zip-Datei aufs Tablet bringen und hier einspielen – dann <b>Neu starten</b>.
+          Der alte Stand liegt als Sicherung bereit. Die Lenkung geht dabei aus, eine laufende
+          Arbeit wird gesichert.</p>
+        <p class="note" id="updateInfo" role="status" aria-atomic="true"></p>
+      </div>
+    </details>
+
+    <details class="setting-group werkzeug">
+      <summary>Rohdaten aufzeichnen <span class="note inline" id="rohdatenInfo" role="status" aria-atomic="true"></span></summary>
+      <div class="werkzeug-inhalt">
+        <div class="row">
+          <button id="btnRohdaten" class="primary">Aufzeichnung starten</button>
+        </div>
+        <details class="erklaerung">
+          <summary>Erklärung</summary>
+          <p>Zeichnet auf, was <b>hereinkommt</b>: die rohen NMEA-Sätze und die Lagemeldungen
+            des Neigungssensors, mit Zeitstempel. Mit <b>Abspielen</b> läuft dieselbe Fahrt am
+            Schreibtisch noch einmal durch dieselbe Rechenkette – so lässt sich ein Fehler vom
+            Feld nachstellen. Die Lenkung geht dabei aus; zurück zum Empfänger über
+            <b>Einstellungen → Empfänger → Quelle</b>. Rund 7 MB je Stunde, bei 200 MB endet
+            die Aufzeichnung von selbst.</p>
+        </details>
+        <div class="list" id="rohdatenList"></div>
+      </div>
+    </details>
+
+    <div class="row" id="simRow" hidden>
+      <label>Simulator km/h <input type="range" id="simSpeed" min="0" max="15" step="0.5" value="9"></label>
+      <label>Lenken <input type="range" id="simSteer" min="-30" max="30" step="1" value="0"></label>
+      <button id="btnSimInsFeld">Traktor ins Feld setzen</button>
+      <span class="note">Ohne scharfe Lenkung fährt der virtuelle Traktor geradeaus
+        davon – außerhalb der Grenze schalten die Sektionen ab und es wird nichts
+        markiert. Der Knopf setzt ihn auf den Anfang der Spur; beim Laden eines
+        Schlags fährt er von selbst dorthin. Auf der Tastatur: ← → lenken
+        (gedrückt halten), ↑ ↓ Tempo.</span>
+    </div>
+  </section>
+</div>
+
+<div class="toast" id="toast" hidden></div>
+<button class="vorschlag" id="feldVorschlag" hidden></button>
+
+<script src="alerts.js"></script>
+<script src="flaeche.js"></script>
+<script src="app.js"></script>
+<script>
+  /* Nur fuer die Kachel auf dem Android-Tablet. Browser lassen Service Worker
+     ausschliesslich in sicherem Kontext zu (HTTPS oder localhost) - ueber
+     http://192.168.x.x passiert hier bewusst nichts, statt einer Fehlermeldung
+     in der Kabine. */
+  /* Im eigenen Windows-Fenster (?fenster=1) keinen: der Dienst laeuft auf demselben
+     Rechner, und ein Service Worker lieferte nach einem Update beim ersten Oeffnen
+     noch das alte app.js zur neuen Seite. Einen frueher angelegten wieder abmelden. */
+  var imFenster = new URLSearchParams(location.search).has('fenster');
+  if ('serviceWorker' in navigator && imFenster) {
+    navigator.serviceWorker.getRegistrations()
+      .then(function (alle) { alle.forEach(function (r) { r.unregister(); }); })
+      .catch(function () {});
+    if (window.caches) caches.keys().then(function (namen) {
+      namen.forEach(function (n) { caches.delete(n); });
+    }).catch(function () {});
+  } else if ('serviceWorker' in navigator && window.isSecureContext) {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('sw.js').catch(() => {});
+    });
+  }
+</script>
+</body>
+</html>

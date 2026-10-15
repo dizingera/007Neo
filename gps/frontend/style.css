@@ -1,0 +1,614 @@
+/* Kabinen-Oberfläche: der Blick über die Haube.
+
+   Dunkel als Grundzustand, weil das Display nachts direkt im Blickfeld sitzt;
+   ein Tag-Zustand mit hellem Grund, weil ein schwarzer Bildschirm in praller
+   Sonne die wenigsten Reserven hat. Große Flächen, weil bedient wird mit
+   Arbeitshandschuhen auf einem rüttelnden Sitz.
+
+   Farben sagen etwas: Phosphorgrün ist die Spur und nur die Spur. Bernstein
+   warnt, Blau ist die Wende, Rot ist "nicht". Was leuchtet, will etwas. */
+
+:root {
+  --grund: #05090c; --himmel: #0d2a25;
+  --text: #eef3f0; --muted: #86938d;
+  --glas: rgba(9,15,19,.66); --haar: rgba(255,255,255,.09);
+  --leucht: #5dff8e; --leucht-tinte: #06130a; --amber: #ffb020; --rot: #ff4d4d; --blau: #6cb8ff;
+  --led-aus: rgba(255,255,255,.07);
+  /* Karte */
+  --f-boden: #0a1216; --f-raster: rgba(255,255,255,.035); --f-grenze: #ffb020;
+  --f-vg: rgba(255,77,77,.85); --f-pass: rgba(255,255,255,.16); --f-aktiv: #5dff8e;
+  --f-flaeche: rgba(93,255,142,.22); --f-wende: #6cb8ff; --f-spur: rgba(108,184,255,.5); --f-traktor: #eef3f0;
+  --f-fahrgasse: rgba(255,92,92,.75); --f-konflikt: #ffb020;
+  --f-doppelt: rgba(255,170,40,.6); --f-traktor-rand: #0a1216; --f-geraet: #4c5a55;
+  --f-lack: #3d8c34; --f-lack-hell: #6fc25f; --f-lack-dunkel: #1f4f1b; --f-akzent: #f4c400; --f-reifen: #1a1d1c; --f-kabine: #0e1a22;
+  /* Menü */
+  --bg: #0c1116; --panel: #131a20; --panel-2: #1a232b; --line: #263038;
+  --green: #1f8a4b; --green-bright: #5dff8e; --red: #ff4d4d; --blue: #6cb8ff; --blue-solid: #2563eb;
+  --touch: 52px;
+}
+body.tag {
+  --grund: #dfe6dc; --himmel: #f4f7ef;
+  --text: #14201a; --muted: #57645d;
+  --glas: rgba(255,255,255,.70); --haar: rgba(20,32,26,.12);
+  --leucht: #0b7a38; --leucht-tinte: #ffffff; --amber: #9a5200; --rot: #b3241e; --blau: #1f63d6;
+  --led-aus: rgba(20,32,26,.10);
+  --f-boden: #cfd9c9; --f-raster: rgba(20,32,26,.05); --f-grenze: #b57c0e;
+  --f-vg: rgba(216,54,47,.8); --f-pass: rgba(20,32,26,.16); --f-aktiv: #15a350;
+  --f-flaeche: rgba(21,163,80,.28); --f-wende: #1f63d6; --f-spur: rgba(31,99,214,.45); --f-traktor: #14201a;
+  --f-fahrgasse: rgba(216,54,47,.75); --f-konflikt: #b86400;
+  --f-doppelt: rgba(214,110,0,.55); --f-traktor-rand: #5b6a61; --f-geraet: #9aa69e;
+  --f-lack: #2f7a29; --f-lack-hell: #5cae4e; --f-lack-dunkel: #1a4416; --f-akzent: #e0b400; --f-reifen: #222624; --f-kabine: #1b2a33;
+  --bg: #eef1ec; --panel: #ffffff; --panel-2: #f1f4ee; --line: #d3d9d1;
+  --green: #15a350; --green-bright: #0f7a3c; --red: #d8362f; --blue: #1f63d6; --blue-solid: #1f63d6;
+}
+
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+[hidden] { display: none !important; }
+
+html, body {
+  margin: 0; height: 100%; overflow: hidden;
+  background: var(--grund); color: var(--text);
+  font-family: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  user-select: none;
+}
+body { height: 100dvh; }
+button { font: inherit; color: inherit; }
+
+/* Maßeinheit der Kabine: 1 vw der Bühne. Damit skaliert alles mit dem Tablet,
+   ohne dass irgendwo ein Pixelwert zu klein wird. */
+.stage { position: relative; width: 100%; height: 100%; overflow: hidden; --u: 1vw; }
+@media (orientation: portrait) { .stage { --u: 1.6vw; } }
+
+/* --- Das Feld --- */
+.buehne { position: absolute; inset: 0; perspective: calc(110 * var(--u)); perspective-origin: 50% 26%; overflow: hidden; }
+/* Der Ankerpunkt (wo der Traktor sitzt) liegt bei 78 % der Leinwand und soll
+   auf 74 % der Bühnenhöhe landen - unabhängig davon, ob das Tablet 16:10,
+   16:9 oder 4:3 ist. Deshalb wird die Leinwand von dort aus nach oben gesetzt,
+   nicht von oben herab. Gedreht wird um genau diesen Punkt, damit er beim
+   Kippen stehen bleibt. */
+.feld {
+  position: absolute; left: 50%; top: calc(74% - 109.2 * var(--u)); width: calc(140 * var(--u)); height: calc(140 * var(--u));
+  margin-left: calc(-70 * var(--u)); transform-origin: 50% 78%;
+  transform: rotateX(54deg); will-change: transform;
+  transition: transform .5s ease;   /* nicht top: das springt beim Laden sonst von 0 herunter */
+}
+.stage.flach .feld { transform: rotateX(0deg); }
+.stage.nord .feld { top: calc(50% - 70 * var(--u)); transform: rotateX(0deg); }
+.feld canvas { width: 100%; height: 100%; display: block; touch-action: none; }
+.himmel { position: absolute; inset: 0; pointer-events: none;
+  background: linear-gradient(180deg, var(--himmel) 0%, var(--grund) 34%, transparent 60%); transition: opacity .5s; }
+.stage.flach .himmel, .stage.nord .himmel { opacity: 0; }
+.vignette { position: absolute; inset: 0; pointer-events: none;
+  background: radial-gradient(120% 90% at 50% 70%, transparent 55%, rgba(0,0,0,.45) 100%); }
+body.tag .vignette { background: radial-gradient(120% 90% at 50% 70%, transparent 60%, rgba(20,32,26,.18) 100%); }
+
+/* --- Lichtbalken --- */
+.balken { position: absolute; left: 50%; top: calc(2.2 * var(--u)); transform: translateX(-50%); width: calc(46 * var(--u)); z-index: 3; text-align: center; pointer-events: none; }
+.leds { display: grid; grid-template-columns: repeat(21, 1fr); gap: calc(.45 * var(--u)); height: calc(1.5 * var(--u)); }
+.leds .led { border-radius: calc(.3 * var(--u)); background: var(--led-aus); transition: background 80ms linear, box-shadow 80ms linear;
+  transform: translateY(calc(var(--h, 0) * -1 * var(--u))); }
+.leds .led.centre { background: color-mix(in srgb, var(--text) 25%, transparent); }
+.leds .led.on-green { background: var(--leucht); box-shadow: 0 0 calc(1.2 * var(--u)) var(--leucht); }
+.leds .led.on-amber { background: var(--amber); box-shadow: 0 0 calc(1.2 * var(--u)) var(--amber); }
+.leds .led.on-red { background: var(--rot); box-shadow: 0 0 calc(1.2 * var(--u)) var(--rot); }
+.mitte { position: absolute; left: 50%; top: calc(-.5 * var(--u)); width: calc(.25 * var(--u)); height: calc(2.6 * var(--u)); margin-left: calc(-.125 * var(--u)); background: var(--text); opacity: .6; }
+.abw { margin-top: calc(1.1 * var(--u)); font-family: "Rajdhani", "Bahnschrift", "Roboto Condensed", sans-serif; font-weight: 700;
+  font-size: calc(7.6 * var(--u)); line-height: .9; letter-spacing: -.01em; font-variant-numeric: tabular-nums;
+  display: flex; align-items: baseline; justify-content: center; gap: calc(.7 * var(--u)); }
+.abw .pfeil { font-size: calc(4 * var(--u)); color: var(--muted); }
+.abw b.ok, .abw .pfeil.ok { color: var(--leucht); } .abw b.warn { color: var(--amber); } .abw b.bad { color: var(--rot); }
+.abw small { font-family: "IBM Plex Sans", sans-serif; font-size: max(11px, calc(1.3 * var(--u))); font-weight: 600; color: var(--muted); letter-spacing: .14em; text-transform: uppercase; }
+
+/* Lenkt die Maschine? Am Lichtbalken, nicht nur in der Taste unten rechts. */
+.balken.lenkt .leds, .balken.scharf .leds { outline: calc(.35 * var(--u)) solid var(--leucht); outline-offset: calc(.6 * var(--u)); border-radius: calc(.8 * var(--u)); }
+.balken.scharf .leds { outline-color: var(--amber); outline-style: dashed; }
+.lenkstatus { display: inline-block; margin-top: calc(.6 * var(--u)); padding: calc(.35 * var(--u)) calc(1.2 * var(--u)); border-radius: 999px;
+  font-family: "Rajdhani", "Bahnschrift", sans-serif; font-weight: 700; font-size: max(15px, calc(1.8 * var(--u))); letter-spacing: .1em; text-transform: uppercase; }
+.lenkstatus.lenkt { background: var(--leucht); color: var(--leucht-tinte); }
+.lenkstatus.scharf { background: var(--glas); color: var(--amber); border: 2px solid var(--amber); }
+
+/* Spurwechsel mit einem Tipp war zu leicht: der erste Tipp fragt, der zweite tut es
+   (Regeln dazu unten bei der Leiste). */
+
+/* --- Glas --- */
+.glas { position: absolute; background: var(--glas); backdrop-filter: blur(16px) saturate(1.2); -webkit-backdrop-filter: blur(16px) saturate(1.2);
+  border: 1px solid var(--haar); border-radius: calc(1.6 * var(--u)); z-index: 3; }
+.chips { position: absolute; top: calc(2.2 * var(--u)); display: flex; flex-direction: column; gap: calc(.7 * var(--u)); z-index: 3; pointer-events: none; }
+.chips.l { left: calc(2.2 * var(--u)); align-items: flex-start; max-width: calc(50% - 26.4 * var(--u)); } .chips.r { right: calc(2.2 * var(--u)); align-items: flex-end; }
+.chip { display: inline-flex; align-items: center; gap: calc(.6 * var(--u)); padding: calc(.55 * var(--u)) calc(1.1 * var(--u)); border-radius: 999px;
+  background: var(--glas); border: 1px solid var(--haar); font-size: max(12px, calc(1.25 * var(--u))); font-weight: 600; white-space: nowrap; backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); }
+.chip i { width: calc(.8 * var(--u)); height: calc(.8 * var(--u)); border-radius: 50%; background: var(--muted); flex: none; }
+.chip.good { color: var(--leucht); } .chip.good i { background: var(--leucht); box-shadow: 0 0 calc(.8 * var(--u)) var(--leucht); }
+.chip.warn { color: var(--amber); } .chip.warn i { background: var(--amber); box-shadow: 0 0 calc(.8 * var(--u)) var(--amber); }
+.chip.bad { color: var(--rot); } .chip.bad i { background: var(--rot); }
+.chip.titel { font-family: "Rajdhani", "Bahnschrift", sans-serif; font-weight: 700; font-size: calc(1.9 * var(--u)); letter-spacing: .03em; text-transform: uppercase; padding: calc(.5 * var(--u)) calc(1.3 * var(--u)); }
+#datenRolle { white-space: pre-line; }
+.hint { margin-top: calc(.4 * var(--u)); font-size: max(14px, calc(1.5 * var(--u))); font-weight: 600; color: var(--amber); max-width: calc(34 * var(--u)); white-space: pre-line;
+  background: var(--glas); border: 1px solid var(--haar); border-radius: calc(1 * var(--u)); padding: calc(.6 * var(--u)) calc(1 * var(--u));
+  backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); }
+.hint:empty { display: none; }
+.hint.alarm { color: var(--rot); animation: alarm 1s steps(2) infinite; }
+@keyframes alarm { 50% { opacity: .35; } }
+
+/* --- Leiste rechts ---
+   Vorher nahm die Knopfspalte gut ein Viertel der Breite und die halbe Höhe
+   ein; das Feld war zwischen Glas kaum zu sehen. Jetzt eine schmale Leiste
+   aus zwei Spalten am Rand: Symbol oben, kurzes Wort darunter, jede Taste
+   handschuhtauglich groß. Alles andere gehört der Karte. */
+.stage { --leiste-spalte: max(64px, calc(5.4 * var(--u))); --rand: calc(1.6 * var(--u));
+  --leiste-breite: calc(2 * var(--leiste-spalte) + 3 * calc(.6 * var(--u)) + 2px); }
+.leiste { position: absolute; right: var(--rand); top: var(--rand); bottom: var(--rand); z-index: 4;
+  width: var(--leiste-breite); padding: calc(.6 * var(--u)); box-sizing: border-box;
+  display: grid; grid-template-columns: 1fr 1fr; align-content: start; gap: calc(.6 * var(--u));
+  background: color-mix(in srgb, var(--glas) 70%, transparent); border: 1px solid var(--haar); border-radius: calc(1.6 * var(--u));
+  backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); }
+.leiste .gruppe { display: contents; }
+.leiste .unten-rechts { grid-column: 1 / -1; display: grid; gap: calc(.6 * var(--u)); margin-top: auto; align-self: end; }
+/* Markieren und Lenkung sitzen unten, auch wenn oben Platz frei bleibt. */
+.leiste { grid-template-rows: repeat(4, auto) 1fr; }
+.leiste .unten-rechts { grid-row: 5; }
+
+/* Fahrgasse: nicht zu übersehen, aber kein Alarm - Bernstein, ruhig. */
+.fahrgasse-hinweis { grid-column: 1 / -1; grid-row: 4; display: flex; flex-direction: column; align-items: center; gap: 2px;
+  padding: 8px 6px; border-radius: calc(1 * var(--u)); background: var(--amber); color: var(--bg); text-align: center; }
+.fahrgasse-hinweis[hidden] { display: none; }
+.fahrgasse-hinweis b { font-family: "Rajdhani", "Bahnschrift", sans-serif; font-weight: 700; font-size: max(18px, calc(1.8 * var(--u)));
+  letter-spacing: .08em; text-transform: uppercase; line-height: 1; }
+.fahrgasse-hinweis small { font-size: max(12px, calc(1 * var(--u))); font-weight: 600; line-height: 1.15; }
+
+/* Wende-Fenster: links neben der Leiste, groß genug für Handschuhe. */
+.wendefenster { position: absolute; right: calc(100% + 10px); top: 0; z-index: 6; width: max(300px, calc(26 * var(--u)));
+  display: flex; flex-direction: column; gap: 12px; padding: 14px; box-sizing: border-box;
+  background: var(--bg); color: var(--text); border: 2px solid var(--blau); border-radius: calc(1.6 * var(--u));
+  box-shadow: 0 12px 34px rgba(0,0,0,.45); }
+.wendefenster[hidden] { display: none; }
+.wf-kopf { font-family: "Rajdhani", "Bahnschrift", sans-serif; font-weight: 700; font-size: 22px; letter-spacing: .06em; text-transform: uppercase; color: var(--blau); }
+.wf-gruppe { display: flex; flex-direction: column; gap: 6px; }
+.wf-gruppe > span { font-size: 13px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+.wf-wahl { display: flex; gap: 6px; }
+.wf-wahl button { flex: 1; min-height: var(--touch); border-radius: 10px; border: 2px solid var(--haar); background: var(--glas);
+  color: var(--text); font-size: 17px; font-weight: 700; cursor: pointer; }
+.wf-wahl button.an { background: var(--blau); border-color: var(--blau); color: var(--bg); }
+.wf-ergebnis { margin: 0; min-height: 2.6em; font-size: 15px; font-weight: 600; line-height: 1.3; }
+.wf-ergebnis.gut { color: var(--leucht); } .wf-ergebnis.schlecht { color: var(--amber); }
+.wf-knoepfe { display: flex; gap: 8px; }
+.wf-knoepfe button { flex: 1; min-height: var(--touch); border-radius: 10px; font-size: 16px; font-weight: 700; cursor: pointer;
+  border: 2px solid var(--haar); background: var(--glas); color: var(--text); }
+.wf-knoepfe button.primary { background: var(--blau); border-color: var(--blau); color: var(--bg); }
+.wf-knoepfe button:disabled { opacity: .4; cursor: default; }
+
+/* Spur-Werkzeuge: klappen links neben der Leiste auf, zwei mal zwei. */
+.werkzeuge { position: absolute; right: calc(100% + 10px); top: 0; z-index: 5;
+  display: grid; grid-template-columns: repeat(2, var(--leiste-spalte)); gap: calc(.6 * var(--u)); padding: calc(.6 * var(--u));
+  background: var(--glas); border: 1px solid var(--haar); border-radius: calc(1.6 * var(--u));
+  backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); box-shadow: 0 10px 30px rgba(0,0,0,.35); }
+.werkzeuge[hidden] { display: none; }
+#btnSpur[aria-expanded="true"] { border: 2px solid var(--text); }
+#btnSpur.recording { color: var(--rot); border: 2px solid color-mix(in srgb, var(--rot) 60%, transparent); }
+
+.taste { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
+  min-height: var(--touch); height: max(var(--touch), calc(5 * var(--u))); padding: 4px 2px;
+  border-radius: calc(1 * var(--u)); background: var(--glas); border: 1px solid var(--haar);
+  font-size: max(12px, calc(1.05 * var(--u))); font-weight: 600; line-height: 1.05; white-space: nowrap; cursor: pointer;
+  color: var(--text); text-align: center; }
+.taste svg { width: max(22px, calc(2.1 * var(--u))); height: max(22px, calc(2.1 * var(--u))); stroke: currentColor; fill: none;
+  stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+.taste:active { background: color-mix(in srgb, var(--text) 14%, var(--glas)); }
+.taste:focus-visible { outline: 3px solid var(--text); outline-offset: 2px; }
+.taste:disabled { opacity: .4; cursor: default; }
+.taste.recording { color: var(--rot); border-color: color-mix(in srgb, var(--rot) 50%, transparent); }
+.taste.turn { overflow: hidden; color: var(--blau); border-color: color-mix(in srgb, var(--blau) 35%, transparent); }
+.taste.turn > * { position: relative; }
+.taste.turn .fuellung { position: absolute; left: 0; top: 0; bottom: 0; width: 0; background: color-mix(in srgb, var(--blau) 22%, transparent); }
+.taste.turn.geplant { border-color: var(--blau); }
+.taste.turn.aktiv { color: #fff; background: var(--blau); border-color: transparent; }
+/* Richtung: auffällig nur, wenn die Anlage gerade rückwärts annimmt. */
+#btnRichtung.rueck { color: var(--amber); border: 2px solid var(--amber); }
+
+/* Rückfrage (A+, Kontur): die Frage steht links neben der Leiste, nicht in der Taste. */
+.taste.bestaetigen { border: 2px solid var(--amber); color: var(--amber); }
+.taste.bestaetigen::after { content: attr(data-frage); position: absolute; right: calc(100% + 10px); top: 50%; transform: translateY(-50%);
+  padding: 8px 12px; border-radius: 10px; background: var(--glas); border: 2px solid var(--amber); color: var(--amber);
+  font-size: max(14px, calc(1.3 * var(--u))); font-weight: 700; white-space: nowrap; pointer-events: none; }
+
+.taste.mark, .taste.lenk { flex-direction: row; justify-content: flex-start; gap: calc(.7 * var(--u)); padding: 0 calc(1 * var(--u));
+  font-family: "Rajdhani", "Bahnschrift", sans-serif; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; text-align: left; }
+.taste.mark span, .taste.lenk span { display: flex; flex-direction: column; line-height: 1; min-width: 0; }
+.taste.mark small, .taste.lenk small { font-family: "IBM Plex Sans", sans-serif; font-weight: 600; font-size: max(12px, calc(1 * var(--u)));
+  letter-spacing: 0; text-transform: none; margin-top: 3px; opacity: .9; white-space: normal; line-height: 1.15; }
+.taste.mark i, .taste.lenk i { flex: none; border-radius: 50%; background: var(--muted); }
+/* In der schmalen Leiste trägt der Leuchtpunkt den Zustand; das Symbol würde dem Wort den Platz nehmen. */
+.taste.mark svg, .taste.lenk svg { display: none; }
+.taste.mark { height: max(60px, calc(5.6 * var(--u))); font-size: max(15px, calc(1.5 * var(--u))); }
+.taste.mark i { width: 10px; height: 10px; }
+.taste.mark.an { color: var(--leucht); border: 2px solid color-mix(in srgb, var(--leucht) 60%, transparent); }
+.taste.mark.an i { background: var(--leucht); box-shadow: 0 0 8px var(--leucht); }
+.taste.lenk { height: max(84px, calc(8 * var(--u))); font-size: max(18px, calc(1.9 * var(--u))); }
+.taste.lenk i { width: 12px; height: 12px; }
+/* Der Grund kann lang sein ("zu weit von der Spur …") - zwei Zeilen, dann Schluss. */
+.taste.lenk small { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.taste.lenk svg { width: max(28px, calc(2.8 * var(--u))); height: max(28px, calc(2.8 * var(--u))); stroke-width: 1.8; }
+.taste.lenk.an { color: var(--leucht-tinte); background: var(--leucht); border-color: transparent;
+  box-shadow: 0 0 calc(2.4 * var(--u)) color-mix(in srgb, var(--leucht) 45%, transparent); }
+.taste.lenk.an i { background: var(--leucht-tinte); animation: puls 1.6s ease-in-out infinite; }
+.taste.lenk.scharf { color: var(--amber); border: 2px solid color-mix(in srgb, var(--amber) 65%, transparent); }
+.taste.lenk.scharf i { background: var(--amber); box-shadow: 0 0 8px var(--amber); animation: puls 1.6s ease-in-out infinite; }
+.taste.lenk:not(.an):not(.scharf) i { background: var(--rot); }
+@keyframes puls { 50% { opacity: .3; } }
+@media (prefers-reduced-motion: reduce) { .taste i { animation: none !important; } .hint.alarm { animation: none; } .feld { transition: none; } }
+
+/* --- Ansicht: Zoom, Blickwinkel, Tag/Nacht - klein, links neben der Leiste --- */
+.ansicht { position: absolute; right: calc(var(--leiste-breite) + 2 * var(--rand)); top: calc(var(--rand) + 84px);
+  display: flex; flex-direction: column; gap: calc(.6 * var(--u)); z-index: 3; }
+.rund { width: 48px; height: 48px; border-radius: 50%; display: grid; place-items: center;
+  background: var(--glas); color: var(--text); border: 1px solid var(--haar); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+  font-size: 24px; font-weight: 600; cursor: pointer; }
+.rund svg { width: 22px; height: 22px; stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.rund.an { color: var(--leucht); border-color: color-mix(in srgb, var(--leucht) 40%, transparent); }
+.chips.r { right: calc(var(--leiste-breite) + 2 * var(--rand)); }
+/* Mitte der freien Fläche links der Leiste - dort steht auch der Traktor. */
+.stage { --frei-mitte: calc((100% - var(--leiste-breite) - var(--rand)) / 2); }
+.buehne { right: calc(var(--leiste-breite) + var(--rand)); }
+.balken { left: var(--frei-mitte); width: min(calc(42 * var(--u)), calc(100% - 2 * var(--leiste-breite) - 8 * var(--rand))); }
+
+/* --- Unten links: eine flache Zeile Zahlen, daneben das Vorgewende --- */
+/* Die Fahrdaten stehen als schmale Spalte am linken Rand: hinter dem Traktor,
+   unten in der Mitte, liegen Gerät und frischer Streifen - die bleiben frei. */
+.unten { position: absolute; left: var(--rand); bottom: var(--rand); width: max(150px, calc(13 * var(--u)));
+  display: flex; flex-direction: column; align-items: stretch; gap: calc(.6 * var(--u)); z-index: 3; pointer-events: none; }
+.unten > * { pointer-events: auto; }
+.unten > .glas { position: static; }
+
+.cluster { padding: calc(.8 * var(--u)) calc(1.1 * var(--u)); flex: none;
+  display: grid; grid-template-columns: 1fr 1fr; align-items: end; gap: calc(.5 * var(--u)) calc(1.8 * var(--u)); font-variant-numeric: tabular-nums; }
+.cluster .kmh { grid-column: 1 / -1; display: flex; align-items: baseline; gap: calc(.5 * var(--u)); }
+.cluster .kmh b { font-family: "Rajdhani", "Bahnschrift", sans-serif; font-weight: 700; font-size: max(30px, calc(3.6 * var(--u))); line-height: .9; }
+.cluster .kmh span, .cluster div span { font-size: max(11px, calc(1 * var(--u))); font-weight: 600; color: var(--muted); letter-spacing: .1em; text-transform: uppercase; }
+.cluster div b { display: block; font-family: "Rajdhani", "Bahnschrift", sans-serif; font-weight: 600; font-size: max(20px, calc(2.2 * var(--u))); line-height: 1; }
+.cluster div b.warn { color: var(--amber); }
+.cluster #tiltBox { grid-column: 1 / -1; }
+.cluster .spark { grid-column: 1 / -1; height: max(16px, calc(1.6 * var(--u))); }
+.cluster .spark svg { width: 100%; height: 100%; display: block; }
+.cluster .spark path { fill: none; stroke: var(--leucht); stroke-width: 2; vector-effect: non-scaling-stroke; }
+.cluster .spark .band { fill: color-mix(in srgb, var(--leucht) 10%, transparent); stroke: none; }
+.cluster .spark .null { stroke: var(--haar); stroke-width: 1; }
+.cluster .sections { grid-column: 1 / -1; display: flex; gap: calc(.3 * var(--u)); }
+.sections .sec { flex: 1; height: 44px; border-radius: calc(.4 * var(--u)); background: var(--led-aus);
+  border: 1px solid var(--haar); font-size: max(13px, calc(1.2 * var(--u))); font-weight: 700; color: var(--muted); display: grid; place-items: center; cursor: pointer; }
+.sections .sec.on { background: var(--leucht); color: var(--leucht-tinte); border-color: transparent; }
+.sections .sec.forced { background: color-mix(in srgb, var(--rot) 25%, transparent); color: var(--rot); border-color: var(--rot); }
+
+.vg { flex: none; padding: calc(.7 * var(--u)) calc(1.1 * var(--u)); }
+.vg .zeile { flex-wrap: wrap; }
+.vg .zeile { display: flex; justify-content: space-between; align-items: baseline; gap: calc(1 * var(--u)); font-size: max(11px, calc(1 * var(--u))); font-weight: 600; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
+.vg .zeile span { min-width: 0; }
+.vg .zeile b { flex: none; white-space: nowrap; font-family: "Rajdhani", "Bahnschrift", sans-serif; font-weight: 700; font-size: max(20px, calc(2.2 * var(--u))); letter-spacing: 0; color: var(--text); font-variant-numeric: tabular-nums; }
+.vg .zeile b.warn { color: var(--amber); } .vg .zeile b.turn { color: var(--blau); }
+.vg .bar { height: 6px; border-radius: 999px; background: var(--led-aus); margin-top: calc(.5 * var(--u)); overflow: hidden; }
+.vg .bar i { display: block; height: 100%; width: 100%; background: var(--leucht); border-radius: 999px; transform-origin: left; transition: background .3s; }
+.vg .bar i.warn { background: var(--amber); } .vg .bar i.turn { background: var(--blau); }
+.ruf { position: absolute; left: var(--frei-mitte); transform: translateX(-50%); bottom: calc(16 * var(--u)); z-index: 3; pointer-events: none;
+  font-family: "Rajdhani", "Bahnschrift", sans-serif; font-weight: 700; font-size: max(18px, calc(2 * var(--u))); letter-spacing: .06em; text-transform: uppercase;
+  color: var(--amber); text-shadow: 0 0 calc(2 * var(--u)) color-mix(in srgb, var(--amber) 60%, transparent); opacity: 0; transition: opacity .3s; }
+.ruf.an { opacity: 1; }
+
+/* Niedriges Fenster (am PC): Tasten flacher, Ansichtsknöpfe nebeneinander. */
+@media (orientation: landscape) and (max-height: 560px) {
+  .taste { height: 50px; min-height: 50px; }
+  .taste.mark { height: 52px; }
+  .taste.lenk { height: 64px; }
+  .ansicht { top: calc(var(--rand) + 70px); gap: 6px; }
+  .rund { width: 40px; height: 40px; font-size: 20px; }
+  .rund svg { width: 19px; height: 19px; }
+  .cluster .spark { display: none; }
+  .balken .abw { font-size: calc(5.6 * var(--u)); }
+}
+
+/* Hochkant: die Leiste wird zur Leiste unten, fünf Tasten je Zeile, darunter
+   Markieren und Lenkung nebeneinander. Die Zahlen sitzen darüber. */
+@media (orientation: portrait) {
+  .stage { --leiste-hoehe: calc(max(var(--touch), calc(5 * var(--u))) + max(60px, calc(5.6 * var(--u))) + 3 * calc(.6 * var(--u)) + 2px); }
+  .leiste { top: auto; left: var(--rand); width: auto; height: var(--leiste-hoehe);
+    grid-template-columns: repeat(6, 1fr); grid-template-rows: none; }
+  .werkzeuge { right: auto; left: 0; top: auto; bottom: calc(100% + 10px); }
+  .wendefenster { right: 0; left: auto; top: auto; bottom: calc(100% + 10px); }
+  .fahrgasse-hinweis { position: absolute; left: 0; right: 0; bottom: calc(100% + 8px); grid-row: auto; }
+  /* Steht das Fahrgassen-Band über der Leiste, rücken die Fahrdaten darüber. */
+  .stage:has(#fahrgasseHinweis:not([hidden])) .unten { bottom: calc(var(--leiste-hoehe) + 2 * var(--rand) + 64px); }
+  .leiste .unten-rechts { grid-column: 1 / -1; grid-row: auto; grid-template-columns: 1fr 1.4fr; }
+  .taste.lenk { height: max(60px, calc(5.6 * var(--u))); }
+  .taste.bestaetigen::after { right: auto; left: 50%; top: auto; bottom: calc(100% + 10px); transform: translateX(-50%); }
+  .buehne { right: 0; }
+  .stage { --frei-mitte: 50%; }
+  /* Unten liegen Leiste und Fahrdaten: der Traktor steht darüber, damit Gerät
+     und Streifen hinter ihm sichtbar bleiben (Anker bei 52 % statt 74 %). */
+  .feld { top: calc(52% - 109.2 * var(--u)); }
+  .unten { right: var(--rand); width: auto; bottom: calc(var(--leiste-hoehe) + 2 * var(--rand)); flex-direction: row; align-items: flex-end; }
+  .unten > .cluster { grid-template-columns: auto auto auto auto; }
+  .cluster .kmh { grid-column: auto; }
+  .unten > .vg { flex: 1 1 auto; }
+  .ruf { bottom: calc(var(--leiste-hoehe) + 16 * var(--u)); }
+  .balken { width: calc(70 * var(--u)); }
+  .chips.r { right: var(--rand); }
+  .ansicht { right: var(--rand); }
+  /* Die Chips rücken unter den Balken - nebeneinander ist hochkant kein Platz. */
+  .chips { top: calc(13 * var(--u)); }
+  .chips.l { max-width: 60%; }
+  .ansicht { top: calc(25 * var(--u)); }
+}
+
+/* --- Menü --- */
+/* Eigene Farben nur fürs Menü: Ränder, die man in der Sonne noch sieht (≥3:1), und
+   Statusfarben als Schrift (≥4,5:1). Die Fahransicht behält ihre Leuchtfarben. */
+.sheet {
+  --m-linie: #3b4852; --m-feld-rand: #4a5863;
+  --m-gruen: #5dff8e; --m-amber: #ffb020; --m-rot: #ff7a72;
+  position: fixed; inset: 0; background: var(--bg); z-index: 20;
+  display: flex; flex-direction: column;
+}
+body.tag .sheet {
+  --m-linie: #8a978f; --m-feld-rand: #6f7d75;
+  --m-gruen: #0f7a3c; --m-amber: #8f4c00; --m-rot: #b3261e;
+}
+.sheet-head {
+  display: flex; align-items: center; gap: 10px; padding: 10px 12px;
+  border-bottom: 2px solid var(--m-linie);
+}
+/* Eine Zeile, die auf schmalen Geräten seitlich wischt, statt in vier Zeilen umzubrechen. */
+.tabs { display: flex; gap: 6px; flex-wrap: nowrap; overflow-x: auto; align-items: center;
+  min-width: 0; flex: 1; scrollbar-width: thin; padding-bottom: 2px; }
+.tab {
+  flex: none; min-height: var(--touch); padding: 0 18px; border-radius: 10px;
+  background: var(--panel-2); color: var(--text); border: 2px solid var(--m-linie);
+  font-size: 16px; font-weight: 500; white-space: nowrap;
+}
+/* Wo man ist, muss ein Blick sagen: der gewählte Reiter ist voll gefüllt. */
+.tab.active { background: var(--blue-solid); border-color: var(--blue-solid); color: #fff; font-weight: 700; }
+.tab-trenner { flex: none; margin-left: 10px; padding-left: 14px; border-left: 2px solid var(--m-linie);
+  font-size: 12px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+.tab.werkstatt:not(.active) { background: transparent; }
+.close { flex: none; min-height: var(--touch); padding: 0 18px; border-radius: 10px; gap: 8px;
+  background: var(--panel-2); color: var(--text); border: 2px solid var(--m-linie); font-size: 16px; font-weight: 600; }
+.sheet :focus-visible { outline: 3px solid var(--blau); outline-offset: 2px; }
+.tab-panel { padding: 14px; overflow-y: auto; flex: 1; }
+/* Lesbare Breite statt über den ganzen Bildschirm gezogener Zeilen. */
+.tab-panel > * { max-width: 1180px; }
+
+/* Karten: zusammengehörige Einstellungen als ein Block (Traktor | Gerät, Vorgewende | Wenden). */
+.karten { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 440px), 1fr));
+  gap: 14px; margin-bottom: 12px; align-items: start; }
+.karte { background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+  padding: 14px 16px; display: grid; gap: 12px; min-width: 0; }
+.karte > h3 { margin: 0; font-size: 18px; font-weight: 700; }
+.karte .row { margin-bottom: 0; }
+.auswahl { display: flex; gap: 8px; flex-wrap: wrap; }
+.auswahl select { flex: 1 1 220px; width: auto; padding: 10px 12px; }
+.formular { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+.formular > label, .formular fieldset label { font-size: 12px; color: var(--muted);
+  display: flex; flex-direction: column; gap: 5px; }
+.formular .ganz { grid-column: 1 / -1; }
+.formular fieldset { grid-column: 1 / -1; display: grid; gap: 10px;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px 12px; margin: 0; min-width: 0; }
+.formular legend { font-size: 13px; font-weight: 600; color: var(--text); padding: 0 6px; }
+.formular label.switch { flex-direction: row; align-items: center; font-size: 14px; color: var(--text); align-self: end; min-height: 44px; }
+.schalter { display: flex; gap: 10px 22px; flex-wrap: wrap; margin-bottom: 12px; }
+.kopfnote { margin-top: 0; }
+
+/* Erklärungen: da, wenn man sie sucht - nicht zwischen den Bedienelementen. */
+details.erklaerung { margin: 4px 0 14px; color: var(--muted); font-size: 13px; line-height: 1.55; }
+details.erklaerung > summary { cursor: pointer; color: var(--blue); font-size: 14px;
+  min-height: 44px; display: inline-flex; align-items: center; gap: 6px; list-style: none; }
+details.erklaerung > summary::-webkit-details-marker { display: none; }
+details.erklaerung > summary::before { content: "ⓘ"; font-size: 16px; }
+details.erklaerung[open] > summary { color: var(--text); }
+details.erklaerung p { margin: 0 0 8px; max-width: 75ch; }
+
+/* --- Menü: Bedienbarkeit in der Kabine --- */
+.sheet .note { max-width: 75ch; }
+/* Eingabefelder mit einem Rand, den man auch in der Sonne sieht. */
+.sheet input:not([type=checkbox]):not([type=range]), .sheet select {
+  border: 2px solid var(--m-feld-rand); min-height: var(--touch);
+}
+.sheet input.geaendert, .sheet select.geaendert {
+  border-color: var(--blue); background: color-mix(in srgb, var(--blue) 14%, var(--panel));
+}
+/* Beschriftungen lesbar statt 12 px grau. */
+.formular > label, .formular fieldset label, .grid label { font-size: 14px; color: var(--text); font-weight: 500; }
+.setting-field > label { font-size: 14px; color: var(--text); font-weight: 500; }
+.formular fieldset { border: 2px solid var(--m-linie); }
+.karte { border: 2px solid var(--m-linie); }
+.sheet button, .sheet .button { min-height: var(--touch); }
+.sheet .switch { min-height: var(--touch); }
+.sheet .switch input { width: 28px; height: 28px; accent-color: var(--blue-solid); }
+.sheet button.danger { color: var(--m-rot); border-color: var(--m-rot);
+  background: color-mix(in srgb, var(--m-rot) 10%, var(--panel)); }
+
+/* Listen: Zeilen dürfen umbrechen, Knöpfe sind für Handschuhe gemacht. */
+.sheet .item { flex-wrap: wrap; border: 2px solid var(--m-linie); }
+.sheet .item .main { flex: 1 1 220px; }
+.sheet .item .sub { font-size: 13px; }
+.sheet .item .actions { flex-wrap: wrap; gap: 12px; }
+.sheet .item .actions button, .sheet .item .actions a { min-height: var(--touch); padding: 0 16px; font-size: 15px; }
+.sheet .item .actions .abgesetzt { margin-left: 16px; }
+
+/* Status im Menü: lesbare Schrift statt Leuchtfarbe, ohne Glimmen. */
+.sheet .chip { font-size: 14px; padding: 6px 12px; gap: 8px; border: 2px solid currentColor; background: transparent; }
+.sheet .chip i { width: 10px; height: 10px; box-shadow: none !important; }
+.sheet .chip.good { color: var(--m-gruen); } .sheet .chip.good i { background: var(--m-gruen); }
+.sheet .chip.warn { color: var(--m-amber); } .sheet .chip.warn i { background: var(--m-amber); }
+.sheet .chip.bad { color: var(--m-rot); } .sheet .chip.bad i { background: var(--m-rot); }
+.setting-field .restart { color: var(--m-amber); font-weight: 600; }
+
+/* Aufklappbare Gruppen zeigen, dass sie aufklappen. */
+.setting-group > summary { list-style: none; }
+.setting-group > summary::-webkit-details-marker { display: none; }
+.setting-group > summary::before { content: "▸"; color: var(--blau); font-size: 18px;
+  transition: transform .15s ease-out; }
+.setting-group[open] > summary::before { transform: rotate(90deg); }
+@media (prefers-reduced-motion: reduce) { .setting-group > summary::before { transition: none; } }
+.setting-group { border: 2px solid var(--m-linie); }
+.werkzeug { margin-top: 18px; }
+.werkzeug > summary .note.inline { margin: 0 0 0 auto; font-size: 13px; font-weight: 400; max-width: none; }
+.werkzeug-inhalt { padding: 4px 14px 14px; }
+.tab-panel > .abschnitt:first-child { border-top: 0; margin-top: 0; padding-top: 0; }
+.abschnitt { border-top: 2px solid var(--m-linie); color: var(--text); }
+.row.ende { margin-top: 18px; }
+
+.row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 12px; }
+.row input[type=text], .row input:not([type]) { flex: 1; min-width: 200px; }
+input, select {
+  padding: 12px; border-radius: 8px; background: var(--panel-2);
+  border: 1px solid var(--line); color: var(--text); font-size: 16px; width: 100%;
+}
+button, .button {
+  padding: 12px 18px; border-radius: 8px; background: var(--panel-2);
+  border: 1px solid var(--line); color: var(--text); font-size: 15px;
+  cursor: pointer; text-decoration: none;
+  /* inline-flex statt inline-block: sonst klebt die Beschriftung oben,
+     sobald die Mindesthöhe den Knopf streckt. */
+  display: inline-flex; align-items: center; justify-content: center;
+  /* Bedient wird mit Arbeitshandschuhen auf einem rüttelnden Sitz. 44 px ist
+     das Maß, unter dem daneben gegriffen wird - auch in den Listen. */
+  min-height: 44px;
+}
+button.primary, .button.primary { background: var(--blue-solid); border-color: var(--blue-solid); color: #fff; }
+button.danger { background: color-mix(in srgb, var(--red) 16%, var(--panel)); border-color: var(--red); color: var(--red); }
+.note { color: var(--muted); font-size: 13px; line-height: 1.5; margin: 6px 0 14px; }
+
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 10px; }
+.grid label { font-size: 12px; color: var(--muted); display: flex; flex-direction: column; gap: 5px; }
+.switch { display: flex; flex-direction: row; align-items: center; gap: 8px; font-size: 14px; color: var(--text); }
+/* Zwischenüberschrift in einem Reiter, der zwei Dinge nebeneinander zeigt. */
+.abschnitt { margin: 22px 0 8px; font-size: 15px; color: var(--muted);
+             font-weight: 600; border-top: 1px solid var(--line); padding-top: 16px; }
+.switch input { width: 22px; height: 22px; }
+
+.list { display: flex; flex-direction: column; gap: 8px; }
+.item {
+  display: flex; align-items: center; gap: 12px; padding: 12px 14px;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+}
+/* Tag wie Nacht: der Grünstich kommt aus dem Grün des Themas, nicht aus einer
+   festen Nachtfarbe - sonst steht am Tag dunkle Schrift auf dunklem Grün. */
+.item.active { border-color: var(--green); background: color-mix(in srgb, var(--green) 12%, var(--panel)); }
+.item .main { flex: 1; min-width: 0; }
+.item .title { font-size: 16px; font-weight: 600; }
+.item .sub { font-size: 12px; color: var(--muted); margin-top: 2px; }
+.item .actions { display: flex; gap: 6px; }
+.item .actions button, .item .actions a { padding: 9px 12px; font-size: 13px; }
+.item .actions button.an { border-color: var(--green); color: var(--green); }
+/* Die Spuren eines Feldes: eingerückt unter dem Feld, gleiche Zeilen, kleiner. */
+.unterliste { display: flex; flex-direction: column; gap: 6px; margin: -2px 0 6px 22px;
+  padding-left: 12px; border-left: 2px solid var(--line); }
+.unterliste .item { padding: 8px 10px; }
+.unterliste .item .title { font-size: 14px; }
+.unterliste:empty { display: none; }
+.gruppe { display: flex; align-items: baseline; justify-content: space-between; gap: 10px;
+  margin: 18px 0 6px; font-size: 15px; color: var(--muted); }
+.gruppe b { color: var(--text); font-size: 16px; }
+.gruppe:first-child { margin-top: 0; }
+.row select { padding: 10px 12px; }
+label.button { display: inline-flex; align-items: center; cursor: pointer; }
+
+/* --- Einstellungen --- */
+.sticky-save {
+  position: sticky; top: 0; z-index: 2; margin: -14px -14px 12px; padding: 12px 14px;
+  background: var(--bg); border-bottom: 1px solid var(--line);
+}
+.setting-group {
+  border: 1px solid var(--line); border-radius: 10px; background: var(--panel);
+  margin-bottom: 12px; overflow: hidden;
+}
+.setting-group > summary {
+  padding: 14px; font-size: 16px; font-weight: 600; cursor: pointer;
+  min-height: 44px; display: flex; align-items: center; gap: 10px;
+}
+.setting-group > summary::marker { color: var(--muted); }
+.setting-group .group-note { color: var(--muted); font-size: 13px; line-height: 1.5;
+  padding: 0 14px 10px; }
+.setting-field { padding: 10px 14px; border-top: 1px solid var(--line); }
+.setting-field > label { display: block; font-size: 13px; color: var(--muted);
+  margin-bottom: 6px; }
+.setting-field .unit { color: var(--muted); font-size: 12px; margin-left: 6px; }
+.setting-field .help { color: var(--muted); font-size: 12px; line-height: 1.5; margin-top: 6px; }
+.setting-field .warn { color: var(--red); font-size: 12px; line-height: 1.5; margin-top: 6px; }
+.setting-field .restart { color: var(--amber); font-size: 12px; margin-top: 6px; }
+.setting-field.changed { background: color-mix(in srgb, var(--blue) 12%, var(--panel)); }
+.setting-field.changed > label { color: var(--blue); }
+.ntrip-tool { padding: 12px 14px; border-top: 1px solid var(--line); display: grid; gap: 10px; }
+.ntrip-buttons { display: flex; flex-wrap: wrap; gap: 10px; }
+.ntrip-buttons button { flex: 1 1 180px; min-height: 48px; }
+.ntrip-list { width: 100%; min-height: 48px; }
+.ntrip-result { font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
+.ntrip-result.good { color: var(--leucht); }
+.ntrip-result.bad { color: var(--red); }
+
+/* --- Inbetriebnahme --- */
+.progress {
+  flex: 1; min-width: 160px; height: 10px; border-radius: 5px;
+  background: var(--panel-2); border: 1px solid var(--line); overflow: hidden;
+}
+.progress-bar { height: 100%; width: 0; background: var(--green); transition: width .3s; }
+
+.step { display: block; }
+.step .head { display: flex; align-items: center; gap: 12px; }
+.step .nr {
+  flex: none; width: 30px; height: 30px; border-radius: 50%;
+  background: var(--panel-2); border: 1px solid var(--line);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 14px; font-weight: 700; color: var(--muted);
+}
+.step.done .nr { background: color-mix(in srgb, var(--green) 15%, var(--panel)); border-color: var(--green); color: var(--green-bright); }
+.step.now { border-color: var(--blue); }
+.step.now .nr { background: color-mix(in srgb, var(--blue) 15%, var(--panel)); border-color: var(--blue); color: var(--blue); }
+.step .why { font-size: 13px; color: var(--muted); line-height: 1.5; margin: 8px 0 0 42px; }
+.step .check { font-size: 13px; margin: 8px 0 0 42px; }
+.step .check.good { color: var(--green-bright); }
+.step .check.bad { color: var(--red); }
+.step .check.unknown { color: var(--muted); }
+.step .foot { display: flex; align-items: center; gap: 10px; margin: 10px 0 0 42px; }
+.step .foot .quittung { font-size: 13px; color: var(--text); flex: 1; }
+
+.toast {
+  /* Oben unter dem Balken, nicht unten: dort liegen die Zahlen und der
+     Vorgewende-Kasten, und eine Meldung darüber verdeckte genau das. */
+  position: fixed; left: 50%; top: calc(13 * var(--u)); transform: translateX(-50%); max-width: 70vw;
+  background: var(--panel-2); border: 2px solid var(--blue);
+  padding: 14px 20px; border-radius: 12px; font-size: max(16px, calc(1.6 * var(--u))); font-weight: 600; z-index: 30;
+  max-width: 80vw; box-shadow: 0 8px 24px #0008;
+}
+.toast.error { border-color: var(--red); color: var(--red); }
+
+/* Feld erkannt: ein großer Knopf, den man mit dem Handschuh trifft. Er blockiert
+   nichts - wer ihn ignoriert, fährt einfach weiter. */
+.vorschlag {
+  position: fixed; left: 50%; top: calc(22 * var(--u)); transform: translateX(-50%);
+  min-height: 56px; padding: 12px 26px; border-radius: 10px; z-index: 29;
+  background: var(--blue); color: #fff; border: 0; font-size: 18px; font-weight: 600;
+  box-shadow: 0 8px 24px #0008;
+}
+.vorschlag[hidden] { display: none; }
+
+
+/* Saatplan */
+.formular label.breit { grid-column: 1 / -1; }
+.saat-konflikt { border-left: 4px solid var(--amber); background: color-mix(in srgb, var(--amber) 12%, transparent);
+  border-radius: 8px; padding: 10px 12px; margin: 10px 0; }
+.saat-konflikt p { margin: 0 0 6px; }
+.saat-konflikt ul { margin: 0; padding-left: 20px; }
+.saat-ok { border-left: 4px solid var(--leucht); padding: 8px 12px; margin: 10px 0; }
+.saat-fuell { border-left: 4px solid var(--blau); background: color-mix(in srgb, var(--blau) 10%, transparent);
+  border-radius: 8px; padding: 10px 12px; margin: 10px 0; }
+.saat-fuell p { margin: 0 0 6px; }
+.saat-fuell ul { margin: 0; padding-left: 20px; }
+
+#abstInfo, #einmessInfo, #einrichtenInfo { white-space: pre-line; }
+.einrichten { list-style: none; padding: 0; margin: 10px 0; display: grid; gap: 8px; }
+.einrichten li { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; }
+.einrichten li.fertig { border-color: var(--leucht); }
+.einrichten li.gesperrt { opacity: .55; }
+.einrichten .kopf { display: flex; gap: 10px; align-items: center; font-weight: 700; }
+.einrichten .haken { width: 1.6em; text-align: center; }
+.einrichten .schritt-text { margin: 6px 0; font-size: .95em; }
+.einrichten .tasten { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
