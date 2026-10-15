@@ -1,6 +1,7 @@
 """Lenkung einrichten: Drehrichtung aus Beobachtung und Drehgeber, Stand der Schritte."""
 
 import asyncio
+import math
 import unittest
 from unittest import mock
 
@@ -55,12 +56,13 @@ class StatusTest(unittest.TestCase):
         self.assertFalse(nach_id["mindestleistung"]["moeglich"])
         self.assertTrue(nach_id["notaus"]["moeglich"])
         self.assertEqual([s["id"] for s in schritte],
-                         ["verbindung", "richtung", "mindestleistung", "zaehlwerte", "notaus",
-                          "freigabe", "probefahrt"])
+                         ["verbindung", "richtung", "mindestleistung", "zaehlwerte", "feinabstimmung",
+                          "notaus", "freigabe", "probefahrt"])
 
     def test_all_done(self):
         erledigt = {"richtung": {"invert_motor": False}, "mindestleistung": {"min_duty": 0.25},
-                    "zaehlwerte": {"zaehlwerte_je_grad": 210.0}}
+                    "zaehlwerte": {"zaehlwerte_je_grad": 210.0},
+                    "feinabstimmung": {"gain_p": 0.1, "gain_i": 0.0, "gain_d": 0.02}}
         schritte = le.status(erledigt, {"typ": "phidget", "bereit": True}, True, True,
                              {"befund": {"art": "gut"}})
         self.assertTrue(all(s["fertig"] for s in schritte))
@@ -145,7 +147,8 @@ class EinrichtenApiTest(unittest.TestCase):
             config.gnss.source = "simulator"
             with TestClient(create_app(config)) as client:
                 stand = client.get("/api/lenkung/einrichten").json()["data"]
-                self.assertEqual(len(stand["schritte"]), 7)
+                self.assertEqual(len(stand["schritte"]), 8)
+                self.assertEqual(client.post("/api/lenkung/einrichten/feinabstimmung").status_code, 400)
                 self.assertFalse(stand["schritte"][0]["fertig"])          # Simulator ist kein Phidget
                 self.assertIn("encoder_invert", stand["einstellungen"])
                 # Ohne Phidget-Motor kein Richtungstest.
@@ -164,3 +167,117 @@ class EinrichtenApiTest(unittest.TestCase):
                 client.post("/api/lenkung/einrichten/neu")
                 stand = client.get("/api/lenkung/einrichten").json()["data"]
                 self.assertFalse(next(s for s in stand["schritte"] if s["id"] == "zaehlwerte")["fertig"])
+
+
+def sprungreihe(fn, sekunden=2.5, dt=0.02):
+    return [(i * dt, fn(i * dt)) for i in range(int(sekunden / dt))]
+
+
+class SprungTest(unittest.TestCase):
+    def test_a_clean_step(self):
+        reihe = sprungreihe(lambda t: 6.0 * min(1.0, t / 0.4))
+        b = le.bewerte_sprung(reihe, 0.0, 6.0)
+        self.assertAlmostEqual(b["anstieg_s"], 0.36, delta=0.03)
+        self.assertEqual(b["ueberschwingen"], 0.0)
+        self.assertTrue(b["steht"])
+        self.assertFalse(b["schwingt"])
+        self.assertTrue(le.feinabstimmung_schritt([b, b], 0.09, 0.0, 0.0)["gut"])
+
+    def test_overshoot_lowers_p_and_adds_damping(self):
+        reihe = sprungreihe(lambda t: 6.0 * (1 - math.exp(-t / 0.6) * math.cos(t * 6)))
+        b = le.bewerte_sprung(reihe, 0.0, 6.0)
+        self.assertGreater(b["ueberschwingen"], le.FEIN_UEBERSCHWINGEN_MAX)
+        s = le.feinabstimmung_schritt([b], 0.4, 0.0, 0.0)
+        self.assertAlmostEqual(s["p"], 0.3)
+        self.assertGreater(s["d"], 0.0)
+        self.assertFalse(s["fertig"])
+
+    def test_too_slow_raises_p_and_still_moving_counts_as_slow(self):
+        reihe = sprungreihe(lambda t: 6.0 * t / 3.0)                  # erreicht das Ziel nicht
+        b = le.bewerte_sprung(reihe, 0.0, 6.0)
+        self.assertIsNone(b["anstieg_s"])
+        self.assertFalse(b["steht"])
+        self.assertAlmostEqual(le.feinabstimmung_schritt([b], 0.1, 0.0, 0.0)["p"], 0.135)
+
+    def test_standing_short_of_the_target_adds_integral(self):
+        reihe = sprungreihe(lambda t: 5.0 * min(1.0, t / 0.4))         # steht bei 5 von 6 Grad
+        b = le.bewerte_sprung(reihe, 0.0, 6.0)
+        self.assertTrue(b["steht"])
+        self.assertAlmostEqual(b["rest_deg"], 1.0, delta=0.01)
+        s = le.feinabstimmung_schritt([b], 0.1, 0.0, 0.0)
+        self.assertAlmostEqual(s["i"], 0.03)
+
+    def test_no_movement_stops_with_a_hint(self):
+        b = le.bewerte_sprung(sprungreihe(lambda t: 0.0), 0.0, 6.0)
+        s = le.feinabstimmung_schritt([b], 0.1, 0.0, 0.0)
+        self.assertTrue(s["fertig"])
+        self.assertFalse(s["gut"])
+        self.assertIn("folgen", s["text"])
+
+    def test_the_gains_stay_within_their_limits(self):
+        langsam = le.bewerte_sprung(sprungreihe(lambda t: 6.0 * t / 3.0), 0.0, 6.0)
+        s = le.feinabstimmung_schritt([langsam], le.FEIN_P[1], 0.0, 0.0)
+        self.assertTrue(s["fertig"])
+        self.assertIn("größtem P", s["text"])
+
+
+class TraegeDLL(AttrappeDLL):
+    """Motor mit Losbrechleistung und Trägheit: die Geschwindigkeit folgt der Leistung verzögert."""
+
+    def __init__(self, losbrech=15.0, traegheit=0.03, faktor=1.0):
+        super().__init__()
+        self.lb, self.tr, self.fk = losbrech, traegheit, faktor
+        self.v, self.rest = 0.0, 0.0
+
+    def CPhidgetMotorControl_setVelocity(self, handle, kanal, wert):
+        self.geschwindigkeit[kanal] = wert.value
+        w = wert.value
+        soll = 0.0 if abs(w) < self.lb else math.copysign(abs(w) - self.lb, w) * self.fk
+        self.v += (soll - self.v) * self.tr
+        self.rest += self.v
+        schritt = int(self.rest)
+        self.rest -= schritt
+        self.drehgeber += schritt
+        return 0
+
+
+class FeinabstimmungTest(unittest.TestCase):
+    """Der Motorregler am nachgebildeten trägen Motor: von selbst zur Ruhe."""
+
+    def abstimmen(self, dll, **cfg):
+        werte = dict(bibliothek="phidget21", control="velocity", feedback="encoder",
+                     encoder_counts_per_deg=40.0, min_duty=0.2, max_duty=0.55, dead_band_deg=0.3)
+        werte.update(cfg)
+        ausgang = actuators.PhidgetOutput(PhidgetConfig(**werte))
+        with mock.patch.object(phidget21, "_DLL", dll), mock.patch.object(phidget21, "_DLL_FEHLER", ""), \
+                mock.patch.object(actuators, "FEIN_HALTEN_S", 1.5):
+            async def ablauf():
+                await ausgang.start()
+                ausgang.running = True
+                laeuft = asyncio.create_task(ausgang._control_loop())
+                try:
+                    return await ausgang.feinabstimmen()
+                finally:
+                    ausgang.running = False
+                    await laeuft
+                    await ausgang.stop()
+            ergebnis = asyncio.run(ablauf())
+        phidget21._OFFEN.clear()
+        return ausgang, ergebnis
+
+    def test_an_overshooting_controller_is_damped(self):
+        dll = TraegeDLL()
+        ausgang, e = self.abstimmen(dll, gain_p=0.6, gain_i=0.0, gain_d=0.0)
+        self.assertTrue(e["gut"], e["text"])
+        self.assertLess(e["ende"]["gain_p"], 0.6)
+        self.assertGreater(e["ende"]["gain_d"], 0.0)
+        self.assertGreater(e["verlauf"][0]["hin"]["ueberschwingen"], le.FEIN_UEBERSCHWINGEN_MAX)
+        self.assertLessEqual(e["verlauf"][-1]["hin"]["ueberschwingen"], le.FEIN_UEBERSCHWINGEN_MAX)
+        self.assertEqual(dll.geschwindigkeit[0], 0.0)
+
+    def test_a_motor_that_does_not_move_keeps_the_start_values(self):
+        dll = TraegeDLL(losbrech=200.0)                             # läuft nie an
+        ausgang, e = self.abstimmen(dll, gain_p=0.09, gain_i=0.01, gain_d=0.002)
+        self.assertFalse(e["gut"])
+        self.assertEqual(e["ende"], {"gain_p": 0.09, "gain_i": 0.01, "gain_d": 0.002})
+        self.assertEqual(len(e["verlauf"]), 1)

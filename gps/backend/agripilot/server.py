@@ -1139,6 +1139,24 @@ def create_app(config=None) -> FastAPI:
         application.richtung_bewegt = None
         return ok(ergebnis)
 
+    @api.post("/api/lenkung/einrichten/feinabstimmung")
+    async def feinabstimmung():
+        """P/I/D des Lenkmotors am Stand einstellen (Sprung 6 Grad hin und zurück)."""
+        output = application.steering.output
+        if not hasattr(output, "feinabstimmen"):
+            raise HTTPException(400, "Kein Phidget-Lenkmotor verbunden - erst Schritt 1")
+        if application.steering.armed:
+            raise HTTPException(400, "Die Lenkung ist scharf - erst ausschalten")
+        try:
+            ergebnis = await output.feinabstimmen()
+        except (RuntimeError, ValueError) as exc:
+            raise HTTPException(400, str(exc)) from exc
+        if ergebnis["gut"]:
+            config.save()                   # die neuen Werte stehen schon in config.phidget
+            _einrichtung_merken("feinabstimmung", ergebnis["ende"])
+            engine.note(f"Lenkmotor fein abgestimmt: {ergebnis['ende']}")
+        return ok(ergebnis)
+
     @api.post("/api/lenkung/einrichten/erledigt")
     async def einrichtung_erledigt(payload: dict = Body(...)):
         schritt = str(payload.get("schritt", ""))

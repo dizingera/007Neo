@@ -422,7 +422,7 @@ Radeinschlag (**Drehgeber: Zählwerte je Grad**) einmal ausmessen, nicht schätz
 
 ## Lenkung einrichten (Menü → Einbau)
 
-Oben im Reiter Einbau führt **„Lenkung einrichten“** in sieben Schritten von der
+Oben im Reiter Einbau führt **„Lenkung einrichten“** in acht Schritten von der
 Verbindung bis zur Probefahrt. Jeder Schritt hat seinen Knopf und bekommt einen
 Haken, wenn er erledigt ist; spätere bleiben gesperrt, bis die früheren fertig
 sind (nur der Not-Aus-Schritt steht frei). Am Stand arbeiten: Lenkung aus, Räder
@@ -439,10 +439,18 @@ in der Mitte, Not-Aus griffbereit.
 3. **Mindestleistung einmessen** – wie „Motor einmessen“ unten (Losbrechleistung).
 4. **Zählwerte je Grad messen** – Anschläge von Hand anfahren; den
    Gesamteinschlag der Räder am Boden darüber eintragen.
-5. **Not-Aus und Einbau** – unten in der Einbau-Liste „Lenkmotor anbauen“ abhaken.
-6. **Lenkung freigeben** – erst jetzt darf die Automatik lenken.
-7. **Probefahrt** – schaltet den Lenk-Assistenten auf „Nur Vorschläge“; auf einer
-   AB-Spur 5–8 km/h geradeaus, Lenkung scharf. Erledigt, sobald er „gut“ meldet.
+5. **Feinabstimmung des Lenkmotors** – am Stand, Traktormotor läuft (Servolenkung),
+   Räder in der Mitte: der Motorregler fährt mehrmals 6° nach rechts und zurück und
+   bewertet jeden Sprung (Zeit bis 90 %, Überschwingen, Schwingen, Rest). Danach
+   stellt er P, I und D nach – überschwingt er: weniger P, mehr D; zu langsam: mehr P;
+   bleibt er vor dem Ziel stehen: etwas I. Höchstens acht Durchgänge, feste
+   Grenzen; gelingt es nicht, bleiben die alten Werte und der Grund steht da
+   (z. B. „auch mit größtem P zu langsam – Größte Leistung erhöhen“).
+6. **Not-Aus und Einbau** – unten in der Einbau-Liste „Lenkmotor anbauen“ abhaken.
+7. **Lenkung freigeben** – erst jetzt darf die Automatik lenken.
+8. **Probefahrt** – die Feinabstimmung der Spurregelung: „Nur Vorschläge“ oder
+   „Stellt selbst nach“ schaltet den Lenk-Assistenten ein; auf einer AB-Spur
+   5–8 km/h geradeaus, Lenkung scharf. Erledigt, sobald er „gut“ meldet.
 
 „Von vorn beginnen“ löscht die Haken (nicht die Einstellungen).
 

@@ -43,6 +43,9 @@ _VERSION = 1
 
 MOTORTEST_MAX = 0.35            # höchstens so viel der vollen Leistung im Motortest
 MOTORTEST_DAUER_MAX_S = 1.0     # und höchstens so lange am Stück
+FEIN_SPRUNG_DEG = 6.0           # so weit fährt die Feinabstimmung aus der Mitte
+FEIN_HALTEN_S = 2.5             # so lange hat der Regler je Sprung Zeit
+FEIN_DURCHGAENGE = 8            # höchstens so viele Durchgänge hin und zurück
 EINMESS_IMPULS_S = 0.35         # so lang ist ein Impuls beim Einmessen
 EINMESS_REGELTAKT_S = 0.12      # Zugabe, damit der Regelkreis den Impuls sicher durchläuft
 EINMESS_AUSROLLEN_S = 0.25      # nach dem Impuls ausrollen lassen, dann ablesen
@@ -276,6 +279,12 @@ class PhidgetOutput(SteerOutput):
         self._test_bis = 0.0
         self._anschlag: Optional[list] = None      # [kleinster, größter] Zählstand beim Ausmessen
         self._test_strom_max = 0.0
+        # Regeltest (Feinabstimmung am Stand): der Regler fährt einen Zielwinkel an,
+        # ohne dass die Lenkung scharf ist, und schreibt mit, wie der Winkel folgt.
+        self._regeltest_ziel: Optional[float] = None
+        self._regeltest_bis = 0.0
+        self._regeltest_start = 0.0
+        self._regeltest_spur: list = []
 
         self._target_angle = 0.0
         self._engaged = False
@@ -595,13 +604,21 @@ class PhidgetOutput(SteerOutput):
                 self._test_bis = 0.0
             return
         measured = self.measured_angle()
-        if not self._engaged:
+        jetzt = time.time()
+        regeltest = (self._regeltest_ziel is not None and jetzt < self._regeltest_bis
+                     and not self._engaged)
+        if regeltest:
+            self._regeltest_spur.append((jetzt - self._regeltest_start, measured))
+        if not self._engaged and not regeltest:
             self._safe_stop()
             self.feedback = OutputFeedback(wheel_angle_deg=measured, duty=0.0,
                                            received_at=time.time())
             return
 
-        error = self._error(measured)
+        if regeltest:
+            error = 0.0 if measured is None else self._regeltest_ziel - measured
+        else:
+            error = self._error(measured)
         self._integral = _clamp(self._integral + error * dt,
                                 -self.config.integral_limit, self.config.integral_limit)
         derivative = (error - self._last_error) / dt if dt > 0 else 0.0
@@ -630,10 +647,71 @@ class PhidgetOutput(SteerOutput):
 
         self.feedback = OutputFeedback(
             wheel_angle_deg=measured,
-            driver_override=self._detect_override(measured, duty, dt),
+            driver_override=False if regeltest else self._detect_override(measured, duty, dt),
             duty=duty,
             received_at=time.time(),
         )
+
+    async def sprung(self, ziel_deg: float, halten_s: float) -> list:
+        """Den Regler einen Radwinkel anfahren lassen und mitschreiben."""
+        self._integral = 0.0
+        self._last_error = 0.0
+        self._regeltest_spur = []
+        self._regeltest_start = time.time()
+        self._regeltest_ziel = float(ziel_deg)
+        self._regeltest_bis = self._regeltest_start + halten_s
+        try:
+            await asyncio.sleep(halten_s + 0.05)
+        finally:
+            self._regeltest_ziel = None
+            self._regeltest_bis = 0.0
+            self._safe_stop()
+        return list(self._regeltest_spur)
+
+    async def feinabstimmen(self, sprung_deg: float = FEIN_SPRUNG_DEG,
+                            durchgaenge: int = FEIN_DURCHGAENGE) -> dict:
+        """P/I/D des Motorreglers am Stand einstellen (siehe lenkung_einrichten).
+
+        Die aktuelle Stellung gilt dabei als Mitte; gefahren wird ``sprung_deg``
+        nach rechts und zurück. Gelingt es nicht, gehen die Ausgangswerte zurück.
+        """
+        from . import lenkung_einrichten as le
+        if not self.ready or self.motor is None:
+            raise RuntimeError(f"Lenkmotor nicht bereit: {self.status}")
+        if self._engaged:
+            raise RuntimeError("Die Lenkung ist scharf - erst ausschalten")
+        if self.mode not in ("encoder", "was") or self.measured_angle() is None:
+            raise RuntimeError("Die Feinabstimmung braucht einen Drehgeber oder Radwinkelsensor "
+                               "als Rückmeldung (Einstellungen → Lenkmotor → Rückmeldung)")
+        cfg = self.config
+        start = {"gain_p": cfg.gain_p, "gain_i": cfg.gain_i, "gain_d": cfg.gain_d}
+        if self.encoder is not None:
+            self._encoder_centre = self.encoder.getPosition()     # hier ist die Mitte
+        mitte = self.measured_angle() or 0.0
+        verlauf = []
+        ergebnis = {"gut": False, "text": ""}
+        try:
+            for _ in range(int(durchgaenge)):
+                hin = await self.sprung(mitte + sprung_deg, FEIN_HALTEN_S)
+                zurueck = await self.sprung(mitte, FEIN_HALTEN_S)
+                befunde = [le.bewerte_sprung(hin, mitte, mitte + sprung_deg),
+                           le.bewerte_sprung(zurueck, mitte + sprung_deg, mitte)]
+                ergebnis = le.feinabstimmung_schritt(befunde, cfg.gain_p, cfg.gain_i, cfg.gain_d)
+                verlauf.append({"p": cfg.gain_p, "i": cfg.gain_i, "d": cfg.gain_d,
+                                "hin": befunde[0], "zurueck": befunde[1], "text": ergebnis["text"]})
+                cfg.gain_p, cfg.gain_i, cfg.gain_d = ergebnis["p"], ergebnis["i"], ergebnis["d"]
+                if ergebnis["fertig"]:
+                    break
+            else:
+                ergebnis = {**ergebnis, "gut": False,
+                            "text": f"Nach {durchgaenge} Durchgängen nicht sauber - Ausgangswerte zurück."}
+        finally:
+            self._safe_stop()
+        if not ergebnis.get("gut"):
+            cfg.gain_p, cfg.gain_i, cfg.gain_d = start["gain_p"], start["gain_i"], start["gain_d"]
+        return {"gut": bool(ergebnis.get("gut")), "text": ergebnis["text"], "start": start,
+                "ende": {"gain_p": cfg.gain_p, "gain_i": cfg.gain_i, "gain_d": cfg.gain_d},
+                "verlauf": verlauf}
 
     def _error(self, measured: Optional[float]) -> float:
         """Regelabweichung in der Größe, die tatsächlich gemessen wird."""
