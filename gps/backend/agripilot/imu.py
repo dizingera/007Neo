@@ -291,7 +291,7 @@ class SimulatedImu(ImuSource):
                     2 * math.pi * self.simulator.east / self.wavelength_m
                 )
                 yaw = self.simulator.heading
-                steer = math.radians(self.simulator.steer_deg)
+                steer = math.radians(getattr(self.simulator, "rad_deg", self.simulator.steer_deg))
                 if abs(steer) > 1e-6:
                     yaw_rate = math.degrees(
                         self.simulator.speed_ms / self.simulator.wheelbase * math.tan(steer)

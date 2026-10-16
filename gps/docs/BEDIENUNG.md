@@ -454,6 +454,34 @@ in der Mitte, Not-Aus griffbereit.
 
 „Von vorn beginnen“ löscht die Haken (nicht die Einstellungen).
 
+## Lenkung live (Menü → Lenkung)
+
+Oben auf der Seite Lenkung zeigt **Lenkung live**, was die Lenkung gerade tut:
+
+* **Oben:** die Abweichung von der Spur in cm (+ = rechts), grün hinterlegt ±2,5 cm.
+* **Unten:** der verlangte Einschlag (blau), was das Rad wirklich tut (orange, vom
+  Drehgeber) und die Motorleistung (grau).
+* **Grau hinterlegt:** Lenkung aus. **Grüne Striche:** hier hat der Lenk-Assistent
+  Lenkschärfe oder Latenz verstellt.
+
+Darunter ein **Befund** über die letzten 30 s Fahrt mit Lenkung, mit dem, was man
+dreht:
+
+| Befund | Bedeutung | Abhilfe |
+|---|---|---|
+| Gut | Abweichung klein | nichts |
+| Pendelt | schwingt mit Periode und Weite um die Spur | Lenkschärfe senken (bei „Vorausschauend“ Trägheit erhöhen) |
+| Bleibt daneben | Dauerabweichung zu einer Seite | Antenne seitlich nachmessen, Spur verschieben |
+| Träge | kommt nur langsam zurück | Lenkschärfe erhöhen |
+| Rad folgt später | Rad hinkt dem Befehl hinterher | Latenz bzw. Trägheit um diesen Wert erhöhen |
+| Volle Motorleistung | Motor kommt nicht hinterher | Motorregler / Mindestleistung (Lenkung einrichten) |
+
+**Auf der Karte einblenden** legt dieselben Kurven klein neben die Zahlen unten
+links – so sieht man während der Fahrt, was eine Änderung bewirkt. Mit ✕ wieder weg.
+
+Im **Simulator** folgt das Rad jetzt wie am Traktor träge (0,3 s) und mit höchstens
+30 °/s – so lässt sich das Abstimmen am Schreibtisch ausprobieren.
+
 ## Lenk-Assistent (Menü → Lenkung)
 
 Der Assistent merkt, wie die Lenkung die Spur hält, und stellt die Spurregelung in

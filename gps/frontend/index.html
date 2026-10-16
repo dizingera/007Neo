@@ -61,6 +61,12 @@
   <!-- Unten links nur die Zahlen, die man beim Fahren braucht - flach, damit
        die Mitte frei bleibt: dort stehen Traktor, Gerät und Feld. -->
   <div class="ruf" id="ruf"></div>
+  <!-- Lenkung live auf der Karte: dieselben Kurven wie im Menü, klein, während der Fahrt. -->
+  <div class="glas lenklive-fenster" id="lenkLiveFenster" hidden>
+    <div class="llf-kopf"><b>Lenkung live</b><span id="lenkLiveKurz"></span>
+      <button id="lenkLiveZu" aria-label="Lenkung live ausblenden">✕</button></div>
+    <canvas id="lenkLiveKlein" aria-label="Verlauf der Abweichung und des Einschlags"></canvas>
+  </div>
   <div class="unten">
     <div class="glas cluster">
       <div class="kmh"><b id="speed">--</b><span>km/h</span></div>
@@ -472,6 +478,57 @@
   <section class="tab-panel" data-panel="lenkung" hidden>
     <!-- Alles zur Lenkung an einer Stelle: einrichten, prüfen, abstimmen, einstellen.
          Die Werte des Traktors (Lenkschärfe, Regelart) stehen bei Traktor & Gerät. -->
+    <section class="karte" id="lenkLive">
+      <h3>Lenkung live</h3>
+      <div class="row">
+        <label>Zeitraum
+          <select id="lenkLiveZeit">
+            <option value="30">30 s</option>
+            <option value="60" selected>1 min</option>
+            <option value="180">3 min</option>
+          </select>
+        </label>
+        <button id="btnLenkLiveKarte">Auf der Karte einblenden</button>
+      </div>
+      <canvas id="lenkLiveGross" class="lenklive-gross" aria-label="Verlauf der Abweichung und des Einschlags"></canvas>
+      <p class="lenklive-befund" id="lenkLiveBefund" role="status" aria-atomic="true"></p>
+      <ul class="lenklive-tipps" id="lenkLiveTipps"></ul>
+      <p class="note" id="lenkLiveZahlen"></p>
+      <p class="note">Oben die Abweichung von der Spur (grün: ±2,5 cm), unten der verlangte Einschlag,
+        was das Rad wirklich tut und die Motorleistung. Grau hinterlegt: Lenkung aus. Grüne Striche:
+        hier hat der Lenk-Assistent etwas verstellt. Bewertet werden die letzten 30 s Fahrt mit Lenkung.</p>
+    </section>
+    <section class="karte" id="lenkAssistent" hidden>
+      <h3>Lenk-Assistent</h3>
+      <p class="note">Merkt, wie die Lenkung die Spur hält, und stellt Verstärkung und Vorhalt in
+        kleinen Schritten nach. Nur bei ruhiger Geradeausfahrt und nur innerhalb fester Grenzen;
+        „zurück“ stellt die Werte vom Einschalten wieder her.</p>
+      <div class="row">
+        <label>Modus
+          <select id="abstModus">
+            <option value="aus">Aus</option>
+            <option value="beobachten">Nur Vorschläge</option>
+            <option value="automatisch">Stellt selbst nach</option>
+          </select>
+        </label>
+        <button id="btnAbstZurueck">Auf die Ausgangswerte zurück</button>
+      </div>
+      <p class="note" id="abstInfo" role="status" aria-atomic="true"></p>
+      <div id="einmessBereich">
+        <div class="row">
+          <button id="btnEinmessen">Motor einmessen</button>
+          <button id="btnAnschlag">Anschläge messen</button>
+          <label>Gesamteinschlag der Räder (°)
+            <input type="number" id="anschlagWinkel" value="70" min="10" max="120" step="1">
+          </label>
+        </div>
+        <p class="note" id="einmessInfo" role="status" aria-atomic="true">Am Stand, Lenkung aus, Räder
+          in der Mitte, Not-Aus griffbereit. „Motor einmessen“ dreht kurz abwechselnd links und rechts
+          und findet die Mindestleistung. „Anschläge messen“: starten, von Hand von Anschlag zu
+          Anschlag lenken, dann beenden - daraus folgen die Zählwerte je Grad.</p>
+        <div class="row"><button id="btnEinmessUebernehmen" class="primary" hidden>Ergebnis übernehmen</button></div>
+      </div>
+    </section>
     <section class="karte" id="lenkEinrichten">
       <h3>Lenkung einrichten</h3>
       <p class="note">Schritt für Schritt von der Verbindung bis zur Probefahrt. Am Stand: Lenkung
@@ -507,37 +564,6 @@
       <span class="note" id="motorTestInfo" role="status" aria-atomic="true">Kurz und schwach, nur
         mit ausgeschalteter Lenkung. Fahrzeug steht, Not-Aus griffbereit.</span>
     </div>
-    <section class="karte" id="lenkAssistent" hidden>
-      <h3>Lenk-Assistent</h3>
-      <p class="note">Merkt, wie die Lenkung die Spur hält, und stellt Verstärkung und Vorhalt in
-        kleinen Schritten nach. Nur bei ruhiger Geradeausfahrt und nur innerhalb fester Grenzen;
-        „zurück“ stellt die Werte vom Einschalten wieder her.</p>
-      <div class="row">
-        <label>Modus
-          <select id="abstModus">
-            <option value="aus">Aus</option>
-            <option value="beobachten">Nur Vorschläge</option>
-            <option value="automatisch">Stellt selbst nach</option>
-          </select>
-        </label>
-        <button id="btnAbstZurueck">Auf die Ausgangswerte zurück</button>
-      </div>
-      <p class="note" id="abstInfo" role="status" aria-atomic="true"></p>
-      <div id="einmessBereich">
-        <div class="row">
-          <button id="btnEinmessen">Motor einmessen</button>
-          <button id="btnAnschlag">Anschläge messen</button>
-          <label>Gesamteinschlag der Räder (°)
-            <input type="number" id="anschlagWinkel" value="70" min="10" max="120" step="1">
-          </label>
-        </div>
-        <p class="note" id="einmessInfo" role="status" aria-atomic="true">Am Stand, Lenkung aus, Räder
-          in der Mitte, Not-Aus griffbereit. „Motor einmessen“ dreht kurz abwechselnd links und rechts
-          und findet die Mindestleistung. „Anschläge messen“: starten, von Hand von Anschlag zu
-          Anschlag lenken, dann beenden - daraus folgen die Zählwerte je Grad.</p>
-        <div class="row"><button id="btnEinmessUebernehmen" class="primary" hidden>Ergebnis übernehmen</button></div>
-      </div>
-    </section>
     <div class="row" id="steerRow" hidden>
       <button id="btnCentre">Lenkung: Mitte lernen</button>
       <span class="note" id="steerInfo"></span>
@@ -690,6 +716,7 @@
 
 <script src="alerts.js"></script>
 <script src="flaeche.js"></script>
+<script src="lenklive.js"></script>
 <script src="app.js"></script>
 <script>
   /* Nur fuer die Kachel auf dem Android-Tablet. Browser lassen Service Worker

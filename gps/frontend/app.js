@@ -102,6 +102,7 @@ function connect() {
 
 function onState(data) {
   const previous = state.live;
+  lenkAufzeichnung.aufnehmen(data);
   glaettungNachfuehren(previous, data);
   state.live = data;
   // Erst den Streifen bis zur neuen Lage malen, dann die Zellen dieser Fahrt
@@ -2093,6 +2094,64 @@ el('btnGeraeteUebernehmen').onclick = async () => {
     : 'Übernommen – Empfänger und Sensor werden neu verbunden');
   el('geraeteRow').hidden = true;
 };
+
+/* Lenkung live: Kurven, Kennzahlen und Befund - im Menü groß, auf der Karte klein. */
+const lenkAufzeichnung = new LenkLive.Aufzeichnung();
+const LENKLIVE_KARTE = 'agripilot.lenkLiveKarte';
+
+function lenkLiveKarteAn() {
+  try { return localStorage.getItem(LENKLIVE_KARTE) === '1'; } catch (error) { return false; }
+}
+
+function lenkLiveKarteSetzen(an) {
+  try { localStorage.setItem(LENKLIVE_KARTE, an ? '1' : '0'); } catch (error) { /* privat: nur diese Sitzung */ }
+  el('lenkLiveFenster').hidden = !an;
+  el('btnLenkLiveKarte').textContent = an ? 'Auf der Karte ausblenden' : 'Auf der Karte einblenden';
+}
+
+function lenkLiveZahlen(k) {
+  if (!k.genug) return '';
+  const z = (x, n = 1) => Number(x).toLocaleString('de-DE', { maximumFractionDigits: n, minimumFractionDigits: n });
+  const teile = [`effektiv ${z(k.effektiv)} cm`, `im Mittel ${k.mittel >= 0 ? '+' : ''}${z(k.mittel)} cm`,
+    `höchstens ${z(k.max, 0)} cm`, `${k.durchgaenge} Seitenwechsel`];
+  if (k.nachlauf != null) teile.push(`Rad folgt ${z(k.nachlauf)} s später`);
+  if (k.vollAnteil) teile.push(`volle Motorleistung ${z(k.vollAnteil * 100, 0)} %`);
+  return `Letzte ${z(k.dauer, 0)} s: ` + teile.join(' · ');
+}
+
+function renderLenkLive() {
+  const regelart = state.live && state.live.profile ? state.live.profile.regelart : 'stanley';
+  const schritte = state.live && state.live.abstimmung ? state.live.abstimmung.schritte : [];
+  const k = lenkAufzeichnung.kennzahlen();
+  const b = LenkLive.befund(k, regelart);
+  const imMenue = !el('sheet').hidden && document.querySelector('.tab.active').dataset.tab === 'lenkung';
+  if (imMenue) {
+    LenkLive.zeichnen(el('lenkLiveGross'), lenkAufzeichnung,
+      { sekunden: Number(el('lenkLiveZeit').value), schritte });
+    el('lenkLiveBefund').textContent = b.text;
+    el('lenkLiveBefund').dataset.art = b.art;
+    el('lenkLiveTipps').replaceChildren(...(b.tipps || []).map((tipp) => {
+      const li = document.createElement('li');
+      li.textContent = tipp;
+      return li;
+    }));
+    el('lenkLiveZahlen').textContent = lenkLiveZahlen(k);
+  }
+  if (!el('lenkLiveFenster').hidden && el('sheet').hidden) {
+    LenkLive.zeichnen(el('lenkLiveKlein'), lenkAufzeichnung, { sekunden: 30, schritte, kompakt: true });
+    el('lenkLiveKurz').textContent = k.genug
+      ? `${Number(k.effektiv).toLocaleString('de-DE', { maximumFractionDigits: 1 })} cm · ` +
+        ({ gut: 'gut', pendelt: 'pendelt', versatz: 'daneben', traege: 'träge' }[b.art] || '')
+      : 'sammelt …';
+    el('lenkLiveKurz').dataset.art = b.art;
+  }
+}
+
+el('btnLenkLiveKarte').onclick = () => lenkLiveKarteSetzen(el('lenkLiveFenster').hidden);
+el('lenkLiveZu').onclick = () => lenkLiveKarteSetzen(false);
+el('lenkLiveZeit').onchange = renderLenkLive;
+lenkLiveKarteSetzen(lenkLiveKarteAn());
+setInterval(renderLenkLive, 500);
 
 /* Lenk-Assistent: Zustand anzeigen, Modus wählen, Motor und Anschläge am Stand einmessen. */
 function renderAbstimmung() {

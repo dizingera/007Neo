@@ -220,7 +220,13 @@ class SimulatorSource(GnssSource):
         self.north = 0.0
         self.heading = 0.0
         self.speed_ms = 2.5
-        self.steer_deg = 0.0
+        self.steer_deg = 0.0         # verlangter Einschlag (Regler im Menü oder Lenkautomatik)
+        # Das Rad folgt wie am echten Traktor nicht sofort: träge (Zeitkonstante)
+        # und mit begrenzter Lenkgeschwindigkeit. Sonst gäbe es am Schreibtisch
+        # weder Pendeln noch Nachlaufen - und nichts abzustimmen.
+        self.rad_deg = 0.0
+        self.lenk_traegheit_s = 0.3
+        self.lenk_rate_deg_s = 30.0
         self.wheelbase = 2.6
         # east/north ist die Mitte der Hinterachse - dort gilt das Einspurmodell.
         # Gemeldet wird aber die Antenne, die beim echten Traktor auf dem
@@ -263,6 +269,7 @@ class SimulatorSource(GnssSource):
         self.east = self.north = 0.0
         self.heading = heading
         self.steer_deg = 0.0
+        self.rad_deg = 0.0
 
     async def run(self) -> None:
         self.running = True
@@ -282,7 +289,10 @@ class SimulatorSource(GnssSource):
             await asyncio.sleep(dt)
 
     def _step(self, dt: float) -> None:
-        steer = math.radians(self.steer_deg)
+        schritt = (self.steer_deg - self.rad_deg) * min(1.0, dt / max(0.01, self.lenk_traegheit_s))
+        grenze = self.lenk_rate_deg_s * dt
+        self.rad_deg += max(-grenze, min(grenze, schritt))
+        steer = math.radians(self.rad_deg)
         if abs(steer) > 1e-6 and self.speed_ms > 0.01:
             turn_rate = self.speed_ms / self.wheelbase * math.tan(steer)
             self.heading = (self.heading + math.degrees(turn_rate) * dt) % 360.0

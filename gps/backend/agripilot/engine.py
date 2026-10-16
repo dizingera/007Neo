@@ -1821,6 +1821,10 @@ class Engine:
                 self.simulator.set_steer(command.angle_deg)
             elif self._steering_was_engaged:
                 self.simulator.set_steer(0.0)
+            # Was das virtuelle Rad wirklich tut - wie ein Drehgeber am echten.
+            rad = getattr(self.simulator, "rad_deg", None)
+            if self.steering is not None and rad is not None:
+                self.steering.output.feedback.wheel_angle_deg = rad
         self._steering_was_engaged = command.engaged
 
     def _record_track(self, fix: Fix, now: float) -> None:
