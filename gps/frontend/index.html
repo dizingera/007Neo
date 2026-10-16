@@ -127,7 +127,7 @@
         </div></div>
       <div class="wf-gruppe"><span>Form</span>
         <div class="wf-wahl" id="wfForm">
-          <button data-wert="omega">Ω-Wende</button><button data-wert="u">U-Wende</button>
+          <button data-wert="omega">Ω-Wende</button><button data-wert="u">U-Wende</button><button data-wert="dubins">Dubins</button>
         </div></div>
       <p class="wf-ergebnis" id="wfErgebnis" role="status" aria-live="polite"></p>
       <div class="wf-knoepfe">
@@ -329,6 +329,7 @@
             <select name="muster">
               <option value="omega">Ω-Wende (weiter Bogen)</option>
               <option value="u">U-Wende (kompakt)</option>
+              <option value="dubins">Dubins (kürzeste passende Verbindung)</option>
             </select>
           </label>
           <label>Wenderichtung
@@ -361,7 +362,7 @@
         Vorgewende bearbeitet ist, liest es aus der markierten Fläche – es zählt nur, was
         mit <b>Markieren</b> gefahren wurde.</p>
       <p><b>Ω-Wende</b> holt nach vorn aus und braucht mehr Tiefe, fährt dafür weichere
-        Radien. Die <b>U-Wende</b> kommt mit weniger Tiefe aus. Wendekreis für den John Deere
+        Radien. <b>Dubins</b> prüft vorwärts fahrbare Verbindungen aus Kreisbögen und Geraden unter Einhaltung des Wendekreises. Eine passende Route im Feld wird bevorzugt; passt keine, bleibt der Start bei aktiver Feldprüfung gesperrt. Die <b>U-Wende</b> kommt mit weniger Tiefe aus. Wendekreis für den John Deere
         rund 4,2 m (kleinster fahrbarer 3,7 m).</p>
       <p><b>Die Wende wird nur gelenkt.</b> Fahrstufe und Gas bleiben beim Fahrer, rückwärts
         fährt kein Muster. Die Sicherheitsprüfung verlangt, dass <i>jeder</i> Punkt der Route
@@ -481,6 +482,36 @@
   <section class="tab-panel" data-panel="lenkung" hidden>
     <!-- Alles zur Lenkung an einer Stelle: einrichten, prüfen, abstimmen, einstellen.
          Die Werte des Traktors (Lenkschärfe, Regelart) stehen bei Traktor & Gerät. -->
+    <section class="karte lenkwerkstatt" aria-labelledby="werkstattTitel">
+      <div class="werkstatt-kopf"><div><p class="note" id="werkstattGeraet">Traktor-Tablet</p>
+        <h3 id="werkstattTitel">Lenkwerkstatt</h3><p id="werkstattTraktor">Traktor wird geladen …</p></div>
+        <span class="werkstatt-befund" id="werkstattBefund" role="status">Einrichtung wird geladen</span></div>
+      <p id="werkstattFortschritt"></p>
+      <p class="note" id="werkstattSperre" role="status"></p>
+      <form id="werkstattForm">
+        <fieldset id="werkstattFelder"><legend>1 · Traktor vermessen</legend>
+          <p class="note">Antenne ab Mitte der Hinterachse messen. Einschlag der Räder am Boden, nicht des Lenkrads.</p>
+          <div class="werkstatt-masse">
+            <label>Radstand (m)<input id="wk_wheelbase_m" type="number" min="0.5" max="10" step="0.01" required></label>
+            <label>Antennenhöhe (m)<input id="wk_antenna_height_m" type="number" min="0" max="6" step="0.01" required></label>
+            <label>Antenne nach vorn (m)<input id="wk_antenna_forward_m" type="number" min="-10" max="15" step="0.01" required><small>Hinter der Achse: negativer Wert</small></label>
+            <label>Antenne nach rechts (m)<input id="wk_antenna_right_m" type="number" min="-5" max="5" step="0.01" required><small>Links der Mitte: negativer Wert</small></label>
+            <label>Einschlag links (°)<input id="wk_max_steer_left_deg" type="number" min="5" max="85" step="0.1" required></label>
+            <label>Einschlag rechts (°)<input id="wk_max_steer_right_deg" type="number" min="5" max="85" step="0.1" required></label>
+          </div>
+          <label class="switch"><input id="werkstattVermessen" type="checkbox" required>Diese Werte wurden am gewählten Traktor gemessen.</label>
+          <button id="werkstattSpeichern" type="submit" class="primary">Maße übernehmen</button>
+        </fieldset>
+      </form>
+      <div class="row"><button id="werkstattLaden">Aktuellen Traktor neu laden</button><button id="werkstattSichern">Traktorwerte sichern</button>
+        <button id="werkstattZurueck">Sicherung wiederherstellen</button></div>
+      <p class="note" id="werkstattSicherung"></p>
+      <p class="note">Die Sicherung umfasst Geometrie und Spurregler des Traktors. Motorregler, Anschlüsse und Gerätebreiten werden damit nicht verändert.</p>
+      <div class="row"><button id="werkstattProtokoll">Prüfstand dokumentieren</button>
+        <a href="/api/lenkung/kalibrierung/export" download="AgriPilot-Kalibrierung.json">Prüfbericht herunterladen</a></div>
+      <p id="werkstattInfo" class="note" role="status" aria-atomic="true"></p>
+      <p class="note">2 · Motor und Richtung: den geführten Ablauf unten durchführen. 3 · Probefahrt: danach den Lenk-Assistenten nutzen. Ein Übungsprotokoll bestätigt keinen echten Einbau.</p>
+    </section>
     <section class="karte" id="lenkLive">
       <h3>Lenkung live</h3>
       <div class="row">
@@ -740,6 +771,7 @@
 <script src="flaeche.js"></script>
 <script src="lenklive.js"></script>
 <script src="spuren.js"></script>
+<script src="kalibrierung.js"></script>
 <script src="app.js"></script>
 <script>
   /* Nur fuer die Kachel auf dem Android-Tablet. Browser lassen Service Worker

@@ -665,3 +665,19 @@ label.button { display: inline-flex; align-items: center; cursor: pointer; }
 .sheet.aussaat-dialog .row { margin-top: 20px; justify-content: flex-end; }
 
 .sheet .item .actions button.an { border-color: var(--m-gruen); color: var(--m-gruen); }
+
+/* Lenkwerkstatt: Messwerte bleiben im gewohnten Menü und auf Tablets erreichbar. */
+.sheet .werkstatt-kopf { display: flex; flex-wrap: wrap; align-items: start; justify-content: space-between; gap: 16px; }
+.sheet .werkstatt-kopf h3 { margin: 4px 0; font-size: 24px; }
+.sheet .werkstatt-befund { border: 1px solid var(--m-amber); color: var(--m-amber); border-radius: 8px; padding: 8px 12px; }
+.sheet .werkstatt-befund[data-art="gut"] { color: var(--m-gruen); border-color: var(--m-gruen); }
+.sheet .lenkwerkstatt fieldset { min-width: 0; border: 1px solid var(--m-linie); padding: 16px; margin: 16px 0; border-radius: 10px; }
+.sheet .lenkwerkstatt legend { font-weight: 700; padding: 0 6px; }
+.sheet .werkstatt-masse { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 16px; margin-bottom: 18px; }
+.sheet .werkstatt-masse label { min-width: 0; }
+.sheet .werkstatt-masse input { width: 100%; }
+.sheet .werkstatt-masse small { color: var(--muted); line-height: 1.5; }
+.sheet .lenkwerkstatt .row { margin-top: 16px; }
+.sheet .lenkwerkstatt a { color: var(--blue); padding: 12px 0; }
+.sheet #werkstattInfo { white-space: pre-line; }
+@media(max-width:650px) { .sheet .werkstatt-masse { grid-template-columns: 1fr; } }

@@ -19,7 +19,7 @@ from __future__ import annotations
 import asyncio
 import math
 import time
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from typing import Any, Optional
 
 from . import abstimmung as abstimmung_module
@@ -38,6 +38,7 @@ from .guidance import (
 )
 from .imu import terrain_offset
 from .nmea import Fix
+from .kalman import Positionsfilter
 from .writer import HintergrundSchreiber
 
 TRACK_MIN_DISTANCE_M = 1.0
@@ -97,6 +98,7 @@ class Engine:
         self.coverage = CoverageMap(cell_size=0.5)
         self.job: Optional[dict] = None
 
+        self.positionsfilter = Positionsfilter()
         self.fix: Optional[Fix] = None
         self.position: Optional[geo.Point] = None      # antenna, local metres
         self.tool_position: Optional[geo.Point] = None
@@ -168,6 +170,7 @@ class Engine:
         if verwaist:
             self.note(f"{verwaist} unterbrochene Arbeit(en) vom letzten Mal abgeschlossen")
         self.auto_sections = True
+        self.teilbreiten = None
 
         # Fahrspur und Zwischenstand schreibt ein eigener Faden (writer.py).
         self._schreiber = HintergrundSchreiber(store.path)
@@ -585,6 +588,7 @@ class Engine:
             raise KeyError("Feld nicht gefunden")
         self.field = field
         self.plane = geo.LocalPlane(field["datum_lat"], field["datum_lon"])
+        self.positionsfilter.reset()
         self.coverage = CoverageMap(cell_size=0.5)
         self.line = None
         # Die Saisonspur zuerst: die Fahrgassen vom Säen sollen beim Düngen und
@@ -1433,7 +1437,7 @@ class Engine:
                    start[1] + math.cos(math.radians(kurs)) * s)
                   for s in [i * 1.0 for i in range(int(anlauf))]]
         tiefe = einstellung.tiefe_m(self.profile.width_m)
-        bogen = headland_module.plan(wendepunkt, kurs, einstellung, self.profile.spacing_m, tiefe)
+        bogen = headland_module.plan(wendepunkt, kurs, einstellung, self.profile.spacing_m, tiefe, grenze)
         pfad = gerade + bogen
         im_feld = headland_module.route_im_feld(pfad, grenze)
         vorschlag = ""
@@ -1445,7 +1449,7 @@ class Engine:
         engster = headland_module.engster_radius(pfad)
         # Der Anschlag der Seite, zu der gewendet wird.
         links, rechts = self.profile.einschlag_grenzen()
-        anschlag = links if einstellung.richtung == "links" else rechts
+        anschlag = min(links,rechts) if einstellung.muster == "dubins" else (links if einstellung.richtung == "links" else rechts)
         kleinster = self.profile.wheelbase_m / math.tan(
             math.radians(max(5.0, min(60.0, anschlag))))
         fahrbar = engster >= kleinster * 0.98
@@ -1486,7 +1490,7 @@ class Engine:
         noetig = achse_vor_geraet + voraus + 0.5
         breite = einstellung.breite_m if einstellung.breite_m > 0 else max(0.5, self.profile.width_m)
         spuren = int(math.ceil(noetig / breite))
-        form = "Ω-Wende" if einstellung.muster == "omega" else "U-Wende"
+        form = {"omega":"Ω-Wende","u":"U-Wende","dubins":"Dubins-Wende"}[einstellung.muster]
         def m(wert: float) -> str:
             return f"{wert:.1f}".replace(".", ",")
         return (f"Die {form} braucht {m(noetig)} m Vorgewende, eingestellt sind {m(tiefe)} m. "
@@ -1597,6 +1601,7 @@ class Engine:
     def stop_job(self) -> Optional[dict]:
         if self.job is None:
             return None
+        if self.teilbreiten is not None:self.teilbreiten.wunsch(0,min(32,len(self.sections)))
         self._flush_track(force=True)
         self.warte_auf_sicherung()          # erst alle Spurpunkte, dann das Ende der Arbeit
         self.store.update_job(
@@ -1625,6 +1630,8 @@ class Engine:
 
     def on_fix(self, fix: Fix) -> None:
         if not fix.valid:
+            self.positionsfilter.reset()
+            if self.teilbreiten is not None:self.teilbreiten.wunsch(0,min(32,len(self.sections)))
             return
         now = fix.received_at or time.time()
         self.fix = fix
@@ -1655,6 +1662,18 @@ class Engine:
         if heading is None:
             return
 
+        if self.config.gnss.kalman_enabled:
+            self.position = self.positionsfilter.update(
+                self.position,fix.speed_ms,
+                fix.course_deg if fix.speed_ms>.3 and fix.course_deg is not None else heading,
+                now,fix.fix_quality,fix.accuracy_m,
+                self.config.gnss.kalman_acceleration_ms2)
+            if not self.positionsfilter.akzeptiert:
+                if self.teilbreiten is not None:self.teilbreiten.wunsch(0,min(32,len(self.sections)))
+                if self.steering is not None:self.steering.disarm("GNSS-Ausreißer im Positionsfilter")
+                return  # keine Fläche oder Lenkbefehle aus verworfenen Messungen
+        else:
+            self.positionsfilter.reset()
         self.position = self._compensate_terrain(self.position, heading, attitude)
 
         previous_tool = self.tool_position
@@ -1829,6 +1848,7 @@ class Engine:
         """
         if self.job is None or self.implement_position is None \
                 or self.heading is None:
+            if self.teilbreiten is not None:self.teilbreiten.wunsch(0,min(32,len(self.sections)))
             return
         kurs = self.implement_heading.value if self.profile.trailed else self.heading
         if kurs is None:
@@ -1843,10 +1863,18 @@ class Engine:
                 boundary=boundary,
                 pcc=self.profile.section_pcc,
             )
+        if self.teilbreiten is not None:
+            maske=sum(1<<s.index for s in self.sections if s.enabled and not s.forced_off)
+            self.teilbreiten.wunsch(maske if len(self.sections)<=32 else 0,min(32,len(self.sections)))
+        wirksam=self._wirksame_teilbreiten()
         if previous_implement is not None:
-            self.coverage.add_swath(
-                previous_implement, self.implement_position, kurs, self.sections
-            )
+            self.coverage.add_swath(previous_implement,self.implement_position,kurs,wirksam)
+
+    def _wirksame_teilbreiten(self):
+        if self.config.teilbreiten.output!="udp":return self.sections
+        maske=self.teilbreiten.bestaetigt() if self.teilbreiten is not None else 0
+        return [replace(s,enabled=s.enabled and not s.forced_off and bool(maske & (1<<s.index)))
+                for s in self.sections]
 
     def _update_steering(self, fix: Fix) -> None:
         if self.steering is None:
@@ -1918,6 +1946,8 @@ class Engine:
         self._checkpoint(now)
         self._pruefe_feldvorschlag(now)
         age = now - self.fix.received_at if (self.fix and self.fix.received_at) else 99.0
+        if self.teilbreiten is not None and (self.job is None or age>GPS_STILLSTAND_S):
+            self.teilbreiten.wunsch(0,min(32,len(self.sections)))
         if age > GPS_STILLSTAND_S and self.turn is not None:
             # Eine Wende ohne Positionsdaten weiterzuführen hieße, blind auf
             # einem Bogen zu lenken. Sie endet hier, nicht erst beim nächsten Fix.
@@ -1944,6 +1974,7 @@ class Engine:
                 "role": self.config.network.role,
             },
             "fix": fix.to_dict() if fix else None,
+            "positionsfilter": {"aktiv": self.config.gnss.kalman_enabled, **self.positionsfilter.status()},
             "position": list(self.position) if self.position else None,
             "tool_position": list(self.tool_position) if self.tool_position else None,
             "implement": {
@@ -1989,7 +2020,8 @@ class Engine:
             } if self.field else None,
             "profile": asdict(self.profile),
             "traktor": self.aktiver_traktor()["name"],
-            "sections": [asdict(s) for s in self.sections],
+            "sections": [asdict(s) for s in self._wirksame_teilbreiten()],
+            "teilbreiten_hardware": self.teilbreiten.status_dict() if self.teilbreiten else None,
             "auto_sections": self.auto_sections,
             "job": {
                 **self.job,

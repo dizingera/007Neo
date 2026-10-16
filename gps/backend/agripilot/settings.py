@@ -80,6 +80,12 @@ class Gruppe:
 
 
 GRUPPEN: list[Gruppe] = [
+    Gruppe(id="teilbreiten",titel="Teilbreiten-Hardware",hinweis=
+        "Noch kein Herstelleradapter ausgewählt. UDP benötigt einen Adapter für das AgriPilot-Teilbreitenprotokoll mit eigenem 500-ms-Watchdog; ohne Rückmeldung wird keine Behandlung markiert.",felder=[
+        Feld("teilbreiten.output","Ausgang","auswahl",sofort=True,auswahl=(("aus","Aus – nur Software"),("udp","UDP-Relais-Adapter (AgriPilot-Protokoll)"))),
+        Feld("teilbreiten.host","Adapter-Adresse",sofort=True),
+        Feld("teilbreiten.port","Adapter-Port","ganzzahl",sofort=True,minimum=1,maximum=65535),
+    ]),
     Gruppe(
         id="gnss",
         titel="Empfänger",
@@ -118,6 +124,10 @@ GRUPPEN: list[Gruppe] = [
                  "alles so wie im Feld. Schneller ist zum Durchspulen gedacht: "
                  "die Positionen rücken vor, während in den Sätzen weiterhin die "
                  "aufgezeichnete Geschwindigkeit steht."),
+            Feld("gnss.kalman_enabled", "Kalman-Positionsfilter", "schalter", sofort=True,
+                 hilfe="Glättet Position und Geschwindigkeit. Roh-Fix und RTK-Freigabe gelten weiter; Ausreißer geben die Lenkung zurück."),
+            Feld("gnss.kalman_acceleration_ms2", "Beweglichkeit des Positionsfilters", "zahl", sofort=True,
+                 minimum=0.1, maximum=8.0, einheit="m/s²", hilfe="Höher folgt Richtungsänderungen schneller; niedriger glättet stärker."),
             Feld("gnss.replay_loop", "Aufzeichnung wiederholen", "schalter", sofort=True,
                  hilfe="Am Ende wieder von vorn, statt stehen zu bleiben."),
         ],

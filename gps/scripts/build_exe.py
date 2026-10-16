@@ -31,7 +31,9 @@ GPS = Path(__file__).resolve().parent.parent
 def main() -> int:
     # --test: dieselbe Datei unter anderem Namen, zum Prüfen neben der ausgelieferten.
     test = "--test" in sys.argv
-    arbeit = GPS / ("build-exe-test" if test else "build-exe")
+    # Nur den eigentlichen Bauordner leeren. Daneben können Simulatoren
+    # und Prüfbelege liegen, die bei einem Testbau erhalten bleiben müssen.
+    arbeit = GPS / "build-exe-test" / "pyinstaller" if test else GPS / "build-exe"
     if arbeit.exists():
         shutil.rmtree(arbeit)
     befehl = [
@@ -42,6 +44,7 @@ def main() -> int:
         "--specpath", str(arbeit),
         "--paths", str(GPS / "backend"),
         "--add-data", f"{GPS / 'frontend'};frontend",
+        "--add-data", f"{GPS / 'docs' / 'DRITTLIZENZEN.md'};docs",
         "--collect-submodules", "agripilot",
         "--collect-submodules", "uvicorn",
         "--collect-submodules", "serial",

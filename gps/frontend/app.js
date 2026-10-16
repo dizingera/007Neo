@@ -282,6 +282,11 @@ function updateHud(s) {
   if (s.system && s.system.update_online) {
     hint.push(`Neue Version ${s.system.update_online} verfügbar – Menü → System → Aktualisierung`);
   }
+  if (s.positionsfilter?.aktiv && !s.positionsfilter.akzeptiert) hint.push('GNSS-Ausreißer verworfen – Lenkung ausgeschaltet');
+  const teilbreiten = s.teilbreiten_hardware;
+  if (teilbreiten?.ausgang === 'udp' && (!teilbreiten.verbunden || teilbreiten.angefordert !== teilbreiten.bestaetigt)) {
+    hint.push('Teilbreiten warten auf Hardwarebestätigung – unbestätigte Teilbreiten werden nicht markiert');
+  }
   if (s.saisonspur_neu) hint.push(`Neue Fahrgassen für Erntejahr ${s.saisonspur_neu.saison} vorhanden – nach der Arbeit Feld neu laden`);
   if (s.guidance.active && s.guidance.message) hint.push(s.guidance.message);
   // Markieren an, aber jede Sektion automatisch aus: die Maschine steht
@@ -1162,7 +1167,7 @@ async function wendePlanen(speichern = true) {
   } else if (!d.im_feld) {
     wendeErgebnis(d.vorschlag || 'Die Route liegt nicht vollständig im Feld.', false);
   } else {
-    const form = d.muster === 'u' ? 'U-Wende' : 'Ω-Wende';
+    const form = d.muster === 'dubins' ? 'Dubins-Wende' : d.muster === 'u' ? 'U-Wende' : 'Ω-Wende';
     const spuren = auslassen === 0 ? 'auf die Nachbarspur' : `${auslassen} ${auslassen === 1 ? 'Spur' : 'Spuren'} ausgelassen`;
     const wo = d.anlauf_m > 1 ? `wendet in ${d.anlauf_m.toFixed(0)} m am Vorgewende` : 'wendet hier';
     wendeErgebnis(`${form} nach ${d.richtung}, ${spuren} – ${wo}.`, true);
@@ -2758,7 +2763,7 @@ function renderSystem() {
    sie nicht davon abdriften kann. Gespeichert wird nur, was wirklich geändert
    wurde - so überschreibt ein Tablet nicht die Eingaben eines anderen. */
 const settings = { geladen: false, werte: {}, gruppen: [] };
-const LENK_GRUPPEN = ['steering', 'phidget'];   // stehen auf der Seite Lenkung
+const LENK_GRUPPEN = ['steering', 'phidget', 'teilbreiten'];   // stehen auf der Seite Lenkung
 
 async function loadSettings() {
   const daten = await (await fetch('/api/settings')).json();
@@ -3012,10 +3017,12 @@ const EINRICHTEN_TEXT = {
   freigabe: 'Erst jetzt darf die Automatik lenken. Scharf geschaltet wird weiterhin von dir, mit geraden Rädern.',
   probefahrt: 'Die Feinabstimmung der Spurregelung: auf einer AB-Spur mit 5–8 km/h geradeaus, Lenkung scharf. Der Lenk-Assistent stellt Verstärkung und Vorhalt nach – erst nur als Vorschlag, dann auf Wunsch selbst. Erledigt, sobald er „gut“ meldet.',
 };
+const lenkWerkstatt = new LenkWerkstatt({el,api});
 let einrichtenStand = null;
 let einrichtenErgebnis = null;
 
 async function renderEinrichten() {
+  lenkWerkstatt.laden();
   const antwort = await fetch('/api/lenkung/einrichten').then((r) => r.json()).catch(() => null);
   if (!antwort || !antwort.data) return;
   einrichtenStand = antwort.data;

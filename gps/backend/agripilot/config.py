@@ -51,6 +51,8 @@ class GnssConfig:
     replay_file: str = ""
     replay_speed: float = 1.0
     replay_loop: bool = False
+    kalman_enabled: bool = False
+    kalman_acceleration_ms2: float = 2.0
 
 
 @dataclass
@@ -226,6 +228,13 @@ class SteeringConfig:
 
 
 @dataclass
+class TeilbreitenConfig:
+    output: str = "aus"
+    host: str = "127.0.0.1"
+    port: int = 8890
+
+
+@dataclass
 class ServerConfig:
     host: str = "0.0.0.0"
     port: int = 8080
@@ -263,6 +272,7 @@ class Config:
     corrections: CorrectionsConfig = field(default_factory=CorrectionsConfig)
     network: NetworkConfig = field(default_factory=NetworkConfig)
     steering: SteeringConfig = field(default_factory=SteeringConfig)
+    teilbreiten: TeilbreitenConfig = field(default_factory=TeilbreitenConfig)
     server: ServerConfig = field(default_factory=ServerConfig)
     path: Optional[Path] = None
 
@@ -343,6 +353,7 @@ def load(path: str | Path | None = None) -> Config:
         corrections=CorrectionsConfig(**_corrections_section(data)),
         network=NetworkConfig(**_subset(NetworkConfig, data.get("network"))),
         steering=SteeringConfig(**_subset(SteeringConfig, data.get("steering"))),
+        teilbreiten=TeilbreitenConfig(**_subset(TeilbreitenConfig, data.get("teilbreiten"))),
         server=ServerConfig(**_subset(ServerConfig, data.get("server"))),
         path=target,
     )

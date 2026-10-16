@@ -44,7 +44,7 @@ from .geo import (
 from .guidance import GuidanceState, VehicleProfile, lightbar_offset
 
 # Muster und Richtungen, wie sie in der Oberfläche stehen.
-MUSTER = ("omega", "u")
+MUSTER = ("omega", "u", "dubins")
 RICHTUNGEN = ("links", "rechts")
 REIHENFOLGEN = ("egal", "zuerst", "zuletzt")
 
@@ -516,10 +516,19 @@ def plan_u_turn(start: Point, heading: float, versatz_m: float,
 
 
 def plan(start: Point, heading: float, settings: HeadlandSettings,
-         spurabstand_m: float, tiefe_m: float) -> list[Point]:
+         spurabstand_m: float, tiefe_m: float, boundary=None) -> list[Point]:
     """Das eingestellte Muster planen - Ω oder U."""
     versatz = max(0.5, spurabstand_m) * max(1, settings.ueberspringen)
     links = settings.richtung == "links"
+    if settings.muster == "dubins":
+        from .dubins import kandidaten
+        sx,sy=_side(heading,links)
+        ziel=(start[0]+sx*versatz,start[1]+sy*versatz,(heading+180)%360)
+        pfade=kandidaten((*start,heading),ziel,settings.radius_m)
+        if boundary and settings.nur_im_feld:
+            innen=[p for p in pfade if route_im_feld(p.punkte,boundary)]
+            if innen:pfade=innen
+        return pfade[0].punkte if pfade else []
     if settings.muster == "u":
         return plan_u_turn(start, heading, versatz, settings.radius_m, links)
     return plan_omega(start, heading, versatz, settings.radius_m,

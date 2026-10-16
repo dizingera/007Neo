@@ -1,5 +1,86 @@
 # Bedienung im Feld
 
+## Lenkwerkstatt ab 1.5.41
+
+Unter **Menü → Lenkung** steht oben die Lenkwerkstatt für den gewählten Traktor.
+Die Einrichtung erfolgt auf dem jeweiligen Traktor-Tablet. Der Büro-Master
+verbindet und verteilt weiterhin Felder und Aussaat-Fahrgassen; Fahrzeugmaße,
+Motorabstimmung und laufende Lenkberechnung bleiben lokal.
+
+1. Arbeit beenden, Lenkung ausschalten und anhalten. Aktuelle GPS-Daten sind
+   nötig, damit Stillstand geprüft werden kann. Der echte Büro-Master bietet
+   keine schreibende Traktorkalibrierung; Simulator und Wiedergabe sind Übungen.
+2. Radstand, Antennenhöhe und Antennenversatz ab der Mitte der Hinterachse
+   messen. Nach hinten bzw. links sind die Werte negativ. Die beiden
+   maximalen Lenkwinkel beziehen sich auf die Räder am Boden.
+3. Alle sechs Maße eintragen, die Messung bestätigen und **Maße übernehmen**.
+   Vorherige Traktorwerte werden automatisch gesichert. **Traktorwerte sichern**
+   legt ausdrücklich einen neuen Sicherungsstand an; **Sicherung wiederherstellen**
+   holt ihn zurück und sichert dabei umgekehrt die eben ersetzten Werte.
+4. Darunter den vorhandenen Motorablauf ausführen: Verbindung, Drehrichtung,
+   Mindestleistung, Zählwerte, Feinabstimmung, Einbau/Not-Aus und Probefahrt.
+   Diese Prüfungen gehören zum gewählten Traktor und zu den zugehörigen
+   Einstellungen. Änderungen können frühere Bestätigungen ungültig machen.
+5. **Prüfstand dokumentieren** und bei Bedarf den Prüfbericht herunterladen.
+   Offene Schritte und spätere Änderungen bleiben erkennbar. Ein Übungsprotokoll
+   bestätigt keinen echten Einbau.
+
+Die Sicherung umfasst Traktorgeometrie und Spurregler. Sie setzt weder die
+Motorregler-Konfiguration noch die Gerätebreiten zurück. Öffnen, Vermessen und
+Speichern der Werkstatt bewegen keinen Motor. Bei Traktorwechsel oder anderen
+Einstellungsänderungen bleibt ein ungespeicherter Entwurf erhalten und wird
+gegen falsche Zuordnung gesperrt; **Aktuellen Traktor neu laden** verwirft ihn.
+
+## Kalman-Positionsfilter ab 1.5.41
+
+Unter **Einstellungen → Empfänger** lässt sich der **Kalman-Positionsfilter** zuschalten.
+Ab Werk ist er aus. Er schätzt Position und Geschwindigkeit in lokalen Metern
+und gewichtet die Messungen nach ihrer Genauigkeit. Das Beschleunigungsrauschen
+ist einstellbar; der Standard beträgt 2 m/s². Dies ersetzt keine Kalibrierung.
+
+Der ursprüngliche GPS-Fix und seine Freigabekriterien bleiben maßgebend. Der
+Filter erzeugt kein RTK-fix aus einer schlechteren Messung und überbrückt keinen
+GPS-Ausfall. Bei Zeitlücke oder Qualitätswechsel wird neu angesetzt. Verworfene
+Positionssprünge werden gemeldet; die Lenkung wird ausgeschaltet und der
+Teilbreitenwunsch sofort auf AUS gesetzt. Erst nach Prüfung wieder freigeben.
+Ein wiederholter Sprung kann zu einem neuen Filteransatz führen; eine gültige
+GPS-Meldung beweist keine tatsächlich korrekte Position.
+
+## Teilbreiten-Hardware ab 1.5.41
+
+Unter **Lenkung → Teilbreiten-Hardware** stehen Ausgang, Adapteradresse und Port.
+Solange keine Hardware gewählt ist, bleibt **Aus – nur Software** eingestellt;
+die bisherige Software-Markierung bleibt damit erhalten.
+
+Für spätere Hardware gibt es einen UDP-Relais-Adapter nach dem eigenen Protokoll
+`agripilot-teilbreiten/1`. Das ist keine Hersteller- oder ISOBUS-Zusage. Ein
+passender Adapter muss die tatsächlich geschalteten Ausgänge zurückmelden und
+bei ausbleibenden Befehlen selbst innerhalb von 500 ms abschalten. Bis zu
+32 Teilbreiten sind unterstützt. Einrichtung nur ohne laufende Arbeit, ohne
+Lenkfreigabe und im Stand.
+
+Bei aktiviertem UDP-Ausgang zählen Anzeige und Flächenmarkierung nur frisch
+bestätigte Teilbreiten. Ohne Rückmeldung erscheint kein erfundener Schaltzustand.
+Bei Arbeitsende, ungültigem GPS, Positionsausreißer oder veralteten Fahrdaten
+wird AUS angefordert. Die Abschaltung echter Ventile muss zusätzlich der Adapter
+gewährleisten. Details und Beispieltelegramme stehen in **TEILBREITEN.md**.
+Noch keine reale Teilbreitenhardware wurde ausgewählt oder geprüft.
+
+## Dubins-Wende ab 1.5.41
+
+Unter **Vorgewende & Wende** kann zusätzlich zu Omega und U **Dubins** ausgewählt
+werden. Die Planung prüft sechs vorwärts fahrbare Verbindungen aus Kreisstücken
+und Geraden, mit dem gewählten Radius und der Zielrichtung auf der nächsten
+Spur. Für Gegenlenkbögen gilt die strengere der beiden Lenkwinkelgrenzen.
+
+Die kürzeste abgetastet im Feld liegende Variante wird bevorzugt, wenn die
+Feldgrenzenprüfung eingeschaltet ist. Passt keine, bleibt die entsprechende
+Startfreigabe gesperrt. Vorschau ansehen und die Wende weiterhin bewusst starten.
+Die Prüfung erfasst den geplanten Fahrzeugpfad, keine vollständige Hüllkurve
+des Anbaugeräts und keine Hindernisse oder Fahrbarkeit des Bodens. Dubins-Bögen
+haben ideale Krümmungswechsel; Lenkdynamik und tatsächliche Wendefläche sind
+vor realem Einsatz zu erproben. Keine automatische Hindernisumfahrung.
+
 ## Gemeinsame Aussaat-Fahrgassen ab 1.5.40
 
 Der Master im Büro verbindet die Arbeiter-Tablets. Beim Säen auf **Tablet A**

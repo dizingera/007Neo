@@ -30,6 +30,8 @@ from fastapi.staticfiles import StaticFiles
 from . import config as config_module
 from . import checklist as checklist_module
 from . import lenkung_einrichten
+from .teilbreiten import TeilbreitenAusgang
+from .kalibrierung import Lenkwerkstatt, KalibrierKonflikt
 from . import settings as settings_module
 from . import export, geraete as geraete_module, imu as imu_module
 from . import recorder as recorder_module, shapefile as shapefile_module, sync
@@ -97,6 +99,8 @@ class Application:
         self._quellen_aufbauen()
         self.steering = self._lenkung_bauen()
         self.engine.steering = self.steering
+        self.teilbreiten = TeilbreitenAusgang(config.teilbreiten)
+        self.engine.teilbreiten = self.teilbreiten
         # Führt Buch über den Einbau und liest dabei mit, was sich erst
         # über die Zeit zeigt - etwa ob "RTK fix" dauerhaft steht.
         self.checklist = checklist_module.Checkliste(self.store)
@@ -287,6 +291,7 @@ class Application:
             self.sync_client = sync.SyncClient(cfg, self.store, self.engine)
             self.tasks.append(asyncio.create_task(self.sync_client.run()))
 
+        await self.teilbreiten.start()
         self.tasks.append(asyncio.create_task(self._broadcast_loop()))
         self.tasks.append(asyncio.create_task(self._backup_loop()))
         if self.config.server.update_online and update_module.als_programm():
@@ -409,6 +414,7 @@ class Application:
         # Karte steht, bleibt lesbar - der letzte Block gehört noch dazu.
         with contextlib.suppress(Exception):
             self.aufzeichnung.stop()
+        await self.teilbreiten.stop()
         await self.steering.stop()
         await self.source.stop()
         if self.imu is not None:
@@ -583,7 +589,7 @@ def _host_of(url: str) -> str:
 
 # Einstellungen an Empfänger und Sensor, die nur einen Wert ändern und keine
 # neue Verbindung brauchen - alle anderen gnss./imu.-Werte bauen die Quelle neu.
-NUR_WERT = ("imu.roll_sign", "imu.terrain_compensation", "imu.use_for_heading")
+NUR_WERT = ("gnss.kalman_enabled", "gnss.kalman_acceleration_ms2", "imu.roll_sign", "imu.terrain_compensation", "imu.use_for_heading")
 
 
 def create_app(config=None) -> FastAPI:
@@ -1111,22 +1117,28 @@ def create_app(config=None) -> FastAPI:
 
     # -- Lenkung einrichten (Menü → Lenkung) -------------------------------
 
+    werkstatt = Lenkwerkstatt(engine)
+
+    def _einrichtung_key():
+        return "lenkung_einrichtung:"+engine.aktiver_traktor()["id"]
+
     def _einrichtung() -> dict:
-        return store.get_setting("lenkung_einrichtung") or {}
+        stand=store.get_setting(_einrichtung_key()) or {}
+        return {k:v["werte"] for k,v in stand.items() if isinstance(v,dict)
+                and v.get("bindung")==werkstatt.schritt_kennung(k)}
 
     def _einrichtung_merken(schritt: str, werte) -> None:
-        stand = _einrichtung()
-        stand[schritt] = werte
-        store.set_setting("lenkung_einrichtung", stand)
+        stand=store.get_setting(_einrichtung_key()) or {}
+        stand[schritt]={"werte":werte,"bindung":werkstatt.schritt_kennung(schritt),"zeit":time.time()}
+        store.set_setting(_einrichtung_key(),stand)
 
     def _notaus_abgehakt() -> bool:
         stand = application.checklist.zusammenfassung(application.checklist_state())
         return next((s["fertig"] for s in stand["schritte"] if s["id"] == "lenkmotor"), False)
 
-    @api.get("/api/lenkung/einrichten")
-    async def lenkung_einrichten_lesen():
+    def _einrichten_stand():
         ausgang = application.steering.output.status_dict()
-        return ok({
+        return {
             "schritte": lenkung_einrichten.status(
                 _einrichtung(), ausgang, bool(config.steering.enabled), _notaus_abgehakt(),
                 engine.abstimmung.status()),
@@ -1135,7 +1147,29 @@ def create_app(config=None) -> FastAPI:
                               "encoder_invert": config.phidget.encoder_invert,
                               "min_duty": config.phidget.min_duty,
                               "encoder_counts_per_deg": config.phidget.encoder_counts_per_deg},
-        })
+        }
+
+    @api.get("/api/lenkung/einrichten")
+    async def lenkung_einrichten_lesen():
+        return ok(_einrichten_stand())
+
+    @api.get("/api/lenkung/kalibrierung")
+    async def kalibrierung_lesen():
+        return ok(werkstatt.stand(_einrichten_stand()["schritte"]))
+
+    @api.get("/api/lenkung/kalibrierung/export")
+    async def kalibrierung_export():
+        daten=werkstatt.stand(_einrichten_stand()["schritte"])
+        return Response(json.dumps(daten,ensure_ascii=False,indent=2),media_type="application/json",
+                        headers={"Content-Disposition":"attachment; filename=AgriPilot-Kalibrierung.json"})
+
+    @api.post("/api/lenkung/kalibrierung")
+    async def kalibrierung_aendern(payload: dict = Body(...)):
+        try:
+            werkstatt.aktion(payload,_einrichten_stand()["schritte"])
+            return ok(werkstatt.stand(_einrichten_stand()["schritte"]))
+        except KalibrierKonflikt as exc:raise HTTPException(409,str(exc)) from exc
+        except (RuntimeError,ValueError) as exc:raise HTTPException(400,str(exc)) from exc
 
     @api.post("/api/lenkung/einrichten/richtung-test")
     async def richtung_testen():
@@ -1200,7 +1234,7 @@ def create_app(config=None) -> FastAPI:
 
     @api.post("/api/lenkung/einrichten/neu")
     async def einrichtung_neu():
-        store.set_setting("lenkung_einrichtung", {})
+        store.set_setting(_einrichtung_key(), {})
         return ok({})
 
     @api.get("/api/abstimmung")
@@ -1430,6 +1464,10 @@ def create_app(config=None) -> FastAPI:
         motor_fertig = next(
             (s["fertig"] for s in stand["schritte"] if s["id"] == "lenkmotor"), True)
         try:
+            if any(k.startswith("teilbreiten.") for k in aenderungen):
+                fix=engine.fix
+                if engine.job is not None or application.steering.armed or (fix is not None and abs(fix.speed_ms)>.5):
+                    raise settings_module.EinstellungsFehler("Teilbreiten-Hardware nur im Stand, ohne Arbeit und ausgeschaltete Lenkung ändern")
             ergebnis = settings_module.uebernehmen(config, aenderungen, motor_fertig)
         except settings_module.EinstellungsFehler as exc:
             raise HTTPException(400, str(exc)) from exc
@@ -1446,6 +1484,11 @@ def create_app(config=None) -> FastAPI:
         # Ein anderer Lenkausgang (Gerätesuche übernommen) gilt sofort.
         if any(k in LENKAUSGANG_SCHLUESSEL for k in aenderungen):
             ergebnis["lenkung"] = await application.lenkung_neu_bauen()
+        if any(k.startswith("teilbreiten.") for k in aenderungen):
+            await application.teilbreiten.stop()
+            application.teilbreiten=TeilbreitenAusgang(config.teilbreiten)
+            engine.teilbreiten=application.teilbreiten
+            await application.teilbreiten.start()
         return ok({**ergebnis, "werte": settings_module.werte(config)})
 
     def _caster_angaben(payload: dict):
