@@ -39,6 +39,7 @@ CREATE TABLE IF NOT EXISTS lines (
     saison INTEGER NOT NULL DEFAULT 0,      -- Jahr der Fahrgassen, 0 = keine Saisonspur
     fahrgasse_m REAL NOT NULL DEFAULT 0,    -- Fahrgassenabstand, 0 = keine Fahrgassen
     fahrgassen TEXT NOT NULL DEFAULT '',    -- Saatplan: Fahrgassen in m neben der Spur (JSON), '' = alle fahrgasse_m
+    aussaat_at REAL NOT NULL DEFAULT 0,    -- ausdrücklich festgelegte Aussaat, Umbenennen ändert sie nicht
     updated_at REAL NOT NULL,
     deleted INTEGER NOT NULL DEFAULT 0
 );
@@ -84,6 +85,16 @@ CREATE TABLE IF NOT EXISTS devices (
     updated_at REAL NOT NULL,
     deleted INTEGER NOT NULL DEFAULT 0
 );
+
+-- Nur lokal: wann ein fremder Stand hier angekommen ist. Dessen ursprüngliches
+-- updated_at bleibt die Konfliktzeit, aber verspätete Offline-Daten müssen weiter.
+CREATE TABLE IF NOT EXISTS sync_received (
+    table_name TEXT NOT NULL,
+    record_id TEXT NOT NULL,
+    received_at REAL NOT NULL,
+    PRIMARY KEY (table_name, record_id)
+);
+CREATE INDEX IF NOT EXISTS idx_sync_received ON sync_received(table_name, received_at);
 
 CREATE TABLE IF NOT EXISTS settings (
     key TEXT PRIMARY KEY,
@@ -134,6 +145,9 @@ class Storage:
                                    ("fahrgassen", "TEXT NOT NULL DEFAULT ''")):
             if spalte not in vorhanden:
                 self.db.execute(f"ALTER TABLE lines ADD COLUMN {spalte} {definition}")
+        if "aussaat_at" not in vorhanden:
+            self.db.execute("ALTER TABLE lines ADD COLUMN aussaat_at REAL NOT NULL DEFAULT 0")
+            self.db.execute("UPDATE lines SET aussaat_at=updated_at WHERE saison>0 AND fahrgasse_m>0")
         # Seit 1.5.7: mit welchem Traktor eine Arbeit gefahren wurde (Gerät steht in vehicle).
         if "tractor" not in {c[1] for c in self.db.execute("PRAGMA table_info(jobs)")}:
             self.db.execute("ALTER TABLE jobs ADD COLUMN tractor TEXT NOT NULL DEFAULT ''")
@@ -187,20 +201,25 @@ class Storage:
         record = dict(record)
         record.setdefault("id", new_id())
         record.setdefault("nudge_m", 0.0)
-        record.setdefault("saison", 0)
-        record.setdefault("fahrgasse_m", 0.0)
-        record.setdefault("fahrgassen", [])
+        alt = self.get_line(record["id"])
+        # Versatz-/Geometriespeicherung ist keine neue Aussaat. Fehlende Angaben
+        # einer vorhandenen Spur erhalten deren gemeinsame Fahrgassen.
+        record.setdefault("saison", (alt or {}).get("saison", 0))
+        record.setdefault("fahrgasse_m", (alt or {}).get("fahrgasse_m", 0.0))
+        record.setdefault("fahrgassen", (alt or {}).get("fahrgassen", []))
+        record.setdefault("aussaat_at", (alt or {}).get("aussaat_at") or (
+            time.time() if record["saison"] and record["fahrgasse_m"] > 0 else 0.0))
         record["updated_at"] = time.time()
         self.db.execute(
             """INSERT INTO lines (id, field_id, name, mode, points, spacing_m,
-                                  nudge_m, saison, fahrgasse_m, fahrgassen, updated_at, deleted)
+                                  nudge_m, saison, fahrgasse_m, fahrgassen, aussaat_at, updated_at, deleted)
                VALUES (:id, :field_id, :name, :mode, :points, :spacing_m,
-                       :nudge_m, :saison, :fahrgasse_m, :fahrgassen, :updated_at, 0)
+                       :nudge_m, :saison, :fahrgasse_m, :fahrgassen, :aussaat_at, :updated_at, 0)
                ON CONFLICT(id) DO UPDATE SET
                    name=excluded.name, mode=excluded.mode, points=excluded.points,
                    spacing_m=excluded.spacing_m, nudge_m=excluded.nudge_m,
                    saison=excluded.saison, fahrgasse_m=excluded.fahrgasse_m,
-                   fahrgassen=excluded.fahrgassen,
+                   fahrgassen=excluded.fahrgassen, aussaat_at=excluded.aussaat_at,
                    updated_at=excluded.updated_at, deleted=0""",
             {**record, "points": json.dumps(record["points"]),
              "fahrgassen": json.dumps(record["fahrgassen"]) if record["fahrgassen"] else ""},
@@ -231,6 +250,10 @@ class Storage:
         erlaubt = {k: v for k, v in values.items() if k in ("name", "saison", "fahrgasse_m")}
         if not erlaubt:
             return self.get_line(line_id)
+        if "saison" in erlaubt or "fahrgasse_m" in erlaubt:
+            stand = {**(self.get_line(line_id) or {}), **erlaubt}
+            erlaubt["aussaat_at"] = (time.time() if stand.get("saison", 0) > 0
+                                     and stand.get("fahrgasse_m", 0) > 0 else 0.0)
         setzer = ", ".join(f"{k}=:{k}" for k in erlaubt)
         self.db.execute(
             f"UPDATE lines SET {setzer}, updated_at=:updated_at WHERE id=:id",
@@ -239,12 +262,17 @@ class Storage:
         self.db.commit()
         return self.get_line(line_id)
 
-    def season_line(self, field_id: str, saison: int) -> Optional[dict]:
-        """Die Fahrgassenspur des Feldes für dieses Jahr - die zuletzt gesetzte."""
+    def season_line(self, field_id: str, saison: Optional[int] = None) -> Optional[dict]:
+        """Letzte festgelegte Aussaat; das Kalenderjahr setzt Fahrgassen nicht zurück.
+
+        Mit explizitem Jahr lässt sich weiterhin ein historischer Stand abfragen.
+        """
+        bedingung = " AND saison=?" if saison is not None else ""
+        parameter = (field_id, int(saison)) if saison is not None else (field_id,)
         row = self.db.execute(
-            "SELECT * FROM lines WHERE deleted=0 AND field_id=? AND saison=? "
-            "AND fahrgasse_m > 0 ORDER BY updated_at DESC LIMIT 1",
-            (field_id, int(saison)),
+            "SELECT * FROM lines WHERE deleted=0 AND field_id=? AND saison>0 "
+            "AND fahrgasse_m>0" + bedingung + " ORDER BY aussaat_at DESC, id DESC LIMIT 1",
+            parameter,
         ).fetchone()
         return _line_row(row) if row else None
 
@@ -405,7 +433,9 @@ class Storage:
         if table not in SYNCED_TABLES:
             raise ValueError(f"Tabelle {table} wird nicht synchronisiert")
         rows = self.db.execute(
-            f"SELECT * FROM {table} WHERE updated_at > ? ORDER BY updated_at", (since,)
+            f"SELECT * FROM {table} WHERE updated_at > ? OR id IN "
+            "(SELECT record_id FROM sync_received WHERE table_name=? AND received_at>?) "
+            "ORDER BY updated_at", (since, table, since),
         ).fetchall()
         out = []
         for row in rows:
@@ -437,6 +467,13 @@ class Storage:
             ).fetchone()
             if existing and existing["updated_at"] >= record.get("updated_at", 0):
                 continue
+            if table == "lines" and "aussaat_at" not in record:
+                # Alte Gegenstellen kennen die Spalte noch nicht. Vorhandene
+                # Aussaatzeit bewahren; beim ersten Empfang den Altstand übernehmen.
+                alt = self.get_line(record["id"])
+                record["aussaat_at"] = (alt["aussaat_at"] if alt else
+                    record.get("updated_at", 0) if record.get("saison", 0) > 0
+                    and record.get("fahrgasse_m", 0) > 0 else 0.0)
             columns = [c[1] for c in self.db.execute(f"PRAGMA table_info({table})")]
             record = {k: v for k, v in record.items() if k in columns}
             placeholders = ", ".join(f":{k}" for k in record)
@@ -445,6 +482,11 @@ class Storage:
                 f"""INSERT INTO {table} ({', '.join(record)}) VALUES ({placeholders})
                     ON CONFLICT(id) DO UPDATE SET {updates}""",
                 record,
+            )
+            self.db.execute(
+                "INSERT INTO sync_received (table_name, record_id, received_at) VALUES (?, ?, ?) "
+                "ON CONFLICT(table_name, record_id) DO UPDATE SET received_at=excluded.received_at",
+                (table, record["id"], time.time()),
             )
             applied += 1
         self.db.commit()

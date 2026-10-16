@@ -198,8 +198,8 @@
         Versatz und Saison bleiben, auch wenn die Spur dabei einen neuen Namen bekommt;
         selbst angelegte Spuren werden nie angefasst.</p>
       <p>Zu jedem Feld gehören seine <b>Spuren</b>. Eine davon kann die <b>Saisonspur</b>
-        sein: mit der Fahrgassenweite gespeichert, wird sie beim Laden des Feldes das ganze
-        Jahr automatisch aktiv – die Fahrgassen liegen dann bei jedem Gerät an derselben
+        sein: mit Erntejahr und Fahrgassenweite gespeichert, wird die letzte Aussaat beim Laden
+        automatisch aktiv – bis zur nächsten Aussaat – die Fahrgassen liegen dann bei jedem Gerät an derselben
         Stelle.</p>
     </details>
     <div class="list" id="fieldList"></div>
@@ -213,10 +213,13 @@
       <p><b>Kontur</b> (Taste rechts) ist die Feldgrenze selbst: Ring 0 ist die Grenze, jeder
         weitere Ring liegt eine Arbeitsbreite weiter innen. Für das Vorgewende und krumme
         Schläge. Sie wird nicht gespeichert, sondern jedes Mal neu aus der Grenze gebildet.</p>
-      <p><b>Fahrgassen:</b> „Als Saisonspur“ legt auf diese Spur Fahrgassen im Abstand der
+      <p><b>Fahrgassen:</b> „Als Aussaat festlegen“ legt auf diese Spur Fahrgassen im Abstand der
         Fahrgassenweite (Spritze/Streuer). Sie liegen fest in Metern ab Spur 0 und bleiben das
-        ganze Jahr an derselben Stelle – beim Säen, Düngen und Spritzen, egal mit welcher
+        ganze Erntejahr bis zur nächsten Aussaat an derselben Stelle – beim Säen, Düngen und Spritzen, egal mit welcher
         Arbeitsbreite. Eine andere Fahrgassenweite gilt nur für neu gesetzte Saisonspuren.</p>
+      <p><b>Gemeinsam auf den Tablets:</b> Nach dem Abgleich über den Büro-Master sehen alle
+        Tablets die Aussaat dieses Feldes. Erntejahr wählen; der Jahreswechsel ersetzt die
+        Fahrgassen nicht. Eine neue Aussaat ausdrücklich festlegen.</p>
     </details>
     <div class="row">
       <button class="fahrgassen-taste">Fahrgassenweite: 21 m</button>
@@ -272,7 +275,7 @@
         <p id="saatplanZusammenfassung"></p>
         <div id="saatplanKonflikte"></div>
         <div class="row">
-          <button id="btnSaatplanUebernehmen" class="primary">Als Saisonspur übernehmen</button>
+          <button id="btnSaatplanUebernehmen" class="primary">Als Aussaat übernehmen</button>
           <button id="btnSaatplanLoeschen">Plan verwerfen</button>
         </div>
       </section>
@@ -294,8 +297,8 @@
         bernsteinfarben, Vorgewende gestrichelt. Läuft ein Rand
         schräg (Keil) oder passt die Randvorgabe nicht zur Sämaschine, ist das ein
         <b>Konflikt</b> mit Vorschlag zur Anpassung.</p>
-      <p><b>Als Saisonspur übernehmen</b> legt eine AB-Spur durch eine Fahrgasse an. Sie ist das
-        ganze Jahr beim Laden des Feldes aktiv; beim Säen zeigt das Band „Fahrgasse“, wann die
+      <p><b>Als Aussaat übernehmen</b> legt eine AB-Spur durch eine Fahrgasse an. Sie ist das
+        Erntejahr bis zur nächsten Aussaat beim Laden des Feldes aktiv; beim Säen zeigt das Band „Fahrgasse“, wann die
         Fahrgassenschaltung dran ist, und Spritze und Streuer fahren dieselben Gassen.</p>
     </details>
   </section>
@@ -713,6 +716,22 @@
     </div>
   </div>
 </div>
+
+<dialog class="sheet aussaat-dialog" id="aussaatDialog" aria-labelledby="aussaatTitel" aria-describedby="aussaatErklaerung">
+  <form method="dialog">
+    <h2 id="aussaatTitel">Neue Aussaat festlegen</h2>
+    <p id="aussaatErklaerung">Diese Fahrgassen gelten auf allen Tablets bis zur nächsten
+      Aussaat. Der Büro-Master verteilt sie beim Abgleich.</p>
+    <label>Erntejahr
+      <input id="aussaatJahr" type="number" inputmode="numeric" min="2000" max="2200" step="1" required autofocus>
+    </label>
+    <p class="note">Zum Beispiel 2027 für die Herbstsaat 2026. Der Jahreswechsel ändert die Fahrgassen nicht.</p>
+    <div class="row">
+      <button type="submit" value="uebernehmen" class="primary">Aussaat festlegen</button>
+      <button type="submit" value="abbrechen" formnovalidate>Abbrechen</button>
+    </div>
+  </form>
+</dialog>
 
 <div class="toast" id="toast" hidden></div>
 <button class="vorschlag" id="feldVorschlag" hidden></button>

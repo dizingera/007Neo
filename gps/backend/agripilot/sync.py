@@ -142,6 +142,8 @@ class SyncClient:
             apply_changes(self.store, data.get("changes", {}))
             if self.engine is not None and data.get("maschinen"):
                 self.engine.profile_merge(data["maschinen"])
+            if self.engine is not None:
+                self.engine.saisonspur_abgleichen()
             # Advance only on success, so a failed round is simply retried with
             # the same window rather than losing rows.
             self.cursor = data.get("server_time", time.time())

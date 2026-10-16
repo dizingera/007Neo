@@ -650,3 +650,18 @@ label.button { display: inline-flex; align-items: center; cursor: pointer; }
 .einrichten .haken { width: 1.6em; text-align: center; }
 .einrichten .schritt-text { margin: 6px 0; font-size: .95em; }
 .einrichten .tasten { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+
+/* Erntejahr direkt in der Anwendung: auch in eingebetteten Tablet-Browsern. */
+.sheet.aussaat-dialog {
+  display: none; inset: 0; margin: auto; width: min(480px, calc(100vw - 24px));
+  height: fit-content; max-height: calc(100dvh - 24px); overflow: auto;
+  padding: 24px; color: var(--text); border: 2px solid var(--m-linie); border-radius: 14px;
+}
+.sheet.aussaat-dialog[open] { display: block; }
+.sheet.aussaat-dialog::backdrop { background: #000a; }
+.sheet.aussaat-dialog h2 { margin-top: 0; }
+.sheet.aussaat-dialog p { line-height: 1.5; }
+.sheet.aussaat-dialog input { width: 100%; }
+.sheet.aussaat-dialog .row { margin-top: 20px; justify-content: flex-end; }
+
+.sheet .item .actions button.an { border-color: var(--m-gruen); color: var(--m-gruen); }

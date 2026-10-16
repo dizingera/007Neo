@@ -1,5 +1,36 @@
 # Bedienung im Feld
 
+## Gemeinsame Aussaat-Fahrgassen ab 1.5.40
+
+Der Master im Büro verbindet die Arbeiter-Tablets. Beim Säen auf **Tablet A**
+den Saatplan mit **Als Aussaat übernehmen** festlegen oder die gefahrene Spur
+mit **Als Aussaat festlegen** kennzeichnen und das **Erntejahr** auswählen.
+Damit sind Spur, Versatz, Fahrgassenabstand und die im Saatplan festgelegten
+Fahrgassenpositionen dem Feld zugeordnet. Ein begonnener Arbeitsauftrag allein
+veröffentlicht noch keine neue Aussaat.
+
+Nach erfolgreichem Abgleich **Tablet A → Büro-Master → Tablet B** lädt Tablet B
+beim Öffnen dieses Feldes dieselbe Aussaat. Beim Wechsel auf Streuer oder
+Spritze bleiben die Fahrgassen an denselben Stellen in Metern. Die jeweilige
+Gerätebreite bestimmt weiterhin die lokale Darstellung und Spurführung. Ein
+Jahreswechsel löscht die Fahrgassen nicht; **erst eine neu festgelegte Aussaat**
+ersetzt den maßgebenden Stand. Das Erntejahr ist eine ausdrückliche Zuordnung,
+kein automatisches Ablaufdatum. Saatplanstände anderer Erntejahre bleiben gespeichert.
+
+Kommt eine neue Aussaat an, während das Feld schon geladen ist, wird sie ohne
+laufende Arbeit, ohne Aufzeichnung/Wende und ohne Lenkfreigabe übernommen.
+Während Arbeit oder Lenkfreigabe bleibt die bisherige Spur aktiv. Die Anzeige
+meldet neue Fahrgassen; nach der Arbeit das Feld neu laden oder erneut abgleichen,
+sobald die Lenkung ausgeschaltet ist. Es gibt keinen automatischen Spurwechsel
+während einer laufenden Arbeit oder freigegebener Lenkung.
+
+Alle Geräte benötigen diesen Programmstand und denselben erreichbaren Master.
+Bei fehlender Verbindung bleiben die zuletzt übertragenen Daten lokal verfügbar.
+Eine neue Aussaat von A erreicht B erst nach dem nächsten erfolgreichen Abgleich
+beider Tablets mit dem Master. Auch verspätet eingehende Offline-Daten werden
+vom Master weitergereicht. Der Master berechnet dabei keine laufenden Lenkbefehle;
+diese und die Lenkabstimmung bleiben auf dem jeweiligen Traktor-Tablet.
+
 ## Traktor-Tablet und Büro-Master ab 1.5.39
 
 Das Tablet im Traktor berechnet die Lenkbefehle aus seinen eigenen GPS- und
@@ -190,13 +221,15 @@ Beim Säen entscheidet sich, wo das ganze Jahr gefahren wird: die Fahrgassen.
 Düngen und Spritzen sollen später genau diese Spuren treffen, sonst liegt die
 Spritze neben der Fahrgasse und fährt durch den Bestand. Deshalb wird die
 Spur vom Säen als **Saisonspur** gespeichert: **Menü → Felder → Spuren ▾ →
-Als Saisonspur** (ein Tipp; nochmal tippen nimmt sie wieder weg). Der Abstand
+Als Aussaat festlegen**. Das Erntejahr auswählen, z. B. 2027 für die
+Herbstaussaat 2026. **Aussaat erneuern** legt die nächste Aussaat ausdrücklich
+fest; **Fahrgassen aufheben** entfernt die Zuordnung nach Bestätigung. Der Abstand
 der Fahrgassen ist die **Fahrgassenweite**, oben auf der Seite *Spuren*
 (Taste „Fahrgassenweite: 21 m", Vorgabe 21 m = Spritze und Streuer).
 Eine geänderte Fahrgassenweite gilt nur für neu gesetzte Saisonspuren – schon
 angelegte Fahrgassen bleiben, wo sie sind. Von da an
 
-* wird diese Spur beim Laden des Feldes **automatisch aktiv** – dieses Jahr,
+* wird diese Spur beim Laden des Feldes **automatisch aktiv** – bis zur nächsten festgelegten Aussaat,
   bei jeder Arbeit, ohne dass jemand daran denken muss;
 * liegen die Fahrgassen **fest in Metern**: alle 21 m ab Spur 0, bei jeder
   Arbeitsbreite an derselben Stelle. Auf dem Bildschirm sind sie **rot
@@ -218,9 +251,9 @@ Streuer fahren mit 21 m schon in der ersten Spur darauf. Welche Seite innen
 ist, weiß AgriPilot aus der Feldgrenze. Ohne Saisonspur bleibt Spur 0 auf der
 Grenze wie bisher.
 
-Im nächsten Jahr zählt die Saisonspur nicht mehr; beim Laden kommt dann wieder
-die zuletzt benutzte Spur, bis die neue Saat ihre Saisonspur bekommt. Alte
-Saisonspuren bleiben mit Jahreszahl in der Liste stehen.
+Der Kalenderwechsel beendet die Fahrgassen nicht. Maßgebend ist die zuletzt
+festgelegte Aussaat, auch über den Jahreswechsel hinweg. Bloßes Umbenennen
+einer alten Spur macht sie nicht zur neuen Aussaat. Alte Saisonspuren bleiben mit Erntejahr in der Liste stehen.
 
 ### Saatplan: den Schlag vor der Aussaat durchplanen (Menü → Saatplan)
 
@@ -260,7 +293,7 @@ Vorschlag. Läuft ein Rand schräg zur Fahrtrichtung (Keil), passen 21 m dort
 nicht durchgehend: Konflikt, Vorschlag Teilbreitenschaltung oder an diesem Rand
 beginnen. Ein zu schmaler Schlag (unter 2 × 21 m) hat kein Hauptfeld.
 
-**Als Saisonspur übernehmen** legt zwei AB-Spuren an: „Saatplan … A“ durch die
+**Als Aussaat übernehmen** legt zwei AB-Spuren an: „Saatplan … A“ durch die
 erste Fahrgasse (10,5 m von der Startkante) – sie ist die Saisonspur und kommt
 beim Laden des Feldes – und „Saatplan … B“ durch die Fahrgasse von B. Die
 B-Spur beim Säen von B her laden: dort liegt das Raster um den Rest versetzt. Sie kennt genau

@@ -92,6 +92,8 @@ class Engine:
         self.field: Optional[dict] = None
         self.plane: Optional[geo.LocalPlane] = None
         self.line: Optional[GuidanceLine] = None
+        self._saison_stand = None
+        self.saisonspur_neu = None
         self.coverage = CoverageMap(cell_size=0.5)
         self.job: Optional[dict] = None
 
@@ -586,9 +588,11 @@ class Engine:
         self.coverage = CoverageMap(cell_size=0.5)
         self.line = None
         # Die Saisonspur zuerst: die Fahrgassen vom Säen sollen beim Düngen und
-        # Spritzen wieder unter den Rädern liegen - das ganze Jahr, ohne dass
+        # Spritzen wieder unter den Rädern liegen – bis zur nächsten Aussaat, ohne dass
         # jemand daran denken muss. Sonst die zuletzt benutzte Spur.
-        saison = self.store.season_line(field_id, time.localtime().tm_year)
+        saison = self.store.season_line(field_id)
+        self._saison_stand = self._saison_kennung(saison)
+        self.saisonspur_neu = None
         lines = self.store.list_lines(field_id)
         # Randspuren (aus der Grenze erzeugt) gehen nicht vor: sie sind alle
         # gleichzeitig entstanden, "zuletzt benutzt" hieße sonst "zufällig eine
@@ -672,18 +676,57 @@ class Engine:
                 raise ValueError("Der Fahrgassenabstand kann nicht negativ sein")
             werte["fahrgasse_m"] = fahrgasse
             # Fahrgassen gehören zu einer Saison. Ohne Angabe ist es diese.
-            werte["saison"] = int(values.get("saison") or time.localtime().tm_year) if fahrgasse > 0 else 0
+            werte["saison"] = self._erntejahr(values.get("saison")) if fahrgasse > 0 else 0
         elif "saison" in values:
-            werte["saison"] = int(values["saison"] or 0)
-        record = self.store.update_line(line_id, **werte)
+            werte["saison"] = self._erntejahr(values["saison"]) if values["saison"] else 0
+        vorher = self.store.get_line(line_id)
+        if (vorher and vorher["saison"] > 0 and vorher["fahrgasse_m"] > 0
+                and werte.get("saison", 0) > 0 and werte["saison"] != vorher["saison"]):
+            # Dieselbe AB-Linie kann im nächsten Erntejahr wieder benutzt werden.
+            # Das Vorjahr bleibt eine eigene Fassung, statt seine Zuordnung zu verlieren.
+            kopie = {k: v for k, v in vorher.items() if k not in ("id", "aussaat_at")}
+            record = self.store.save_line({**kopie, **werte})
+        else:
+            record = self.store.update_line(line_id, **werte)
         if record is None:
             raise KeyError("Spurlinie nicht gefunden")
         if self.line is not None and self.line.id == line_id:
+            self.line.id = record["id"]
             self.line.name = record["name"]
             self.line.fahrgasse_m = record["fahrgasse_m"]
             self.line.saison = record["saison"]
             self.line.rand_innen = self._rand_innen(self.line)
+            self._remember_session()
         return record
+
+    @staticmethod
+    def _erntejahr(wert=None) -> int:
+        if wert is None:
+            return time.localtime().tm_year
+        text = str(wert)
+        if not text.isdigit() or not 2000 <= int(text) <= 2200:
+            raise ValueError("Erntejahr bitte als ganze Jahreszahl von 2000 bis 2200 angeben")
+        return int(text)
+
+    @staticmethod
+    def _saison_kennung(spur):
+        return (spur["id"], spur.get("aussaat_at", 0)) if spur else None
+
+    def saisonspur_abgleichen(self) -> None:
+        """Empfangene Aussaat im Stillstand übernehmen, nie während Arbeit/Lenkung."""
+        if self.field is None:
+            return
+        spur = self.store.season_line(self.field["id"])
+        kennung = self._saison_kennung(spur)
+        if kennung is None or kennung == self._saison_stand:
+            self.saisonspur_neu = None
+            return
+        if (self.job is not None or getattr(self.steering, "armed", False)
+                or self.record_mode is not None or self.turn is not None):
+            self.saisonspur_neu = {k: spur[k] for k in ("id", "name", "saison")}
+            return
+        self.load_line(spur["id"])
+        self.note(f"Fahrgassen Erntejahr {spur['saison']} vom Abgleich übernommen")
 
     def create_field(self, name: str) -> dict:
         """Anchor a new field at the current position.
@@ -715,6 +758,9 @@ class Engine:
         self.line.saison = int(record.get("saison") or 0)
         self.line.fahrgassen_liste = [float(x) for x in (record.get("fahrgassen") or [])]
         self.line.rand_innen = self._rand_innen(self.line)
+        if self.field is not None:
+            self._saison_stand = self._saison_kennung(self.store.season_line(self.field["id"]))
+            self.saisonspur_neu = None
         zusatz =f" · Fahrgassen alle {self.line.fahrgasse_m:g} m" if self.line.fahrgasse_m else ""
         self.note(f"Spur aktiv: {record['name']}{zusatz}")
         self._remember_session()
@@ -874,19 +920,19 @@ class Engine:
         vorgabe = {**self.saatplan(feld["id"])["vorgabe"], **gespeichert, **(werte or {}), "start": wahl["id"]}
         return self.saatplan_planen(feld["id"], vorgabe)
 
-    def saatplan_uebernehmen(self, field_id: str) -> dict:
+    def saatplan_uebernehmen(self, field_id: str, saison=None) -> dict:
         """Den Plan als Saisonspur speichern: eine AB-Spur durch eine Fahrgasse,
-        Fahrgassen alle fahrgasse_m. Ein früherer Saatplan des Feldes wird ersetzt."""
+        Fahrgassen alle fahrgasse_m. Ersetzt den Saatplan desselben Erntejahres."""
         feld, _ = self._feld_mit_grenze(field_id)
         gespeichert = self.store.get_setting(f"saatplan:{field_id}") or {}
         plan = gespeichert.get("plan")
         if not plan:
             raise ValueError("Erst planen, dann übernehmen")
+        jahr = self._erntejahr(saison)
         for alt in self.store.list_lines(field_id):
-            if alt["name"].startswith(SAATPLAN_PRAEFIX):
+            if alt["name"].startswith(SAATPLAN_PRAEFIX) and alt["saison"] == jahr:
                 self.store.delete_line(alt["id"])
         kante = plan.get("kante", "").replace(randspuren_module.NAMENS_PRAEFIX, "", 1)
-        jahr = time.localtime().tm_year
         # Mit Gegenseite zwei Spuren: B (durch die Fahrgasse von B) für das
         # Säen von B her - dort liegt das Raster anders - und A für alles
         # andere. A wird zuletzt gespeichert und ist damit die Saisonspur, die
@@ -1925,6 +1971,7 @@ class Engine:
                 "fahrbar": self.turn_preview_fahrbar,
             },
             "line": self.line.to_dict() if self.line else None,
+            "saisonspur_neu": self.saisonspur_neu,
             # Liegt die Maschine gerade auf einer Fahrgasse? Dann muss der Fahrer
             # beim Säen die Fahrgassenschaltung setzen.
             "fahrgasse_aktiv": bool(self.line is not None and self.guidance.active

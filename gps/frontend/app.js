@@ -282,6 +282,7 @@ function updateHud(s) {
   if (s.system && s.system.update_online) {
     hint.push(`Neue Version ${s.system.update_online} verfügbar – Menü → System → Aktualisierung`);
   }
+  if (s.saisonspur_neu) hint.push(`Neue Fahrgassen für Erntejahr ${s.saisonspur_neu.saison} vorhanden – nach der Arbeit Feld neu laden`);
   if (s.guidance.active && s.guidance.message) hint.push(s.guidance.message);
   // Markieren an, aber jede Sektion automatisch aus: die Maschine steht
   // außerhalb der Grenze (oder auf schon bearbeiteter Fläche). Ohne den Satz
@@ -1412,7 +1413,7 @@ function menueSchliessen() {
 
 el('btnMenu').onclick = menueOeffnen;
 document.addEventListener('keydown', (event) => {
-  if (event.key === 'Escape' && !el('sheet').hidden) menueSchliessen();
+  if (event.key === 'Escape' && !el('aussaatDialog').open && !el('sheet').hidden) menueSchliessen();
 });
 
 /* Ein Reiter lässt sich direkt ansteuern: /#menu=setup öffnet die Inbetriebnahme.
@@ -1812,7 +1813,9 @@ el('saatplanZeigen').onchange = (event) => { saat.zeigen = event.target.checked;
 el('btnSaatplanUebernehmen').onclick = async () => {
   const feld = state.live && state.live.field;
   if (!feld) return;
-  const antwort = await api('POST', `/api/fields/${feld.id}/saatplan/uebernehmen`);
+  const jahr = await erntejahrWaehlen();
+  if (jahr === null) return;
+  const antwort = await api('POST', `/api/fields/${feld.id}/saatplan/uebernehmen`, { saison: jahr });
   if (antwort) {
     toast(saat.plan && saat.plan.saisonspur_b
       ? `Saisonspur „${antwort.data.name}“ aktiv – an B die Spur „… B“ laden`
@@ -2374,16 +2377,44 @@ el('btnRandspurenAlle').onclick = async () => {
 
 const aufgeklappt = new Set();   // Felder, deren Spuren gerade offen sind
 
+function letzteAussaat(lines) {
+  return (lines || []).filter((line) => line.saison > 0 && line.fahrgasse_m > 0)
+    .sort((a, b) => (b.aussaat_at || 0) - (a.aussaat_at || 0) || b.id.localeCompare(a.id))[0] || null;
+}
+
+function erntejahrWaehlen(vorgabe = new Date().getFullYear()) {
+  const dialog = el('aussaatDialog');
+  const eingabe = el('aussaatJahr');
+  eingabe.value = String(vorgabe);
+  dialog.returnValue = '';
+  return new Promise((resolve) => {
+    dialog.onclose = () => {
+      // Die Spurzeilen werden beim Abgleich neu aufgebaut; der Menü-Reiter bleibt.
+      const zurueck = document.querySelector('.tab[aria-selected="true"]') || el('btnMenu');
+      zurueck.focus({ preventScroll: true });
+      if (dialog.returnValue !== 'uebernehmen') { resolve(null); return; }
+      const text = eingabe.value.trim();
+      const jahr = Number(text);
+      if (!/^\d{4}$/.test(text) || jahr < 2000 || jahr > 2200) {
+        toast('Bitte ein Erntejahr von 2000 bis 2200 eingeben');
+        resolve(null);
+        return;
+      }
+      resolve(jahr);
+    };
+    dialog.showModal();
+  });
+}
+
 function renderFields(fields, lines) {
   const host = el('fieldList');
   const currentId = state.live && state.live.field ? state.live.field.id : null;
-  const jahr = new Date().getFullYear();
   const jeFeld = {};
   (lines || []).forEach((line) => { (jeFeld[line.field_id] = jeFeld[line.field_id] || []).push(line); });
   host.innerHTML = '';
   fields.forEach((field) => {
     const spuren = jeFeld[field.id] || [];
-    const saison = spuren.find((l) => l.saison === jahr && l.fahrgasse_m > 0);
+    const saison = letzteAussaat(spuren);
     const offen = aufgeklappt.has(field.id);
     const row = item({
       active: field.id === currentId,
@@ -2391,7 +2422,7 @@ function renderFields(fields, lines) {
       sub: `${field.area_ha.toFixed(2)} ha` +
            (field.boundary.length ? ` · ${field.boundary.length} Grenzpunkte` : ' · keine Grenze') +
            ` · ${spuren.length} ${spuren.length === 1 ? 'Spur' : 'Spuren'}` +
-           (saison ? ` · Fahrgassen ${jahr}: alle ${saison.fahrgasse_m.toFixed(0)} m` : ''),
+           (saison ? ` · Fahrgassen Erntejahr ${saison.saison}: alle ${saison.fahrgasse_m.toFixed(0)} m` : ''),
       actions: [
         ['Laden', async () => {
           if (await api('POST', `/api/fields/${field.id}/load`)) {
@@ -2427,7 +2458,7 @@ function renderFields(fields, lines) {
       ],
     });
     host.appendChild(row);
-    if (offen) host.appendChild(spurenListe(field, spuren, jahr));
+    if (offen) host.appendChild(spurenListe(field, spuren));
   });
   if (!fields.length) host.innerHTML = '<p class="note">Noch keine Felder angelegt.</p>';
 }
@@ -2435,27 +2466,28 @@ function renderFields(fields, lines) {
 /* Die Spuren eines Feldes, unter dem Feld. Eine davon darf die Saisonspur
  * sein - die mit den Fahrgassen. Sie wird beim Laden des Feldes automatisch
  * aktiv, das ganze Jahr. */
-function spurenListe(field, spuren, jahr) {
+function spurenListe(field, spuren) {
   const box = document.createElement('div');
   box.className = 'unterliste';
-  spuren.forEach((line) => box.appendChild(spurZeile(field.id, line, jahr)));
+  const saison = letzteAussaat(spuren);
+  spuren.forEach((line) => box.appendChild(spurZeile(field.id, line, saison && saison.id)));
   if (!spuren.length) box.innerHTML = '<p class="note">Noch keine Spur für dieses Feld – A/B, A+ oder Kurve in der Kabine anlegen.</p>';
   return box;
 }
 
 /* Eine Spur als Zeile - dieselbe unter dem Feld wie im Reiter Spuren, damit
  * die Saisonspur an beiden Stellen gesetzt werden kann. */
-function spurZeile(fieldId, line, jahr) {
+function spurZeile(fieldId, line, aussaatId) {
   const currentId = state.live && state.live.line ? state.live.line.id : null;
   const feldGeladen = state.live && state.live.field && state.live.field.id === fieldId;
-  const saison = line.saison === jahr && line.fahrgasse_m > 0;
+  const saison = line.id === aussaatId;
   const row = item({
     active: line.id === currentId,
     title: line.name,
     sub: `${line.mode === 'ab' ? 'AB-Linie' : 'Kurve'} · Abstand ${line.spacing_m.toFixed(2)} m` +
          (line.fahrgasse_m > 0 ? ` · Fahrgassen alle ${line.fahrgasse_m.toFixed(0)} m` +
-           (line.saison ? ` (Saison ${line.saison})` : '') : '') +
-         (saison ? ' · Saisonspur' : ''),
+           (line.saison ? ` (Erntejahr ${line.saison})` : '') : '') +
+         (saison ? ' · Aktuelle Aussaat' : ''),
     actions: [
       ['Laden', async () => {
         // Die Spur gehört zu ihrem Feld: erst das Feld, dann die Spur.
@@ -2464,15 +2496,19 @@ function spurZeile(fieldId, line, jahr) {
           toast(`Spur "${line.name}" aktiv`); el('sheet').hidden = true;
         }
       }],
-      [saison ? 'Saisonspur ✓' : 'Als Saisonspur', async () => {
-        // Ein Tipp: Saisonspur mit der eingestellten Fahrgassenweite, noch
-        // einer nimmt sie wieder weg. Die Weite steht oben im Reiter.
-        const antwort = await api('POST', `/api/lines/${line.id}`, { saisonspur: !saison, saison: jahr });
+      [saison ? 'Aussaat erneuern' : 'Als Aussaat festlegen', async () => {
+        const jahr = await erntejahrWaehlen(line.saison || undefined);
+        if (jahr === null) return;
+        const antwort = await api('POST', `/api/lines/${line.id}`, { saisonspur: true, saison: jahr });
         if (antwort) {
-          toast(!saison ? `Saisonspur ${jahr}: Fahrgassen alle ${antwort.data.fahrgasse_m} m` : 'Keine Fahrgassen mehr');
+          toast(`Aussaat Erntejahr ${jahr}: Fahrgassen alle ${antwort.data.fahrgasse_m} m`);
           refreshLists();
         }
       }],
+      ...(line.saison > 0 && line.fahrgasse_m > 0 ? [['Fahrgassen aufheben', async () => {
+        if (!confirm(`Fahrgassen der Aussaat „${line.name}“ aufheben?`)) return;
+        if (await api('POST', `/api/lines/${line.id}`, { saisonspur: false })) refreshLists();
+      }]] : []),
       ['Umbenennen', async () => {
         const name = prompt('Neuer Name der Spur', line.name);
         if (name === null || !name.trim()) return;
@@ -2491,9 +2527,9 @@ function spurZeile(fieldId, line, jahr) {
 function renderLines(lines) {
   const host = el('lineList');
   const fieldId = state.live && state.live.field ? state.live.field.id : null;
-  const jahr = new Date().getFullYear();
+  const saison = letzteAussaat(lines);
   host.innerHTML = '';
-  lines.forEach((line) => host.appendChild(spurZeile(fieldId, line, jahr)));
+  lines.forEach((line) => host.appendChild(spurZeile(fieldId, line, saison && saison.id)));
   if (!lines.length) host.innerHTML = fieldId
     ? '<p class="note">Für dieses Feld gibt es noch keine Spur.</p>'
     : '<p class="note">Kein Feld geladen – Spuren gehören zu ihrem Feld (Menü → Felder).</p>';

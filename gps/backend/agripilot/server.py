@@ -729,8 +729,8 @@ def create_app(config=None) -> FastAPI:
         return guard(engine.saatplan_hier, payload)
 
     @api.post("/api/fields/{field_id}/saatplan/uebernehmen")
-    async def saatplan_uebernehmen(field_id: str):
-        return guard(engine.saatplan_uebernehmen, field_id)
+    async def saatplan_uebernehmen(field_id: str, payload: dict = Body(default=None)):
+        return guard(engine.saatplan_uebernehmen, field_id, (payload or {}).get("saison"))
 
     @api.delete("/api/fields/{field_id}/saatplan")
     async def saatplan_loeschen(field_id: str):

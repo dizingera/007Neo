@@ -2967,8 +2967,10 @@ class SaisonspurTest(unittest.TestCase):
     def test_the_season_line_is_loaded_with_the_field(self):
         jahr = time.localtime().tm_year
         self._spur("Zuletzt")
-        saison = self._spur("Saat", saison=jahr, fahrgasse_m=24.0)
+        # Der historische Stand entsteht vor der aktuellen Aussaat. Der Kalender
+        # begrenzt die Gültigkeit nicht mehr; maßgebend ist die letzte Aussaat.
         self._spur("Vorjahr", saison=jahr - 1, fahrgasse_m=24.0)
+        saison = self._spur("Saat", saison=jahr, fahrgasse_m=24.0)
         self.engine.load_field(self.feld["id"])
         self.assertEqual(self.engine.line.id, saison["id"])
         self.assertEqual(self.engine.line.fahrgasse_m, 24.0)
