@@ -65,6 +65,7 @@ function geraeteLage(s, versatz) {
     kurs: kurs + dh,
     stuecke: window.FlaecheModul.querStuecke(s.sections, (s.profile || {}).width_m || 3),
     aktiv: Boolean(s.job),
+    auftrag: s.job ? s.job.id : null,
   };
 }
 
@@ -190,6 +191,7 @@ function updateHud(s) {
   const kontur = s.line && s.line.mode === 'contour';
   el('pass').textContent = guidance.active ? String(guidance.pass_number) : '--';
   el('passLabel').textContent = kontur ? 'Ring' : 'Spur';
+  el('markLegende').hidden = !(s.job || (s.coverage && s.coverage.area_ha > 0));
   el('area').textContent = (s.job ? s.job.area_ha : (s.coverage ? s.coverage.area_ha : 0)).toFixed(2).replace('.', ',');
 
   // Hang und Ausgleich: die Zahl, die erklärt, warum die Spur am Hang sonst

@@ -59,9 +59,44 @@
         seitlich(alt.pos, alt.kurs, links), seitlich(alt.pos, alt.kurs, rechts),
         seitlich(neu.pos, neu.kurs, rechts), seitlich(neu.pos, neu.kurs, links),
       ];
-      const mitte = seitlich(neu.pos, neu.kurs, (links + rechts) / 2);
+      const mitte = [0, 1].map((achse) => ecken.reduce((summe, p) => summe + p[achse], 0) / 4);
       return { ecken, mitte };
     });
+  }
+
+  /* Nur Breiten, die an beiden Messpunkten eingeschaltet waren. Neue
+   * Teilbreiten beginnen hier; sie färben die vergangene Strecke nicht nach. */
+  function gemeinsameStuecke(alt, neu) {
+    const a = [...alt.stuecke].sort((x, y) => x[0] - y[0]);
+    const b = [...neu.stuecke].sort((x, y) => x[0] - y[0]);
+    const gemeinsam = [];
+    for (let i = 0, j = 0; i < a.length && j < b.length;) {
+      const links = Math.max(a[i][0], b[j][0]), rechts = Math.min(a[i][1], b[j][1]);
+      if (rechts > links) gemeinsam.push([links, rechts]);
+      if (a[i][1] <= b[j][1]) i++; else j++;
+    }
+    return gemeinsam;
+  }
+
+  /* Auch längs höchstens ein halber Meter: ein Anschlussfehler bekommt nur
+   * dort Bernstein, wo er tatsächlich auf schon bearbeitete Zellen trifft. */
+  function streifenVierecke(alt, neu) {
+    const stuecke = gemeinsameStuecke(alt, neu);
+    const winkel = ((neu.kurs - alt.kurs + 180) % 360 + 360) % 360 - 180;
+    const weg = Math.hypot(neu.pos[0] - alt.pos[0], neu.pos[1] - alt.pos[1]);
+    const anzahl = Math.max(1, Math.ceil(weg / .5), Math.ceil(Math.abs(winkel) / 5));
+    const lage = (t) => ({ pos: alt.pos.map((p, i) => p + (neu.pos[i] - p) * t), kurs: alt.kurs + winkel * t });
+    const liste = [];
+    for (let i = 0; i < anzahl; i++) liste.push(...vierecke(lage(i / anzahl), lage((i + 1) / anzahl), stuecke));
+    return liste;
+  }
+
+  function viereckMalen(c, ecken) {
+    c.beginPath();
+    ecken.forEach(([x, y], i) => (i ? c.lineTo(x, y) : c.moveTo(x, y)));
+    c.closePath(); c.fill();
+    c.lineWidth = 0.6 / PX_PRO_M;
+    c.stroke();
   }
 
   /* 'rgba(93,255,142,.22)' oder '#5dff8e' -> deckende Farbe und Deckkraft. */
@@ -117,21 +152,29 @@
     viereck(ecken) {
       const xs = ecken.map((p) => p[0]), ys = ecken.map((p) => p[1]);
       this.jeKachel(Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys), (c) => {
-        c.beginPath();
-        ecken.forEach(([x, y], i) => (i ? c.lineTo(x, y) : c.moveTo(x, y)));
-        c.closePath();
-        c.fill();
-        // Ein Hauch Kontur schließt die Haarfugen zwischen zwei Vierecken.
-        c.lineWidth = 0.6 / PX_PRO_M;
-        c.stroke();
+        viereckMalen(c, ecken);
       });
     }
 
     zellen(liste, groesse) {
+      const zeilen = new Map();
       for (const [ix, iy] of liste) {
-        const x = ix * groesse, y = iy * groesse;
-        this.jeKachel(x, y, x + groesse * 0.999, y + groesse * 0.999,
-          (c) => c.fillRect(x, y, groesse, groesse));
+        if (!zeilen.has(iy)) zeilen.set(iy, new Set());
+        zeilen.get(iy).add(ix);
+      }
+      for (const [iy, zellen] of zeilen) {
+        const xs = [...zellen].sort((a, b) => a - b);
+        let anfang = xs[0], ende = anfang;
+        const malen = () => {
+          const x = anfang * groesse, y = iy * groesse, breite = (ende - anfang + 1) * groesse;
+          this.jeKachel(x, y, x + breite - 1e-9, y + groesse - 1e-9,
+            (c) => c.fillRect(x, y, breite, groesse));
+        };
+        for (const x of xs.slice(1)) {
+          if (x === ende + 1) ende = x;
+          else { malen(); anfang = ende = x; }
+        }
+        malen();
       }
     }
 
@@ -146,19 +189,41 @@
       }
     }
 
-    zeichnen(ctx, x0, y0, x1, y1, alpha) {
-      ctx.save();
-      ctx.globalAlpha = alpha;
-      ctx.imageSmoothingEnabled = true;
-      for (const k of this.kacheln.values()) {
-        const kx0 = k.tx * KACHEL_M, ky0 = k.ty * KACHEL_M;
-        if (kx0 > x1 || kx0 + KACHEL_M < x0 || ky0 > y1 || ky0 + KACHEL_M < y0) continue;
-        ctx.save();
-        ctx.translate(kx0, ky0 + KACHEL_M);
-        ctx.scale(1 / PX_PRO_M, -1 / PX_PRO_M);
-        ctx.drawImage(k.leinwand, 0, 0);
-        ctx.restore();
+    zeichnen(ctx, x0, y0, x1, y1, alpha, ecken = []) {
+      const vorschau = new Map();
+      for (const e of ecken) {
+        const xs = e.map(p => p[0]), ys = e.map(p => p[1]);
+        for (let tx = Math.floor(Math.min(...xs) / KACHEL_M); tx <= Math.floor(Math.max(...xs) / KACHEL_M); tx++) {
+          for (let ty = Math.floor(Math.min(...ys) / KACHEL_M); ty <= Math.floor(Math.max(...ys) / KACHEL_M); ty++) {
+            const key = tx + ',' + ty;
+            if (!vorschau.has(key)) vorschau.set(key, { tx, ty, ecken: [] });
+            vorschau.get(key).ecken.push(e);
+          }
+        }
       }
+      ctx.save(); ctx.globalAlpha = alpha; ctx.imageSmoothingEnabled = true;
+      const malen = (tx, ty, quelle, extra) => {
+        const x = tx * KACHEL_M, y = ty * KACHEL_M;
+        if (x > x1 || x + KACHEL_M < x0 || y > y1 || y + KACHEL_M < y0) return;
+        if (extra) {
+          // Eine wiederverwendete Arbeitskachel: Vorschau und gespeicherte
+          // Fläche werden zusammen nur einmal transparent aufs Bild gelegt.
+          if (!this.arbeitskachel) this.arbeitskachel = this.bauen(KACHEL_PX);
+          const c = this.arbeitskachel.getContext('2d');
+          c.setTransform(1, 0, 0, 1, 0, 0); c.clearRect(0, 0, KACHEL_PX, KACHEL_PX);
+          if (quelle) c.drawImage(quelle, 0, 0);
+          c.setTransform(PX_PRO_M, 0, 0, -PX_PRO_M, -x * PX_PRO_M, (y + KACHEL_M) * PX_PRO_M);
+          c.fillStyle = this.farbe; c.strokeStyle = this.farbe;
+          for (const e of extra.ecken) viereckMalen(c, e);
+          quelle = this.arbeitskachel;
+        }
+        ctx.save(); ctx.translate(x, y + KACHEL_M); ctx.scale(1 / PX_PRO_M, -1 / PX_PRO_M);
+        ctx.drawImage(quelle, 0, 0); ctx.restore();
+      };
+      for (const [key, k] of this.kacheln) {
+        malen(k.tx, k.ty, k.leinwand, vorschau.get(key)); vorschau.delete(key);
+      }
+      for (const extra of vorschau.values()) malen(extra.tx, extra.ty, null, extra);
       ctx.restore();
     }
   }
@@ -215,13 +280,12 @@
     fahrt(lage, jetzt) {
       const alt = this.letzte;
       this.letzte = lage.aktiv ? lage : null;
-      if (!lage.aktiv || !alt || !lage.stuecke.length) return [];
+      if (!lage.aktiv || !alt || alt.auftrag !== lage.auftrag || !lage.stuecke.length) return [];
       const weg = Math.hypot(lage.pos[0] - alt.pos[0], lage.pos[1] - alt.pos[1]);
       if (weg > MAX_SCHRITT_M || weg < 1e-4) {
-        if (weg < 1e-4) this.letzte = alt;
         return [];
       }
-      const liste = vierecke(alt, lage, lage.stuecke);
+      const liste = streifenVierecke(alt, lage);
       for (const v of liste) {
         v.doppelt = this.istDoppelt(v.mitte, jetzt);
         this.bedeckt.viereck(v.ecken);
@@ -232,23 +296,16 @@
 
     /* Das letzte Stück bis zur angezeigten Lage, nur auf den Bildschirm - so
      * wächst der Streifen mit dem Gerät statt in Schritten hinterher. */
-    zeichnen(ctx, sicht, anzeige) {
+    zeichnen(ctx, sicht, anzeige, jetzt = performance.now()) {
       const [x0, y0, x1, y1] = sicht;
-      this.bedeckt.zeichnen(ctx, x0, y0, x1, y1, this.farben.bedeckt.alpha);
-      this.doppelt.zeichnen(ctx, x0, y0, x1, y1, this.farben.doppelt.alpha);
-      if (!anzeige || !this.letzte || !anzeige.stuecke.length) return;
-      const weg = Math.hypot(anzeige.pos[0] - this.letzte.pos[0], anzeige.pos[1] - this.letzte.pos[1]);
-      if (weg > 3 || weg < 1e-3) return;
-      ctx.save();
-      ctx.globalAlpha = this.farben.bedeckt.alpha;
-      ctx.fillStyle = this.farben.bedeckt.deckend;
-      for (const v of vierecke(this.letzte, anzeige, this.letzte.stuecke)) {
-        ctx.beginPath();
-        v.ecken.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)));
-        ctx.closePath();
-        ctx.fill();
+      let ende = [];
+      if (anzeige && anzeige.aktiv && this.letzte && anzeige.auftrag === this.letzte.auftrag) {
+        const weg = Math.hypot(anzeige.pos[0] - this.letzte.pos[0], anzeige.pos[1] - this.letzte.pos[1]);
+        if (weg <= 3 && weg >= 1e-3) ende = streifenVierecke(this.letzte, anzeige);
       }
-      ctx.restore();
+      this.bedeckt.zeichnen(ctx, x0, y0, x1, y1, this.farben.bedeckt.alpha, ende.map(v => v.ecken));
+      this.doppelt.zeichnen(ctx, x0, y0, x1, y1, this.farben.doppelt.alpha,
+        ende.filter(v => this.istDoppelt(v.mitte, jetzt)).map(v => v.ecken));
     }
   }
 

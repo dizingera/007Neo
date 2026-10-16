@@ -53,7 +53,7 @@ test('ein Sprung (neu verbunden, versetzt) malt keinen Streifen quer übers Feld
   const f = new Flaeche(attrappe());
   f.fahrt(lage(0), 0);
   assert.deepStrictEqual(f.fahrt(lage(200), 100), []);
-  assert.strictEqual(f.fahrt(lage(201), 200).length, 12);
+  assert.strictEqual(f.fahrt(lage(201), 200).length, 24);
 });
 
 test('die eigene Spur von eben ist keine Überlappung', () => {

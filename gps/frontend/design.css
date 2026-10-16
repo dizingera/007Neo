@@ -247,3 +247,17 @@ body.tag .sheet { --m-linie: #a0b09d; --m-feld-rand: #788e78;
   .sheet:not(.aussaat-dialog):not([hidden]) { animation: none; }
   .stage .feld, .stage .himmel, .stage .led, .stage .ruf, .stage .bar i { transition: none; }
 }
+
+/* Flächenmarkierung: ruhig gefüllt, Überlappung deutlich in Bernstein. */
+:root { --f-flaeche: rgba(72, 204, 119, .40); --f-doppelt: rgba(255, 174, 48, .72); }
+body.tag { --f-flaeche: rgba(23, 140, 70, .38); --f-doppelt: rgba(200, 104, 12, .64); }
+.stage .cluster .mark-legende { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 6px 12px;
+  padding-top: 8px; border-top: 1px solid var(--haar); }
+.stage .cluster .mark-legende span { display: flex; align-items: center; gap: 6px;
+  font-size: 11px; font-weight: 400; letter-spacing: 0; text-transform: none; color: var(--text); }
+.stage .mark-legende i { width: 9px; height: 9px; border-radius: 2px; background: #48cc77; }
+.stage .mark-legende span:last-child i { background: #ffae30; }
+.stage .taste.mark.an { background: color-mix(in srgb, var(--leucht) 16%, var(--panel)); border-color: var(--leucht); }
+/* Lange Arbeitsnamen bleiben in der Taste, der Schaltzustand steht darüber. */
+.stage .taste.mark small { display: -webkit-box; -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical; overflow: hidden; }

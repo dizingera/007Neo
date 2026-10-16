@@ -1,5 +1,25 @@
 # Bedienung im Feld
 
+## Genauere Flächenmarkierung ab 1.5.43
+
+Grün zeigt die bearbeitete Fläche, Bernstein kennzeichnet die Überlappung mit
+bereits bearbeiteten Rasterzellen. Die kleine Legende erscheint bei laufender
+Arbeit oder vorhandener bearbeiteter Fläche. Der aktive Markieren-Schalter hat
+zusätzlich einen grün getönten Hintergrund.
+
+Für die Darstellung wird die Fahrt jetzt auch längs in Abschnitte bis0,5m
+unterteilt. So wird beim Einfahren in eine schon bearbeitete Fläche nur der
+betroffene Abschnitt bernsteinfarben. Das Live-Endstück und die gespeicherte
+Zeichnung werden gemeinsam mit gleichmäßiger Deckkraft angezeigt. Eingelesene
+Rasterzellen erscheinen als zusammenhängende Reihen ohne zusätzliche Fugen.
+Die farbige Vorschau bleibt eine Darstellung; die Hektar- und
+Überlappungsberechnung des Servers verwendet weiterhin ihr ursprüngliches Raster.
+
+Neu eingeschaltete Teilbreiten malen die davor gefahrene Strecke nicht nach.
+Wird im Stand eingeschaltet, beginnt die Markierung bereits beim Losfahren.
+Auftragswechsel verbinden keine getrennten Arbeiten durch einen Streifen.
+Gerätebreite und tatsächlich bestätigte Teilbreiten bleiben maßgebend.
+
 ## Überarbeitete Tablet-Oberfläche ab 1.5.42
 
 Fahransicht und Menü haben ruhigere Flächen, klarere Schriftgrößen und

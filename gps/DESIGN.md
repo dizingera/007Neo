@@ -38,3 +38,11 @@ unterdrückt die kurze Menü-Einblendung. Tag/Nacht sind gleichwertige Ansichten
 Gestaltungsprüfung in eigener Simulator-Datenbank auf Port8092 mit als Demo
 benannten Feldern; keine praktischen Maschinen-/Sonnenlicht-/Handschuhtests.
 Der installierte Büro-Master auf8080 ist vom Designprüflauf getrennt.
+
+## Markierung ab1.5.43
+Bearbeitete Fläche gleichmäßig grün, Überlappung bernsteinfarben; kleine Legende
+bei vorhandener Fläche/laufender Arbeit. Das Live-Endstück wird mit den
+gezeichneten Kacheln einmal pro Farbebene transparent verrechnet. Maßgebend
+bleiben tatsächliche Gerätebreite, bestätigte Sektionen und getrennte Aufträge.
+Lange Arbeitsnamen in der Markieren-Taste höchstens zweizeilig; vollständiger
+Text bleibt im DOM. Server-Hektarberechnung unverändert.
