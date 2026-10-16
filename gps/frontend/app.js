@@ -434,12 +434,13 @@ const ANKER_Y = 0.78;              // wo der Traktor auf der Leinwand sitzt
 /* Hinweise können mehrzeilig werden. Nur bei Größenänderung messen, damit
  * das Livefenster darunter sitzt, ohne bei jedem Datenpaket Layout abzufragen. */
 function statusAbstandMessen() {
-  const unten = document.querySelector('.chips.l').getBoundingClientRect().bottom;
+  const unten = Math.max(...Array.from(document.querySelectorAll('.chips'),
+    (gruppe) => gruppe.getBoundingClientRect().bottom));
   stage.style.setProperty('--status-unterkante', (unten + 10) + 'px');
 }
 if ('ResizeObserver' in window) {
   const statusBeobachter = new ResizeObserver(statusAbstandMessen);
-  statusBeobachter.observe(document.querySelector('.chips.l'));
+  document.querySelectorAll('.chips').forEach((gruppe) => statusBeobachter.observe(gruppe));
 }
 
 function resize() {

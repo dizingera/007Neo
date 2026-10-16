@@ -1,5 +1,22 @@
 # Bedienung im Feld
 
+## Überarbeitete Tablet-Oberfläche ab 1.5.42
+
+Fahransicht und Menü haben ruhigere Flächen, klarere Schriftgrößen und
+kontrastreichere Eingaben. Feld/Spur, Lichtbalken und GPS-Zustand sind getrennt
+angeordnet; auf schmalen Geräten stapeln sich die Statusanzeigen. Die
+Bedienleiste bleibt rechts im Querformat und unten im Hochformat. Der vorhandene
+Schalter **Tag oder Nacht** wechselt weiterhin beide Ansichten.
+
+Das Menü zeigt AgriPilot und die aktuelle Seite im Kopf. Zusammengehörige
+Formulare, Listen und Kalibrierungsschritte sind mit einheitlichen Abständen
+gegliedert. Ungespeicherte Eingaben behalten ihre blaue Markierung. Aktive
+Wenden behalten die deutlich blaue Stopptaste. Tastaturfokus bleibt sichtbar;
+bei reduzierter Bewegung entfällt die neue kurze Menü-Einblendung.
+Die Lenk-, Geräte- und Synchronisationsfunktionen sind unverändert. Keine
+Arbeitsbreiten werden durch diese Gestaltung angepasst. Die Gestaltung und
+lokalen Schriften funktionieren weiterhin ohne Internet.
+
 ## Lenkwerkstatt ab 1.5.41
 
 Unter **Menü → Lenkung** steht oben die Lenkwerkstatt für den gewählten Traktor.
