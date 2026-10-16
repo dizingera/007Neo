@@ -378,8 +378,10 @@ class Engine:
             aktiv = t.pop("aktiv")
             if aktiv and any(t.get(k) != v for k, v in werte.items()):
                 t.update(werte)
-                if stempeln:
-                    t["stand"] = time.time()
+                if stempeln or not self.config.is_master:
+                    # Auch die automatische Abstimmung im Tablet muss als neue
+                    # Traktorfassung zum Büro gelangen; das Gerät bleibt unverändert.
+                    t["stand"] = max(time.time(), float(t.get("stand") or 0.0) + 0.000001)
         self.store.set_setting("traktoren", liste)
 
     def select_traktor(self, traktor_id: str) -> dict:
@@ -444,13 +446,16 @@ class Engine:
             self.select_traktor(rest[0]["id"])
 
     def _traktoren_mergen(self, eingang: dict) -> None:
-        """Traktoren eines anderen Geräts übernehmen: je Traktor gilt der neuere."""
+        """Traktoren abgleichen; Arbeiter behalten ihre Fahrzeug- und Lenkwerte."""
         if not isinstance(eingang.get("traktoren"), list):
             return                                   # ein Gerät mit älterer Version
         lokal = {t["id"]: {k: v for k, v in t.items() if k != "aktiv"}
                  for t in self.list_traktoren()}
         grab = dict(self.store.get_setting("traktoren_geloescht") or {})
+        aktiv_lokal = self.store.get_setting("traktor_aktiv") if not self.config.is_master else None
         for kennung, zeit in (eingang.get("traktoren_geloescht") or {}).items():
+            if kennung == aktiv_lokal:
+                continue  # Der Büro-Abgleich darf den Traktor in der Kabine nicht umschalten.
             grab[kennung] = max(float(zeit or 0.0), float(grab.get(kennung, 0.0)))
         for t in eingang["traktoren"]:
             if not isinstance(t, dict) or not t.get("id") or not (t.get("name") or "").strip():
@@ -461,9 +466,15 @@ class Engine:
             sauber = {"id": str(t["id"]), "name": str(t["name"]).strip(), "stand": stand,
                       **{k: v for k, v in t.items() if k in TRAKTOR_FELDER}}
             alt = lokal.get(t["id"])
+            if alt is not None and not self.config.is_master:
+                # Die Kabine bestimmt ihre Fahrzeug- und Lenkabstimmung. Vom Büro
+                # kommen Namen und Listen, keine Ersatzwerte für den lokalen Einbau.
+                sauber.update({k: alt[k] for k in TRAKTOR_FELDER if k in alt})
             if alt is None or stand > float(alt.get("stand") or 0.0):
                 lokal[t["id"]] = sauber
         for kennung, zeit in grab.items():
+            if kennung == aktiv_lokal:
+                continue
             alt = lokal.get(kennung)
             if alt is not None and float(alt.get("stand") or 0.0) <= float(zeit) and len(lokal) > 1:
                 del lokal[kennung]

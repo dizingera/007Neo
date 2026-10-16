@@ -1,5 +1,29 @@
 # Bedienung im Feld
 
+## Traktor-Tablet und Büro-Master ab 1.5.39
+
+Das Tablet im Traktor berechnet die Lenkbefehle aus seinen eigenen GPS- und
+Sensordaten. Der Lenk-Assistent läuft dort und muss dort auf „Stellt selbst
+nach“ stehen, wenn er automatisch abstimmen soll. Ein eingeschalteter Assistent
+am Büro-Master gilt ausschließlich für den Büro-PC.
+
+Vorhandene Fahrzeug- und Lenkwerte eines Arbeiter-Tablets bleiben beim
+Netzabgleich und beim Einspielen eines Datenpakets erhalten. Dazu gehören
+Antenne, Radstand, Lenkanschläge, Regelart, Lenkschärfe und Vorhalt. Namen und
+neue Traktoreinträge können weiter aus dem Büro kommen; neue Einträge bringen
+Ausgangswerte mit und müssen am echten Traktor eingerichtet werden. Der gerade
+gewählte Traktor wird durch eine Löschung aus dem Büro nicht automatisch gewechselt.
+Änderungen und ein ausdrücklicher Wechsel am Tablet bleiben möglich.
+
+Automatisch nachgestellte Tablet-Werte werden als neue Traktorfassung zum
+Master übertragen. Der Büro-Master sammelt weiterhin Felder, Spuren, Geräte
+und Arbeiten und verteilt Programmupdates. Er sendet keine laufenden Lenkbefehle.
+Bei unterbrochener Verbindung arbeitet die lokale Lenkung weiter, soweit die
+örtlichen GPS-, Freigabe- und Hardwarebedingungen erfüllt sind. Die Freigabe
+der Automatik bleibt beim Fahrer. Die Zuständigkeit setzt voraus, dass das
+Traktor-Tablet als **Arbeiter** eingerichtet ist und mit seinem lokalen
+AgriPilot-Dienst verbunden ist, nicht mit der Browseransicht des Büro-Masters.
+
 ## Flüssigere Anzeige ab 1.5.38
 
 Die Karte verwendet unveränderte parallele Kurven- und Konturspuren wieder,
