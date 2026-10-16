@@ -666,6 +666,14 @@
       <button id="btnSaveSettings" class="primary">Übernehmen</button>
       <span class="note" id="settingsInfo" role="status" aria-atomic="true"></span>
     </div>
+    <details class="setting-group kartenfarben" open>
+      <summary>Kartenfarben</summary>
+      <p class="note">Feldgrenze und Fahrgassen nach Wunsch hervorheben. In diesem Browser gespeichert; Tag- und Nachtansicht getrennt.</p>
+      <label class="kartenfarben-ansicht" for="kartenfarbenThema">Ansicht <select id="kartenfarbenThema"><option value="nacht">Nacht</option><option value="tag">Tag</option></select></label>
+      <div id="kartenfarbenPalette" class="kartenfarben-felder"><div class="kartenfarbe"><label for="kartenfarbe_grenze">Feldgrenze</label><input type="color" id="kartenfarbe_grenze" value="#ffb020"><div class="farbpalette"><button type="button" class="farbpunkt" data-art="grenze" data-farbe="#ffb020" style="--muster:#ffb020" aria-label="Feldgrenze: Gelb" title="Gelb"></button><button type="button" class="farbpunkt" data-art="grenze" data-farbe="#ff5c5c" style="--muster:#ff5c5c" aria-label="Feldgrenze: Rot" title="Rot"></button><button type="button" class="farbpunkt" data-art="grenze" data-farbe="#4b9dff" style="--muster:#4b9dff" aria-label="Feldgrenze: Blau" title="Blau"></button><button type="button" class="farbpunkt" data-art="grenze" data-farbe="#38d9ce" style="--muster:#38d9ce" aria-label="Feldgrenze: Türkis" title="Türkis"></button><button type="button" class="farbpunkt" data-art="grenze" data-farbe="#c68bff" style="--muster:#c68bff" aria-label="Feldgrenze: Violett" title="Violett"></button><button type="button" class="farbpunkt" data-art="grenze" data-farbe="#ffffff" style="--muster:#ffffff" aria-label="Feldgrenze: Weiß" title="Weiß"></button></div></div><div class="kartenfarbe"><label for="kartenfarbe_fahrgasse">Fahrgassen</label><input type="color" id="kartenfarbe_fahrgasse" value="#ffb020"><div class="farbpalette"><button type="button" class="farbpunkt" data-art="fahrgasse" data-farbe="#ffb020" style="--muster:#ffb020" aria-label="Fahrgassen: Gelb" title="Gelb"></button><button type="button" class="farbpunkt" data-art="fahrgasse" data-farbe="#ff5c5c" style="--muster:#ff5c5c" aria-label="Fahrgassen: Rot" title="Rot"></button><button type="button" class="farbpunkt" data-art="fahrgasse" data-farbe="#4b9dff" style="--muster:#4b9dff" aria-label="Fahrgassen: Blau" title="Blau"></button><button type="button" class="farbpunkt" data-art="fahrgasse" data-farbe="#38d9ce" style="--muster:#38d9ce" aria-label="Fahrgassen: Türkis" title="Türkis"></button><button type="button" class="farbpunkt" data-art="fahrgasse" data-farbe="#c68bff" style="--muster:#c68bff" aria-label="Fahrgassen: Violett" title="Violett"></button><button type="button" class="farbpunkt" data-art="fahrgasse" data-farbe="#ffffff" style="--muster:#ffffff" aria-label="Fahrgassen: Weiß" title="Weiß"></button></div></div></div>
+      <div class="row"><button id="kartenfarbenSpeichern" type="button" class="primary">Kartenfarben übernehmen</button><button id="kartenfarbenStandard" type="button">Standardfarben wiederherstellen</button></div>
+      <p class="note" id="kartenfarbenInfo" role="status" aria-atomic="true"></p>
+    </details>
     <div id="settingsGroups"></div>
   </section>
 
@@ -778,6 +786,7 @@
 <script src="lenklive.js"></script>
 <script src="spuren.js"></script>
 <script src="kalibrierung.js"></script>
+<script src="kartenfarben.js"></script>
 <script src="app.js"></script>
 <script>
   /* Nur fuer die Kachel auf dem Android-Tablet. Browser lassen Service Worker

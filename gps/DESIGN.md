@@ -46,3 +46,17 @@ gezeichneten Kacheln einmal pro Farbebene transparent verrechnet. Maßgebend
 bleiben tatsächliche Gerätebreite, bestätigte Sektionen und getrennte Aufträge.
 Lange Arbeitsnamen in der Markieren-Taste höchstens zweizeilig; vollständiger
 Text bleibt im DOM. Server-Hektarberechnung unverändert.
+
+## 1.5.44 – Kartenfarben und Gesamtprüfung
+
+Menü → Einstellungen → Kartenfarben: Feldgrenze und Fahrgassen frei einfärben,
+mit schnellen Farbmustern oder dem Farbwähler. Tag- und Nachtansicht haben eigene
+Farben. „Kartenfarben übernehmen“ speichert sie nur in diesem Browser;
+„Standardfarben wiederherstellen“ setzt nur die gewählte Ansicht zurück.
+Offene Farbauswahlen bleiben beim Wechsel der Ansicht erhalten.
+
+Die Gesamtprüfung korrigiert zusätzlich den getrennten Sendezeitpunkt beim
+Tablet-Abgleich, die sofortige Lenkabschaltung bei ungültigem GPS-Fix, eine erneute
+Stillstandsprüfung nach dem Online-Download und den Zugriffsschutz der externen
+Live-Verbindung. Gerätenamen werden ausschließlich als Text angezeigt.
+Prüfungen am echten Traktor und an noch nicht gewählter Teilbreitenhardware stehen aus.

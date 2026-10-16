@@ -261,3 +261,17 @@ body.tag { --f-flaeche: rgba(23, 140, 70, .38); --f-doppelt: rgba(200, 104, 12, 
 /* Lange Arbeitsnamen bleiben in der Taste, der Schaltzustand steht darüber. */
 .stage .taste.mark small { display: -webkit-box; -webkit-line-clamp: 2;
   -webkit-box-orient: vertical; overflow: hidden; }
+
+/* Kartenfarben: große Farbziele und ein eindeutiger lokaler Speicherweg. */
+.sheet .kartenfarben {padding: 16px;}
+.sheet .kartenfarben summary {font-weight: 600; font-size: 18px; cursor: pointer;}
+.sheet .kartenfarben-ansicht {display: flex; align-items: center; gap: 16px; margin: 16px 0;}
+.sheet .kartenfarben-ansicht select {min-width: 130px;}
+.sheet .kartenfarben-felder {display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 24px; margin-bottom: 20px;}
+.sheet .kartenfarbe {display: grid; gap: 12px; min-width: 0;}
+.sheet .kartenfarbe label {font-weight: 600;}
+.sheet .kartenfarbe input[type="color"] {width: 100%; height: 54px; padding: 5px; cursor: pointer;}
+.sheet .farbpalette {display: flex; flex-wrap: wrap; gap: 8px;}
+.sheet .farbpunkt {width: 44px; min-width: 44px; height: 44px; padding: 8px; border-radius: 10px;}
+.sheet .farbpunkt::after {content: ''; display: block; width: 22px; height: 22px; margin: auto; background: var(--muster); border-radius: 50%; border: 1px solid #627066;}
+@media (max-width: 600px) {.sheet .kartenfarben-felder {grid-template-columns: 1fr; gap: 20px;}}

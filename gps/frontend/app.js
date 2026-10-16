@@ -32,12 +32,15 @@ const stage = el('stage');
 /* Farben kommen aus dem Stylesheet, damit Tag und Nacht dieselbe Zeichnung
  * teilen und niemand in zwei Dateien dieselbe Farbe pflegen muss. */
 let F = {};
+let kartenfarben = null;
 function farbenLesen() {
+  const bisher = F;
   const cs = getComputedStyle(document.body);
   F = Object.fromEntries(['boden', 'raster', 'grenze', 'vg', 'pass', 'aktiv', 'flaeche', 'doppelt', 'wende', 'spur',
     'traktor', 'traktor-rand', 'geraet', 'fahrgasse', 'konflikt', 'lack', 'lack-hell', 'lack-dunkel', 'akzent', 'reifen', 'kabine']
     .map((k) => [k, cs.getPropertyValue('--f-' + k).trim()]));
-  flaeche.farbenSetzen(F.flaeche, F.doppelt);
+  if (bisher.flaeche !== F.flaeche || bisher.doppelt !== F.doppelt)
+    flaeche.farbenSetzen(F.flaeche, F.doppelt);
 }
 
 /* ---------------------------------------------------------------- Bedeckung */
@@ -1374,6 +1377,7 @@ function tagSetzen(tag) {
   el('tagNacht').classList.toggle('an', tag);
   document.querySelector('meta[name=theme-color]').setAttribute('content', tag ? '#dfe6dc' : '#05090c');
   merken('agripilot.tag', tag ? '1' : '0');
+  if (kartenfarben) kartenfarben.themaSetzen(tag ? 'tag' : 'nacht');
   farbenLesen();
   zeichnenAnfordern();
 }
@@ -2754,9 +2758,13 @@ function renderSystem() {
     const age = (Date.now() / 1000 - device.last_seen);
     const row = document.createElement('div');
     row.className = 'item';
-    row.innerHTML = `<div class="main"><div class="title">${device.name}</div>
-      <div class="sub">${device.role} · zuletzt vor ${age < 90 ? age.toFixed(0) + ' s'
-        : (age / 60).toFixed(0) + ' min'}</div></div>`;
+    const main = document.createElement('div'); main.className = 'main';
+    const title = document.createElement('div'); title.className = 'title';
+    title.textContent = device.name;
+    const sub = document.createElement('div'); sub.className = 'sub';
+    sub.textContent = `${device.role} · zuletzt vor ${age < 90 ? age.toFixed(0) + ' s'
+      : (age / 60).toFixed(0) + ' min'}`;
+    main.append(title, sub); row.append(main);
     host.appendChild(row);
   });
   el('simRow').hidden = system.gnss.source !== 'simulator';
@@ -3441,6 +3449,12 @@ document.addEventListener('keydown', (event) => {
 
 /* ------------------------------------------------------------------ Start */
 
+kartenfarben = new window.KartenfarbenModul.Kartenfarben({
+  el,
+  speicher: {getItem: key => localStorage.getItem(key), setItem: (key, wert) => localStorage.setItem(key, wert)},
+  stil: document.body.style,
+  geaendert: () => {farbenLesen(); zeichnenAnfordern();},
+});
 farbenLesen();
 tagSetzen(gemerkt('agripilot.tag') === '1');
 ansichtSetzen(gemerkt('agripilot.ansicht') || 'perspektive');

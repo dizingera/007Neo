@@ -640,6 +640,9 @@ def create_app(config=None) -> FastAPI:
 
     @api.websocket("/ws")
     async def websocket_endpoint(websocket: WebSocket) -> None:
+        if any(k in websocket.headers for k in ("cf-connecting-ip", "cf-ray", "x-forwarded-for")):
+            await websocket.close(code=1008)
+            return
         await websocket.accept()
         application.clients.add(websocket)
         # First frame carries the full coverage map; after that only deltas.
@@ -1372,6 +1375,12 @@ def create_app(config=None) -> FastAPI:
                 onlineupdate_module.herunterladen, info, Path(config.server.data_dir) / "update")
         except onlineupdate_module.OnlineFehler as exc:
             raise HTTPException(400, str(exc)) from exc
+        # Während Download/Prüfung kann der Fahrer losfahren oder scharfschalten.
+        if application.steering.armed:
+            raise HTTPException(409, "Erst die Lenkung ausschalten")
+        fix = engine.fix
+        if fix is not None and fix.valid and fix.speed_ms > 0.5:
+            raise HTTPException(409, "Erst anhalten - während der Fahrt wird nicht aktualisiert")
         application.steering.disarm("Aktualisierung")
         engine.suspend_job()          # die Arbeit läuft danach weiter
         engine.note(f"Aktualisierung auf {ergebnis['neu']} wird eingespielt - das Programm startet neu")

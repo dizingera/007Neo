@@ -119,6 +119,8 @@ class SyncClient:
             return {"ok": False, "error": self.status}
 
         since = self.cursor
+        push_since = float(self.store.get_setting("sync_push_cursor", 0.0))
+        push_bis = time.time()  # vor dem Snapshot, damit spätere Änderungen in der nächsten Runde bleiben
         payload = {
             "device": {
                 "id": self.config.network.device_id,
@@ -126,7 +128,7 @@ class SyncClient:
                 "role": "client",
             },
             "since": since,
-            "changes": collect_changes(self.store, since),
+            "changes": collect_changes(self.store, push_since),
         }
         if self.engine is not None:
             payload["maschinen"] = self.engine.profile_export()
@@ -147,6 +149,7 @@ class SyncClient:
             # Advance only on success, so a failed round is simply retried with
             # the same window rather than losing rows.
             self.cursor = data.get("server_time", time.time())
+            self.store.set_setting("sync_push_cursor", push_bis)
             self.last_success = time.time()
             self.rounds += 1
             self.status = "synchron"

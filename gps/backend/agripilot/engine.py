@@ -1630,7 +1630,13 @@ class Engine:
 
     def on_fix(self, fix: Fix) -> None:
         if not fix.valid:
+            self.fix = fix  # den tatsächlichen Fixverlust auch sofort anzeigen
             self.positionsfilter.reset()
+            self._last_update_at = None
+            self.tool_position = None
+            self.implement_position = None
+            if self.steering is not None:self.steering.disarm("GNSS-Position ungültig")
+            if self.turn is not None:self.turn = None
             if self.teilbreiten is not None:self.teilbreiten.wunsch(0,min(32,len(self.sections)))
             return
         now = fix.received_at or time.time()
