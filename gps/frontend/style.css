@@ -268,7 +268,7 @@ body.tag .vignette { background: radial-gradient(120% 90% at 50% 70%, transparen
 .llf-kopf span { flex: 1; font-weight: 700; }
 .llf-kopf span[data-art=gut] { color: var(--green); }
 .llf-kopf span[data-art=pendelt], .llf-kopf span[data-art=versatz], .llf-kopf span[data-art=traege] { color: var(--amber); }
-.llf-kopf button { min-width: 40px; min-height: 40px; border-radius: 8px; border: 1px solid var(--haar);
+.llf-kopf button { min-width: 44px; min-height: 44px; border-radius: 8px; border: 1px solid var(--haar);
   background: transparent; color: var(--text); font-size: 16px; }
 #lenkLiveKlein { width: 100%; height: 130px; display: block; }
 
@@ -320,6 +320,9 @@ body.tag .vignette { background: radial-gradient(120% 90% at 50% 70%, transparen
 /* Hochkant: die Leiste wird zur Leiste unten, fünf Tasten je Zeile, darunter
    Markieren und Lenkung nebeneinander. Die Zahlen sitzen darüber. */
 @media (orientation: portrait) {
+  /* Unter den Statusanzeigen bleibt das Livefenster über der Bedienleiste frei. */
+  .lenklive-fenster { left: var(--rand); right: auto; top: max(calc(25 * var(--u)), var(--status-unterkante, 0px)); bottom: auto;
+    width: min(380px, calc(100vw - 2 * var(--rand) - max(52px, calc(5.6 * var(--u))) - 12px)); }
   .stage { --leiste-hoehe: calc(max(var(--touch), calc(5 * var(--u))) + max(60px, calc(5.6 * var(--u))) + 3 * calc(.6 * var(--u)) + 2px); }
   .leiste { top: auto; left: var(--rand); width: auto; height: var(--leiste-hoehe);
     grid-template-columns: repeat(6, 1fr); grid-template-rows: none; }

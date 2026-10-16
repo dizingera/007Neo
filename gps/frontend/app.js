@@ -425,7 +425,19 @@ function drawSections(sections) {
 const MAX_PIXEL = 1600;
 const ANKER_Y = 0.78;              // wo der Traktor auf der Leinwand sitzt
 
+/* Hinweise können mehrzeilig werden. Nur bei Größenänderung messen, damit
+ * das Livefenster darunter sitzt, ohne bei jedem Datenpaket Layout abzufragen. */
+function statusAbstandMessen() {
+  const unten = document.querySelector('.chips.l').getBoundingClientRect().bottom;
+  stage.style.setProperty('--status-unterkante', (unten + 10) + 'px');
+}
+if ('ResizeObserver' in window) {
+  const statusBeobachter = new ResizeObserver(statusAbstandMessen);
+  statusBeobachter.observe(document.querySelector('.chips.l'));
+}
+
 function resize() {
+  statusAbstandMessen();
   const ratio = window.devicePixelRatio || 1;
   const px = Math.min(MAX_PIXEL, Math.round(canvas.clientWidth * ratio));
   canvas.width = canvas.height = px;
@@ -766,16 +778,15 @@ function istFahrgasse(line, spur) {
   return Math.floor((gasse - raster) / breite + 0.5) === spur;
 }
 
+const spurPuffer = new window.SpurenModul.SpurPuffer();
+
 function drawPasses() {
   const s = state.live;
-  if (!s || !s.line) return;
+  if (!s || !s.line) { spurPuffer.spuren(null, 0); return; }
   const line = s.line;
   const current = s.guidance.active ? s.guidance.pass_number : 0;
   const ring = line.mode === 'contour';
-  for (let offset = current - 6; offset <= current + 6; offset++) {
-    // Ring -1 läge außerhalb der Feldgrenze – dort wird nicht gearbeitet.
-    if (ring && offset < 0) continue;
-    const points = shiftLine(line, offset * line.spacing_m + line.nudge_m + (line.raster_m || 0));
+  for (const { nummer: offset, punkte: points } of spurPuffer.spuren(line, current)) {
     if (!points.length) continue;
     polyline(points, ring);
     const active = offset === current;
@@ -798,49 +809,6 @@ function drawPasses() {
       ctx.stroke();
     }
   }
-}
-
-/* Parallele Spur berechnen – dieselbe Rechnung wie im Backend, damit die
- * Anzeige und die Führung nicht auseinanderlaufen. */
-function shiftLine(line, shift) {
-  const points = line.points;
-  if (points.length < 2) return [];
-  if (line.mode === 'ab') {
-    const [a, b] = [points[0], points[points.length - 1]];
-    const heading = Math.atan2(b[0] - a[0], b[1] - a[1]);
-    const forward = [Math.sin(heading), Math.cos(heading)];
-    const right = [Math.cos(heading), -Math.sin(heading)];
-    const mid = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
-    const half = Math.max(600, Math.hypot(b[0] - a[0], b[1] - a[1])) / 2;
-    return [-half, half].map((t) => [
-      mid[0] + forward[0] * t + right[0] * shift,
-      mid[1] + forward[1] * t + right[1] * shift,
-    ]);
-  }
-  if (line.mode === 'contour') {
-    // Geschlossener Ring, versetzt nach innen. Der Umlaufsinn der Grenze wird
-    // herausgerechnet – sonst läge Ring 1 mal drinnen und mal draußen, je
-    // nachdem, wie herum jemand das Feld abgefahren hat.
-    const n = points.length;
-    let area = 0;
-    for (let i = 0; i < n; i++) {
-      const [x1, y1] = points[i], [x2, y2] = points[(i + 1) % n];
-      area += x1 * y2 - x2 * y1;
-    }
-    const inward = area > 0 ? -1 : 1;
-    return points.map((p, index) => {
-      const a = points[(index - 1 + n) % n], b = points[(index + 1) % n];
-      const heading = Math.atan2(b[0] - a[0], b[1] - a[1]);
-      return [p[0] + Math.cos(heading) * shift * inward,
-              p[1] - Math.sin(heading) * shift * inward];
-    });
-  }
-  return points.map((p, index) => {
-    const a = points[Math.max(0, index - 1)];
-    const b = points[Math.min(points.length - 1, index + 1)];
-    const heading = Math.atan2(b[0] - a[0], b[1] - a[1]);
-    return [p[0] + Math.cos(heading) * shift, p[1] - Math.sin(heading) * shift];
-  });
 }
 
 function drawTrail() {
@@ -2120,11 +2088,14 @@ function lenkLiveZahlen(k) {
 }
 
 function renderLenkLive() {
+  if (document.visibilityState !== 'visible') return;
+  const imMenue = !el('sheet').hidden && document.querySelector('.tab.active').dataset.tab === 'lenkung';
+  const aufKarte = !el('lenkLiveFenster').hidden && el('sheet').hidden;
+  if (!imMenue && !aufKarte) return;
   const regelart = state.live && state.live.profile ? state.live.profile.regelart : 'stanley';
   const schritte = state.live && state.live.abstimmung ? state.live.abstimmung.schritte : [];
   const k = lenkAufzeichnung.kennzahlen();
   const b = LenkLive.befund(k, regelart);
-  const imMenue = !el('sheet').hidden && document.querySelector('.tab.active').dataset.tab === 'lenkung';
   if (imMenue) {
     LenkLive.zeichnen(el('lenkLiveGross'), lenkAufzeichnung,
       { sekunden: Number(el('lenkLiveZeit').value), schritte });
@@ -2137,7 +2108,7 @@ function renderLenkLive() {
     }));
     el('lenkLiveZahlen').textContent = lenkLiveZahlen(k);
   }
-  if (!el('lenkLiveFenster').hidden && el('sheet').hidden) {
+  if (aufKarte) {
     LenkLive.zeichnen(el('lenkLiveKlein'), lenkAufzeichnung, { sekunden: 30, schritte, kompakt: true });
     el('lenkLiveKurz').textContent = k.genug
       ? `${Number(k.effektiv).toLocaleString('de-DE', { maximumFractionDigits: 1 })} cm · ` +

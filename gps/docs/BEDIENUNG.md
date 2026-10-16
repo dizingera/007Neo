@@ -1,5 +1,14 @@
 # Bedienung im Feld
 
+## Flüssigere Anzeige ab 1.5.38
+
+Die Karte verwendet unveränderte parallele Kurven- und Konturspuren wieder,
+statt sie in jedem Bild neu auszurechnen. Ein Spurwechsel oder ein geänderter
+Versatz erscheint weiter sofort. Das entlastet die Anzeige auf dem Tablet.
+„Lenkung live“ wertet seine Messwerte nur bei sichtbarer Anzeige aus; die
+Aufzeichnung läuft im Hintergrund weiter. Beim Öffnen stehen die inzwischen
+gesammelten Messwerte zur Verfügung. Im Hochformat sitzt das kleine Livefenster unter den Statusanzeigen, damit es nicht von den unteren Tasten verdeckt wird.
+
 ## Der Bildschirm
 
 ![Die Kabine](bilder/kabine.png)

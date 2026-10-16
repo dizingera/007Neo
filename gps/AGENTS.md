@@ -8,7 +8,7 @@ Oberfläche und Commits: **Deutsch**.
 
 ```bash
 cd backend && PYTHONIOENCODING=utf-8 ./.venv/Scripts/python.exe -m unittest discover -s tests
-cd frontend && node --test tests/lenklive.test.js tests/alerts.test.js tests/flaeche.test.js
+cd frontend && node --test tests/*.test.js
 ```
 
 Nur mit `backend/.venv` – das System-Python gibt dutzende Fehler.
