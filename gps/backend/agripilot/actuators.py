@@ -682,7 +682,7 @@ class PhidgetOutput(SteerOutput):
             raise RuntimeError("Die Lenkung ist scharf - erst ausschalten")
         if self.mode not in ("encoder", "was") or self.measured_angle() is None:
             raise RuntimeError("Die Feinabstimmung braucht einen Drehgeber oder Radwinkelsensor "
-                               "als Rückmeldung (Einstellungen → Lenkmotor → Rückmeldung)")
+                               "als Rückmeldung (Menü → Lenkung → Lenkmotor → Rückmeldung)")
         cfg = self.config
         start = {"gain_p": cfg.gain_p, "gain_i": cfg.gain_i, "gain_d": cfg.gain_d}
         if self.encoder is not None:

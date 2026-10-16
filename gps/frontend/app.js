@@ -1469,13 +1469,14 @@ reiter.forEach((tab, index) => {
     document.querySelectorAll('.tab-panel').forEach((panel) => {
       panel.hidden = panel.dataset.panel !== tab.dataset.tab;
     });
+    el('sheetTitel').textContent = tab.textContent;
     // Auf schmalen Geräten scrollt die Leiste: den gewählten Reiter in Sicht holen.
     tab.scrollIntoView({ block: 'nearest', inline: 'nearest' });
     refreshLists();
   };
   // Pfeiltasten wechseln den Reiter, wie bei jeder Reiterleiste.
   tab.onkeydown = (event) => {
-    const schritt = { ArrowRight: 1, ArrowLeft: -1 }[event.key];
+    const schritt = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[event.key];
     if (!schritt) return;
     event.preventDefault();
     const ziel = reiter[(index + schritt + reiter.length) % reiter.length];
@@ -2118,7 +2119,7 @@ function renderAbstimmung() {
   el('abstInfo').textContent = zeilen.join('\n');
 }
 setInterval(() => {
-  if (!el('sheet').hidden && document.querySelector('.tab.active').dataset.tab === 'system') renderAbstimmung();
+  if (!el('sheet').hidden && document.querySelector('.tab.active').dataset.tab === 'lenkung') renderAbstimmung();
 }, 2000);
 
 el('abstModus').onchange = async (event) => {
@@ -2322,6 +2323,12 @@ async function refreshLists() {
   if (active === 'headland') fillHeadland();
   if (active === 'saatplan') renderSaatplan();
   if (active === 'system') { renderSystem(); renderRohdaten(); renderUpdate(); }
+  if (active === 'lenkung') {
+    renderSystem();
+    renderEinrichten();
+    if (!settings.geladen) loadSettings();
+  }
+  if (active === 'daten') { renderBackup(); renderDatenRolle(); }
   if (active === 'setup') renderSetup(await (await fetch('/api/checklist')).json());
   if (active === 'settings' && !settings.geladen) loadSettings();
 }
@@ -2685,18 +2692,20 @@ function renderSystem() {
    sie nicht davon abdriften kann. Gespeichert wird nur, was wirklich geändert
    wurde - so überschreibt ein Tablet nicht die Eingaben eines anderen. */
 const settings = { geladen: false, werte: {}, gruppen: [] };
+const LENK_GRUPPEN = ['steering', 'phidget'];   // stehen auf der Seite Lenkung
 
 async function loadSettings() {
   const daten = await (await fetch('/api/settings')).json();
   settings.gruppen = daten.gruppen;
   settings.werte = daten.werte;
   settings.geladen = true;
-  const host = el('settingsGroups');
-  host.innerHTML = '';
-  daten.gruppen.forEach((gruppe, index) => {
+  el('settingsGroups').innerHTML = '';
+  el('settingsLenkung').innerHTML = '';
+  daten.gruppen.forEach((gruppe) => {
+    const host = el(LENK_GRUPPEN.includes(gruppe.id) ? 'settingsLenkung' : 'settingsGroups');
     const box = document.createElement('details');
     box.className = 'setting-group';
-    box.open = index === 0;
+    box.open = !host.children.length;
     const kopf = document.createElement('summary');
     kopf.textContent = gruppe.titel;
     box.appendChild(kopf);
@@ -2900,7 +2909,7 @@ function feldGeaendert(feld, input) {
   return jetzt !== vorher;
 }
 
-el('btnSaveSettings').onclick = async () => {
+async function einstellungenSpeichern() {
   const aenderungen = {};
   settings.gruppen.forEach((gruppe) => gruppe.felder.forEach((feld) => {
     const input = document.getElementById(`set-${feld.schluessel}`);
@@ -2919,7 +2928,10 @@ el('btnSaveSettings').onclick = async () => {
   el('settingsInfo').textContent = neustart.length
     ? `Gespeichert in ${antwort.data.datei} · Neustart nötig für: ${neustart.join(', ')}`
     : `Gespeichert in ${antwort.data.datei} · sofort wirksam`;
-};
+}
+
+el('btnSaveSettings').onclick = einstellungenSpeichern;
+el('btnSaveSettingsLenkung').onclick = einstellungenSpeichern;
 
 /* Lenkung einrichten: sieben Schritte, jeder mit seinem Werkzeug. Was ein
  * Schritt braucht, steht in ihm selbst; spätere bleiben gesperrt, bis die
@@ -3281,7 +3293,12 @@ function item({ active, title, sub, actions }) {
   main.querySelector('.sub').textContent = sub;
   const box = document.createElement('div');
   box.className = 'actions';
-  (actions || []).forEach(([label, handler]) => {
+  // Vorn nur die zwei Handgriffe, die man ständig braucht; der Rest (Umbenennen,
+  // Grenze, Löschen) klappt unter "Mehr" auf - eine Zeile statt einer Knopfwand.
+  const alle = actions || [];
+  const vorn = alle.length > 3 ? alle.slice(0, 2) : alle;
+  const hinten = alle.length > 3 ? alle.slice(2) : [];
+  const knopf = ([label, handler]) => {
     const button = document.createElement('button');
     button.textContent = label;
     button.onclick = handler;
@@ -3289,9 +3306,27 @@ function item({ active, title, sub, actions }) {
     // damit es mit dem Handschuh auf dem rüttelnden Sitz nicht getroffen wird.
     if (label === 'Laden') button.classList.add('primary');
     if (label === 'Löschen') button.classList.add('danger', 'abgesetzt');
-    box.appendChild(button);
-  });
+    return button;
+  };
+  vorn.forEach((a) => box.appendChild(knopf(a)));
   row.append(main, box);
+  if (hinten.length) {
+    const mehr = document.createElement('button');
+    mehr.className = 'mehr';
+    mehr.textContent = 'Mehr ▾';
+    mehr.setAttribute('aria-expanded', 'false');
+    const leiste = document.createElement('div');
+    leiste.className = 'actions mehr-leiste';
+    leiste.hidden = true;
+    hinten.forEach((a) => leiste.appendChild(knopf(a)));
+    mehr.onclick = () => {
+      leiste.hidden = !leiste.hidden;
+      mehr.setAttribute('aria-expanded', String(!leiste.hidden));
+      mehr.textContent = leiste.hidden ? 'Mehr ▾' : 'Weniger ▴';
+    };
+    box.appendChild(mehr);
+    row.appendChild(leiste);
+  }
   return row;
 }
 

@@ -139,21 +139,29 @@
 <!-- Menü-Ebenen -->
 <div class="sheet" id="sheet" role="dialog" aria-modal="true" aria-label="Menü" hidden>
   <div class="sheet-head">
-    <!-- Vorn, was der Fahrer im Feld braucht; hinter dem Trenner die Werkstatt. -->
-    <div class="tabs" role="tablist" aria-label="Menü-Reiter">
+    <h2 class="sheet-titel" id="sheetTitel">Felder</h2>
+    <button class="close" id="sheetClose" aria-label="Menü schließen"><span aria-hidden="true">✕</span> Schließen</button>
+  </div>
+  <div class="sheet-body">
+    <!-- Links die Seiten, in drei Gruppen: was der Fahrer im Feld braucht, die
+         Maschine, und die Werkstatt. Auf schmalen Geräten wird daraus eine Zeile. -->
+    <nav class="tabs" role="tablist" aria-label="Menü-Seiten" aria-orientation="vertical">
+      <span class="tab-gruppe" aria-hidden="true">Im Feld</span>
       <button data-tab="fields" class="tab active" role="tab" aria-selected="true">Felder</button>
       <button data-tab="lines" class="tab" role="tab" aria-selected="false" tabindex="-1">Spuren</button>
       <button data-tab="jobs" class="tab" role="tab" aria-selected="false" tabindex="-1">Arbeiten</button>
-      <button data-tab="machine" class="tab" role="tab" aria-selected="false" tabindex="-1">Traktor &amp; Gerät</button>
-      <button data-tab="headland" class="tab" role="tab" aria-selected="false" tabindex="-1">Vorgewende</button>
       <button data-tab="saatplan" class="tab" role="tab" aria-selected="false" tabindex="-1">Saatplan</button>
-      <span class="tab-trenner" aria-hidden="true">Werkstatt</span>
+      <button data-tab="headland" class="tab" role="tab" aria-selected="false" tabindex="-1">Vorgewende &amp; Wende</button>
+      <span class="tab-gruppe" aria-hidden="true">Maschine</span>
+      <button data-tab="machine" class="tab" role="tab" aria-selected="false" tabindex="-1">Traktor &amp; Gerät</button>
+      <button data-tab="lenkung" class="tab" role="tab" aria-selected="false" tabindex="-1">Lenkung</button>
+      <span class="tab-gruppe" aria-hidden="true">Werkstatt</span>
       <button data-tab="settings" class="tab werkstatt" role="tab" aria-selected="false" tabindex="-1">Einstellungen</button>
+      <button data-tab="daten" class="tab werkstatt" role="tab" aria-selected="false" tabindex="-1">Daten &amp; Geräte</button>
       <button data-tab="system" class="tab werkstatt" role="tab" aria-selected="false" tabindex="-1">System</button>
       <button data-tab="setup" class="tab werkstatt" role="tab" aria-selected="false" tabindex="-1">Einbau</button>
-    </div>
-    <button class="close" id="sheetClose" aria-label="Menü schließen"><span aria-hidden="true">✕</span> Schließen</button>
-  </div>
+    </nav>
+    <div class="panels">
 
   <section class="tab-panel" data-panel="fields">
     <div class="row">
@@ -164,8 +172,6 @@
       <label class="button" for="shpDateien">Shapefile einlesen (.shp, .dbf, .prj)</label>
       <input type="file" id="shpDateien" accept=".shp,.dbf,.prj,.shx,.cpg" multiple hidden>
       <span class="note" id="shpInfo" role="status" aria-atomic="true"></span>
-    </div>
-    <div class="row">
       <button id="btnRandspurenAlle">Spuren an allen Feldrändern anlegen</button>
       <span class="note" id="randspurenInfo" role="status" aria-atomic="true"></span>
     </div>
@@ -190,10 +196,6 @@
         Jahr automatisch aktiv – die Fahrgassen liegen dann bei jedem Gerät an derselben
         Stelle.</p>
     </details>
-    <div class="row">
-      <button class="fahrgassen-taste">Fahrgassenweite: 21 m</button>
-      <span class="note">gilt für neue Saisonspuren</span>
-    </div>
     <div class="list" id="fieldList"></div>
   </section>
 
@@ -467,15 +469,9 @@
     </div>
   </section>
 
-  <section class="tab-panel" data-panel="settings" hidden>
-    <div class="row sticky-save">
-      <button id="btnSaveSettings" class="primary">Übernehmen</button>
-      <span class="note" id="settingsInfo" role="status" aria-atomic="true"></span>
-    </div>
-    <div id="settingsGroups"></div>
-  </section>
-
-  <section class="tab-panel" data-panel="setup" hidden>
+  <section class="tab-panel" data-panel="lenkung" hidden>
+    <!-- Alles zur Lenkung an einer Stelle: einrichten, prüfen, abstimmen, einstellen.
+         Die Werte des Traktors (Lenkschärfe, Regelart) stehen bei Traktor & Gerät. -->
     <section class="karte" id="lenkEinrichten">
       <h3>Lenkung einrichten</h3>
       <p class="note">Schritt für Schritt von der Verbindung bis zur Probefahrt. Am Stand: Lenkung
@@ -489,26 +485,7 @@
         <button id="btnEinrichtenNeu">Von vorn beginnen</button>
       </div>
     </section>
-    <div class="row">
-      <div class="progress" aria-hidden="true"><div class="progress-bar" id="setupBar"></div></div>
-      <!-- Eine Statusmeldung, nicht zwei: der Balken zeigt dasselbe wie der
-           Text daneben und bleibt deshalb für Vorlesehilfen stumm. -->
-      <span class="note" id="setupCount" role="status" aria-atomic="true"></span>
-    </div>
-    <p class="note">Von oben nach unten abhaken. Was das Programm selbst prüfen kann, prüft
-      es laufend mit – ein Schritt mit rotem Befund lässt sich nicht abhaken.</p>
-    <div class="list" id="setupList"></div>
-    <div class="row ende">
-      <button id="btnSetupReset" class="danger">Alle Bestätigungen zurücksetzen</button>
-    </div>
-  </section>
-
-  <section class="tab-panel" data-panel="system" hidden>
-    <!-- Zuerst der Zustand: der eigentliche Grund, diesen Reiter zu öffnen. -->
-    <h3 class="abschnitt">Zustand</h3>
-    <div class="list" id="systemList"></div>
-
-    <h3 class="abschnitt">Sensoren und Lenkung</h3>
+    <h3 class="abschnitt">Prüfen und abstimmen</h3>
     <div class="row" id="imuRow" hidden>
       <button id="btnLevel" class="primary">Neigungssensor nullen</button>
       <label class="switch"><input type="checkbox" id="compensation" checked>
@@ -565,16 +542,15 @@
       <button id="btnCentre">Lenkung: Mitte lernen</button>
       <span class="note" id="steerInfo"></span>
     </div>
+    <h3 class="abschnitt">Einstellungen Lenkautomatik und Lenkmotor</h3>
     <div class="row">
-      <label class="switch"><input type="checkbox" id="warnton" checked>
-        Warnton und Vibration</label>
-      <button id="btnWarnProbe">Probe</button>
+      <button id="btnSaveSettingsLenkung" class="primary">Übernehmen</button>
+      <span class="note">Lenkschärfe, Regelart und Lenkanschlag stehen bei <b>Traktor &amp; Gerät</b>.</span>
     </div>
-    <div class="row">
-      <button id="btnBackup">Jetzt sichern</button>
-      <span class="note" id="backupInfo">Sicherung: wird geladen …</span>
-    </div>
+    <div id="settingsLenkung"></div>
+  </section>
 
+  <section class="tab-panel" data-panel="daten" hidden>
     <h3 class="abschnitt">Angeschlossene Geräte</h3>
     <div class="row">
       <button id="btnGeraete" class="primary">Geräte suchen</button>
@@ -608,6 +584,48 @@
         erstellen, per USB-Stick zum Tablet bringen und dort einspielen – es überschreibt
         nichts, was auf dem Tablet neuer ist. Mit Netz läuft der Abgleich von selbst.</p>
     </details>
+
+    <h3 class="abschnitt">Sicherung</h3>
+    <div class="row">
+      <button id="btnBackup">Jetzt sichern</button>
+      <span class="note" id="backupInfo">Sicherung: wird geladen …</span>
+    </div>
+  </section>
+
+  <section class="tab-panel" data-panel="settings" hidden>
+    <div class="row sticky-save">
+      <button id="btnSaveSettings" class="primary">Übernehmen</button>
+      <span class="note" id="settingsInfo" role="status" aria-atomic="true"></span>
+    </div>
+    <div id="settingsGroups"></div>
+  </section>
+
+  <section class="tab-panel" data-panel="setup" hidden>
+    <div class="row">
+      <div class="progress" aria-hidden="true"><div class="progress-bar" id="setupBar"></div></div>
+      <!-- Eine Statusmeldung, nicht zwei: der Balken zeigt dasselbe wie der
+           Text daneben und bleibt deshalb für Vorlesehilfen stumm. -->
+      <span class="note" id="setupCount" role="status" aria-atomic="true"></span>
+    </div>
+    <p class="note">Von oben nach unten abhaken. Was das Programm selbst prüfen kann, prüft
+      es laufend mit – ein Schritt mit rotem Befund lässt sich nicht abhaken.</p>
+    <div class="list" id="setupList"></div>
+    <div class="row ende">
+      <button id="btnSetupReset" class="danger">Alle Bestätigungen zurücksetzen</button>
+    </div>
+  </section>
+
+  <section class="tab-panel" data-panel="system" hidden>
+    <!-- Zuerst der Zustand: der eigentliche Grund, diesen Reiter zu öffnen. -->
+    <h3 class="abschnitt">Zustand</h3>
+    <div class="list" id="systemList"></div>
+
+    <div class="row">
+      <label class="switch"><input type="checkbox" id="warnton" checked>
+        Warnton und Vibration</label>
+      <button id="btnWarnProbe">Probe</button>
+    </div>
+
 
     <!-- Selten gebraucht: zugeklappt, damit der Reiter nicht sieben Bildschirme lang ist. -->
     <details class="setting-group werkzeug">
@@ -663,6 +681,8 @@
         (gedrückt halten), ↑ ↓ Tempo.</span>
     </div>
   </section>
+    </div>
+  </div>
 </div>
 
 <div class="toast" id="toast" hidden></div>

@@ -158,8 +158,8 @@ Düngen und Spritzen sollen später genau diese Spuren treffen, sonst liegt die
 Spritze neben der Fahrgasse und fährt durch den Bestand. Deshalb wird die
 Spur vom Säen als **Saisonspur** gespeichert: **Menü → Felder → Spuren ▾ →
 Als Saisonspur** (ein Tipp; nochmal tippen nimmt sie wieder weg). Der Abstand
-der Fahrgassen ist die **Fahrgassenweite**, oben in den Reitern *Felder* und
-*Spuren* (Taste „Fahrgassenweite: 21 m", Vorgabe 21 m = Spritze und Streuer).
+der Fahrgassen ist die **Fahrgassenweite**, oben auf der Seite *Spuren*
+(Taste „Fahrgassenweite: 21 m", Vorgabe 21 m = Spritze und Streuer).
 Eine geänderte Fahrgassenweite gilt nur für neu gesetzte Saisonspuren – schon
 angelegte Fahrgassen bleiben, wo sie sind. Von da an
 
@@ -374,7 +374,7 @@ Nur verfügbar, wenn sie bei der Installation freigegeben wurde.
 
 Sitzt ein Drehgeber am Lenkmotor, lernt das System beim Scharfschalten die
 Geradeausstellung – **beim Scharfschalten müssen die Räder also gerade stehen.**
-Neu setzen lässt sie sich über **Menü → System → Lenkung: Mitte lernen**, etwa
+Neu setzen lässt sie sich über **Menü → Lenkung → Lenkung: Mitte lernen**, etwa
 nachdem von Hand nachgelenkt wurde.
 
 **Ins Lenkrad greifen schaltet sofort ab** und die Lenkung bleibt aus, bis sie
@@ -395,10 +395,10 @@ alles nach, sobald der Master wieder erreichbar ist.
 Ist auf dem Tablet der ältere **Phidget21**-Treiber installiert (so läuft die
 MotorControl 1065 auch mit dem AgriPilot Terminal), spricht AgriPilot die
 Platine direkt über USB an – kein COM-Port, kein Phidget22 nötig.
-**Menü → System → Geräte suchen** findet sie über Phidget21 („… (Phidget21) –
+**Menü → Daten & Geräte → Geräte suchen** findet sie über Phidget21 („… (Phidget21) –
 1 Motor, 1 Drehgeber, 2 Analogeingänge“), **Gefundene Geräte übernehmen** stellt
 Phidget-Treiber „Phidget21“, die Seriennummer, den eigenen Regelkreis und den
-Drehgeber als Rückmeldung ein. Einstellbar unter **Einstellungen → Lenkmotor →
+Drehgeber als Rückmeldung ein. Einstellbar unter **Menü → Lenkung → Lenkmotor (Phidget) →
 Phidget-Treiber** (automatisch / Phidget22 / Phidget21).
 
 Unter Phidget21 kann die 1065 weniger als neuere Platinen:
@@ -409,20 +409,20 @@ Unter Phidget21 kann die 1065 weniger als neuere Platinen:
 * **keine einstellbare Stromgrenze**,
 * **kein Positionsregler** – AgriPilot regelt selbst (50-mal je Sekunde).
 
-**Motor testen:** **Menü → System → Lenkmotor testen** (erscheint, sobald der
+**Motor testen:** **Menü → Lenkung → Motor links/rechts** (erscheint, sobald der
 Lenkmotor bereit ist). ◀ / ▶ dreht den Motor 0,5 s mit 10–35 % Leistung und zeigt,
 wie weit sich der Drehgeber bewegt hat. Das geht nur mit ausgeschalteter Lenkung
 und braucht die Freigabe der Lenkautomatik nicht – dafür muss unter
-Einstellungen → Lenkung der **Ausgang „Phidget“** stehen (Geräte suchen →
+Menü → Lenkung → Lenkautomatik der **Ausgang „Phidget“** stehen (Geräte suchen →
 übernehmen, danach AgriPilot neu starten). Fahrzeug steht, Not-Aus griffbereit.
 
 Wichtig: **das AgriPilot Terminal vorher schließen.** Solange es die Platine
 offen hat, findet AgriPilot sie nicht. Die Zählwerte des Drehgebers je Grad
 Radeinschlag (**Drehgeber: Zählwerte je Grad**) einmal ausmessen, nicht schätzen.
 
-## Lenkung einrichten (Menü → Einbau)
+## Lenkung einrichten (Menü → Lenkung)
 
-Oben im Reiter Einbau führt **„Lenkung einrichten“** in acht Schritten von der
+Oben auf der Seite Lenkung führt **„Lenkung einrichten“** in acht Schritten von der
 Verbindung bis zur Probefahrt. Jeder Schritt hat seinen Knopf und bekommt einen
 Haken, wenn er erledigt ist; spätere bleiben gesperrt, bis die früheren fertig
 sind (nur der Not-Aus-Schritt steht frei). Am Stand arbeiten: Lenkung aus, Räder
@@ -454,7 +454,7 @@ in der Mitte, Not-Aus griffbereit.
 
 „Von vorn beginnen“ löscht die Haken (nicht die Einstellungen).
 
-## Lenk-Assistent (Menü → System)
+## Lenk-Assistent (Menü → Lenkung)
 
 Der Assistent merkt, wie die Lenkung die Spur hält, und stellt die Spurregelung in
 kleinen Schritten nach. Er wertet die Querabweichung aus, solange die Lenkung
@@ -491,7 +491,7 @@ den echten Einschlag der Räder am Boden eintragen.
 ## Neigungssensor nullen
 
 Einmal beim Einbau und danach, wenn der Sensor bewegt wurde: auf **ebenem**
-Boden **Menü → System → Neigungssensor nullen**. Der Sensor sitzt nie exakt
+Boden **Menü → Lenkung → Neigungssensor nullen**. Der Sensor sitzt nie exakt
 waagerecht in der Kabine, und ein Grad Montagefehler sind bei 3 m Antennenhöhe
 schon 5 cm Dauerversatz in jeder Spur.
 
@@ -542,6 +542,22 @@ Pendelt die Maschine langsam um die Spur, den Wert erhöhen; lenkt sie zu
 zögerlich, senken. Die Verstärkung wirkt wie gewohnt und kann weiter mit dem
 Lenk-Assistenten abgestimmt werden.
 
+## Das Menü
+
+Links stehen alle Seiten in drei Gruppen:
+
+* **Im Feld:** Felder, Spuren, Arbeiten, Saatplan, Vorgewende & Wende.
+* **Maschine:** Traktor & Gerät (Maße, Lenkschärfe, Regelart) und **Lenkung** –
+  dort steht alles, was zum Lenkmotor gehört: *Lenkung einrichten*, Motortest,
+  Lenk-Assistent, Mitte lernen, Neigungssensor nullen und die Einstellungen
+  Lenkautomatik und Lenkmotor.
+* **Werkstatt:** Einstellungen (Empfänger, RTK, Netzwerk, Anzeige), Daten & Geräte
+  (Geräte suchen, Datenpaket, Sicherung), System (Zustand, Warnton,
+  Aktualisierung, Rohdaten) und Einbau (Checkliste).
+
+In den Listen stehen vorn nur **Laden** und der zweite Handgriff; Umbenennen,
+Grenze abfahren und Löschen liegen unter **Mehr**.
+
 ## Abstimmung bei Tempo, Latenz und Teilbreiten (Menü → Maschine)
 
 Drei Werte, die aus dem Cerea-Handbuch übernommen sind und erst zählen, wenn die
@@ -589,10 +605,10 @@ Geführt wird weiterhin das **Fahrzeug**. Auf ein nachlaufendes Gerät zu führe
 klingt genauer, macht die Lenkung aber unruhig: das Gerät zieht erst dorthin,
 wo das Fahrzeug vorhin war.
 
-## Angeschlossene Geräte finden (Menü → System)
+## Angeschlossene Geräte finden (Menü → Daten & Geräte)
 
 Nach dem Einbau, nach dem Umstecken, nach dem Tausch eines Kabels: **Menü →
-System → Geräte suchen**. Gesucht werden
+Daten & Geräte → Geräte suchen**. Gesucht werden
 
 * der **Empfänger** an den seriellen Anschlüssen – ein u-blox-Gerät (F9P) wird
   als solches erkannt;
@@ -661,9 +677,9 @@ zurück.
 
 **Einrichten.** Beim ersten Start von `AgriPilot-Setup.exe` fragt die Installation
 „Master oder Arbeiter?“. Auf dem Büro-Rechner Enter (Master), auf den Tablets **A**
-und die Adresse des Masters. Die Adresse steht beim Master unter Menü → System
+und die Adresse des Masters. Die Adresse steht beim Master unter Menü → Daten & Geräte
 (Abschnitt „Daten zwischen Master und Arbeitern“), z. B. `http://192.168.1.20:8080`.
-Nachträglich ändern: Menü → System → Einstellungen → Rolle und Adresse des Masters.
+Nachträglich ändern: Menü → Einstellungen → Rolle und Adresse des Masters.
 Ohne Fragen: `AgriPilot-Setup.exe --arbeiter --master http://192.168.1.20:8080`.
 
 **Zwei Wege zu den Tablets:**
@@ -675,7 +691,7 @@ Ohne Fragen: `AgriPilot-Setup.exe --arbeiter --master http://192.168.1.20:8080`.
    holen“ ist ab 1.5.19 als Vorgabe aus. Draußen auf dem
    Acker ohne Verbindung zum Büro arbeitet das Tablet einfach weiter und gleicht
    später ab.
-2. **Als Datei.** Menü → System → **Datenpaket erstellen (.zip)** auf dem Master
+2. **Als Datei.** Menü → Daten & Geräte → **Datenpaket erstellen (.zip)** auf dem Master
    (Haken „mit bearbeiteten Flächen“, wenn auch die Arbeiten mit sollen), die Datei
    per USB-Stick, Messenger oder Mail zum Tablet bringen und dort **Datenpaket
    einspielen**.
@@ -690,7 +706,7 @@ kann das:
 1. **Cloudflare Zero Trust** (one.dash.cloudflare.com) → Networks → Tunnels → den
    Tunnel dieses Rechners → **Public Hostname → Add**: Subdomain z. B. `agripilot`,
    deine Domain, Dienst **HTTP**, URL **`localhost:8080`**.
-2. **Arbeitercode** am Master: Menü → System zeigt ihn (Einstellungen → Netzwerk →
+2. **Arbeitercode** am Master: Menü → Daten & Geräte zeigt ihn (Einstellungen → Netzwerk →
    Arbeitercode, falls noch keiner gesetzt ist: z. B. `K7M2-9PQX`). Ein neuer Master
    bekommt bei der Installation automatisch einen.
 3. **Auf dem Tablet:** Master-Adresse `https://agripilot.deinedomain.de` und denselben
@@ -867,7 +883,7 @@ Schalter und **Probe** stehen unter Menü → System. Der Browser erlaubt Ton er
 nach der ersten Berührung des Bildschirms; auf dem Android-Tablet kommt zusätzlich
 die Vibration. Dasselbe Ereignis meldet sich frühestens nach acht Sekunden wieder.
 
-## Sicherung (Menü → System)
+## Sicherung (Menü → Daten & Geräte)
 
 Einmal am Tag, beim Start gleich mit, wird ein Zip aus Datenbank und
 Konfiguration abgelegt: im Datenordner unter `sicherungen/`, auf Wunsch zusätzlich

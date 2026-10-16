@@ -9,7 +9,7 @@ Datei - sie läuft im WAL-Modus, und eine mitten im Schreiben kopierte Datei ist
 eine kaputte Datenbank.
 
 Zurückspielen geht ohne das Programm: Zip öffnen, beide Dateien an ihre Stelle
-legen (Pfade stehen in Menü → System).
+legen (Pfade stehen in Menü → Daten & Geräte).
 """
 
 from __future__ import annotations

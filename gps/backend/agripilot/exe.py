@@ -587,10 +587,10 @@ def _rolle_erfragen(daten_ordner: Path) -> tuple[str, str, str]:
     if not wahl.startswith("a"):
         return "master", "", ""
     url = input("Adresse des Masters, z. B. http://192.168.1.20:8080\n"
-                "(steht beim Master unter Menü → System; Enter = später eintragen): ").strip()
+                "(steht beim Master unter Menü → Daten & Geräte; Enter = später eintragen): ").strip()
     if url and not url.startswith("http"):
         url = "http://" + url
-    code = input("Arbeitercode vom Master (Menü → System; Enter = später eintragen): ").strip()
+    code = input("Arbeitercode vom Master (Menü → Daten & Geräte; Enter = später eintragen): ").strip()
     return "client", url, code
 
 

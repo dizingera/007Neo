@@ -8,7 +8,7 @@ das auf zwei Wegen:
   der laufende Abgleich (sync.py) trägt dann auch die Maschinen,
 * **als Datenpaket**, wenn das Tablet draußen kein Netz zum Büro hat: eine
   Zip-Datei mit einer JSON-Datei, per USB-Stick, Messenger oder Mail zum Tablet
-  und dort unter Menü → System eingespielt.
+  und dort unter Menü → Daten & Geräte eingespielt.
 
 Beide Wege nehmen dieselbe Zusammenführung: je Datensatz gilt der neuere, die
 bearbeitete Fläche zweier Geräte wird vereinigt statt überschrieben (sync.py).

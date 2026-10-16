@@ -1093,7 +1093,7 @@ def create_app(config=None) -> FastAPI:
 
     @api.post("/api/steering/motortest")
     async def motortest(payload: dict = Body(default={})):
-        """Den Lenkmotor kurz und schwach drehen (Menü → System → Lenkmotor testen)."""
+        """Den Lenkmotor kurz und schwach drehen (Menü → Lenkung → Motor links/rechts)."""
         output = application.steering.output
         if not hasattr(output, "motortest"):
             raise HTTPException(400, "Dieser Lenkausgang kennt keinen Motortest "
@@ -1109,7 +1109,7 @@ def create_app(config=None) -> FastAPI:
         engine.note(f"Motortest {ergebnis['richtung']}: Drehgeber {ergebnis['drehgeber_bewegt']}")
         return ok(ergebnis)
 
-    # -- Lenkung einrichten (Menü → Einbau) -------------------------------
+    # -- Lenkung einrichten (Menü → Lenkung) -------------------------------
 
     def _einrichtung() -> dict:
         return store.get_setting("lenkung_einrichtung") or {}
