@@ -212,6 +212,7 @@
   </section>
 
   <section class="tab-panel" data-panel="lines" hidden>
+    <div class="row"><button id="btnOriginalspur">Versatz auf Originalspur zurücksetzen</button><span id="originalspurInfo" class="note" role="status"></span></div>
     <details class="erklaerung">
       <summary>Erklärung</summary>
       <p><b>A+</b> (Taste rechts) legt eine Spur durch die aktuelle Position in die Richtung,
@@ -329,6 +330,7 @@
       <section class="karte">
         <h3>Wenden</h3>
         <div class="formular">
+          <label>Abstand Gespann zur Arbeitsgrenze (m)<input type="number" step="0.1" min="0" max="20" name="grenzabstand_m"></label>
           <label>Kleinster Wendekreis (m)<input type="number" step="0.5" min="1.5" max="30" name="radius_m"></label>
           <label>Wiedereinfahrt (Spuren weiter)<input type="number" step="1" min="1" max="8" name="ueberspringen"></label>
           <label>Wendemuster
@@ -353,7 +355,7 @@
       <label class="switch"><input type="checkbox" name="alarm_aktiv">
         Annäherungsalarm</label>
       <label class="switch"><input type="checkbox" name="nur_im_feld">
-        Sicherheitsprüfung: Route muss im Feld liegen</label>
+        Sicherheitsprüfung: Gespann muss innerhalb der Arbeitsgrenze bleiben</label>
     </div>
     <div class="row">
       <button id="btnSaveHeadland" class="primary">Übernehmen</button>
@@ -397,6 +399,12 @@
             <label>nach vorn (m)<input type="number" step="0.01" name="antenna_forward_m"></label>
             <label>nach rechts (m)<input type="number" step="0.01" name="antenna_right_m"></label>
             <label>Höhe über Boden (m)<input type="number" step="0.01" name="antenna_height_m"></label>
+          </fieldset>
+          <fieldset><legend>Ausdehnung für die Wendeprüfung</legend>
+            <label>Traktorbreite (m)<input type="number" step="0.01" min="0" max="30" name="traktor_breite_m"></label>
+            <label>Hinterachse bis Vorderkante (m)<input type="number" step="0.01" min="0" max="30" name="traktor_vorn_m"></label>
+            <label>Hinterachse bis Hinterkante (m)<input type="number" step="0.01" min="0" max="30" name="traktor_hinten_m"></label>
+            <p class="note">Größte Ausdehnung einschließlich Überständen messen. 0 bedeutet: noch nicht gemessen.</p>
           </fieldset>
           <fieldset>
             <legend>Lenkung</legend>
@@ -457,6 +465,10 @@
           </fieldset>
           <fieldset>
             <legend>Anbau</legend>
+            <label>Größte Geräte-Außenbreite (m)<input type="number" step="0.01" min="0" max="30" name="geraet_breite_m"></label>
+            <label>Arbeitspunkt bis Gerätevorderkante (m)<input type="number" step="0.01" min="0" max="30" name="geraet_vorn_m"></label>
+            <label>Arbeitspunkt bis Gerätehinterkante (m)<input type="number" step="0.01" min="0" max="30" name="geraet_hinten_m"></label>
+            <p class="note ganz">Wendeprüfung: positive Ausdehnungen ab dem Arbeitspunkt messen; Geprüfte Breite = größerer Wert aus Arbeits- und gemessener Außenbreite. 0 = noch nicht gemessen.</p>
             <label>Gerät hinter Achse (m)<input type="number" step="0.01" name="tool_trailing_m"></label>
             <label>Gerät seitlich (m)<input type="number" step="0.01" name="tool_offset_m"></label>
             <label class="switch"><input type="checkbox" name="trailed"> gezogen (Anhängerkinematik)</label>
@@ -671,6 +683,9 @@
       <p class="note">Feldgrenze und Fahrgassen nach Wunsch hervorheben. In diesem Browser gespeichert; Tag- und Nachtansicht getrennt.</p>
       <label class="kartenfarben-ansicht" for="kartenfarbenThema">Ansicht <select id="kartenfarbenThema"><option value="nacht">Nacht</option><option value="tag">Tag</option></select></label>
       <div id="kartenfarbenPalette" class="kartenfarben-felder"><div class="kartenfarbe"><label for="kartenfarbe_grenze">Feldgrenze</label><input type="color" id="kartenfarbe_grenze" value="#ffb020"><div class="farbpalette"><button type="button" class="farbpunkt" data-art="grenze" data-farbe="#ffb020" style="--muster:#ffb020" aria-label="Feldgrenze: Gelb" title="Gelb"></button><button type="button" class="farbpunkt" data-art="grenze" data-farbe="#ff5c5c" style="--muster:#ff5c5c" aria-label="Feldgrenze: Rot" title="Rot"></button><button type="button" class="farbpunkt" data-art="grenze" data-farbe="#4b9dff" style="--muster:#4b9dff" aria-label="Feldgrenze: Blau" title="Blau"></button><button type="button" class="farbpunkt" data-art="grenze" data-farbe="#38d9ce" style="--muster:#38d9ce" aria-label="Feldgrenze: Türkis" title="Türkis"></button><button type="button" class="farbpunkt" data-art="grenze" data-farbe="#c68bff" style="--muster:#c68bff" aria-label="Feldgrenze: Violett" title="Violett"></button><button type="button" class="farbpunkt" data-art="grenze" data-farbe="#ffffff" style="--muster:#ffffff" aria-label="Feldgrenze: Weiß" title="Weiß"></button></div></div><div class="kartenfarbe"><label for="kartenfarbe_fahrgasse">Fahrgassen</label><input type="color" id="kartenfarbe_fahrgasse" value="#ffb020"><div class="farbpalette"><button type="button" class="farbpunkt" data-art="fahrgasse" data-farbe="#ffb020" style="--muster:#ffb020" aria-label="Fahrgassen: Gelb" title="Gelb"></button><button type="button" class="farbpunkt" data-art="fahrgasse" data-farbe="#ff5c5c" style="--muster:#ff5c5c" aria-label="Fahrgassen: Rot" title="Rot"></button><button type="button" class="farbpunkt" data-art="fahrgasse" data-farbe="#4b9dff" style="--muster:#4b9dff" aria-label="Fahrgassen: Blau" title="Blau"></button><button type="button" class="farbpunkt" data-art="fahrgasse" data-farbe="#38d9ce" style="--muster:#38d9ce" aria-label="Fahrgassen: Türkis" title="Türkis"></button><button type="button" class="farbpunkt" data-art="fahrgasse" data-farbe="#c68bff" style="--muster:#c68bff" aria-label="Fahrgassen: Violett" title="Violett"></button><button type="button" class="farbpunkt" data-art="fahrgasse" data-farbe="#ffffff" style="--muster:#ffffff" aria-label="Fahrgassen: Weiß" title="Weiß"></button></div></div></div>
+      <div id="kartenfarbenMehrPalette" class="kartenfarben-felder"><div><label for="kartenfarbe_flaeche">Bearbeitet</label><input type="color" id="kartenfarbe_flaeche" value="#48cc77"><div class="farbpalette"><button type="button" class="farbpunkt" data-art="flaeche" data-farbe="#48cc77" style="--muster:#48cc77" aria-label="Bearbeitet: Grün"></button><button type="button" class="farbpunkt" data-art="flaeche" data-farbe="#4b9dff" style="--muster:#4b9dff" aria-label="Bearbeitet: Blau"></button><button type="button" class="farbpunkt" data-art="flaeche" data-farbe="#ffae30" style="--muster:#ffae30" aria-label="Bearbeitet: Orange"></button><button type="button" class="farbpunkt" data-art="flaeche" data-farbe="#c68bff" style="--muster:#c68bff" aria-label="Bearbeitet: Violett"></button></div></div><div><label for="kartenfarbe_doppelt">Überlappung</label><input type="color" id="kartenfarbe_doppelt" value="#ffae30"><div class="farbpalette"><button type="button" class="farbpunkt" data-art="doppelt" data-farbe="#48cc77" style="--muster:#48cc77" aria-label="Überlappung: Grün"></button><button type="button" class="farbpunkt" data-art="doppelt" data-farbe="#4b9dff" style="--muster:#4b9dff" aria-label="Überlappung: Blau"></button><button type="button" class="farbpunkt" data-art="doppelt" data-farbe="#ffae30" style="--muster:#ffae30" aria-label="Überlappung: Orange"></button><button type="button" class="farbpunkt" data-art="doppelt" data-farbe="#c68bff" style="--muster:#c68bff" aria-label="Überlappung: Violett"></button></div></div></div>
+      <div id="kartenfarbenVorschau" class="farben-vorschau" role="img" aria-label="Vorschau: Feldgrenze, Fahrgasse, bearbeitete Fläche und Überlappung"><span>Bearbeitet</span><span>Überlappung</span></div>
+      <p class="note">Die Flächen bleiben durchsichtig. Die Vorschau zeigt die Auswahl; auf der Karte gilt sie nach dem Übernehmen.</p>
       <div class="row"><button id="kartenfarbenSpeichern" type="button" class="primary">Kartenfarben übernehmen</button><button id="kartenfarbenStandard" type="button">Standardfarben wiederherstellen</button></div>
       <p class="note" id="kartenfarbenInfo" role="status" aria-atomic="true"></p>
     </details>
@@ -787,6 +802,22 @@
 <script src="spuren.js"></script>
 <script src="kalibrierung.js"></script>
 <script src="kartenfarben.js"></script>
+<dialog id="feldWerkzeug" class="sheet feldwerkzeug" aria-labelledby="fwTitel">
+  <div class="fw-kopf"><div><p class="fw-kicker">AGRIPILOT · FELDWERKZEUGE</p><h2 id="fwTitel"></h2></div><button type="button" id="fwSchliessen" aria-label="Feldwerkzeug schließen">Schließen</button></div>
+  <p id="fwBeschreibung" class="note"></p>
+  <svg id="fwKarte" viewBox="0 0 640 360" aria-label="Vorschau der Feldgeometrie"></svg>
+  <div id="fwGrenze"><div class="formular">
+    <label>Grenzpunkt<select id="fwPunkt"></select></label>
+    <label>Schrittweite (m)<input id="fwSchritt" type="number" value="0.5" step="0.1" min="0.05" max="20"></label>
+    <label>Ost (m zum Feldbezug)<input id="fwOst" type="number" step="0.01"></label>
+    <label>Nord (m zum Feldbezug)<input id="fwNord" type="number" step="0.01"></label>
+  </div><div class="row fw-richtungen"><button data-fw-richtung="n">↑ Nord</button><button data-fw-richtung="w">← West</button><button data-fw-richtung="o">Ost →</button><button data-fw-richtung="s">↓ Süd</button></div>
+  <div class="row"><button id="fwEinfuegen">Punkt dahinter einfügen</button><button id="fwEntfernen">Punkt entfernen</button><button id="fwUndo">Rückgängig</button><button id="fwOriginal">Ursprüngliche Grenze verwenden</button></div></div>
+  <div id="fwSpur" hidden><div class="formular"><label>Geeigneter Abschnitt<select id="fwSegment"></select></label><label>Am Anfang kürzen (m)<input id="fwAnfang" type="number" step="0.5" min="0" value="0"></label><label>Am Ende kürzen (m)<input id="fwEnde" type="number" step="0.5" min="0" value="0"></label><label>Name der neuen Spur<input id="fwName" maxlength="120"></label><label>Abstand der Folgespuren (m)<input id="fwAbstand" type="number" step="0.01" min="0.1" max="100"></label></div><label id="fwAltHinweis" class="switch"><input id="fwAlt" type="checkbox">Ich habe die Antennenspur geprüft. Geräteversatz und Arbeitszustand dieser Altaufzeichnung sind unbekannt.</label><p class="note">Wenden und Datenlücken werden getrennt. Vorschau prüfen: Die neue Referenz erhält keine Aussaatzuordnung. Diese legst du bei Bedarf anschließend unter „Spuren“ fest.</p></div>
+  <p id="fwStatus" class="note" role="status" aria-live="polite"></p>
+  <div class="row"><button id="fwSpeichern" class="primary">Arbeitsgrenze speichern</button></div>
+</dialog>
+<script src="feldwerkzeuge.js"></script>
 <script src="app.js"></script>
 <script>
   /* Nur fuer die Kachel auf dem Android-Tablet. Browser lassen Service Worker

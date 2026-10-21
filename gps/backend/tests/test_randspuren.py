@@ -107,17 +107,18 @@ class EngineTests(unittest.TestCase):
         self.assertEqual(len(danach), 4)
         self.assertEqual(next(l for l in danach if l["id"] == sued["id"])["nudge_m"], 0.3)
 
-    def test_a_renamed_edge_keeps_id_offset_and_season_of_its_predecessor(self):
+    def test_a_season_edge_keeps_geometry_and_a_changed_edge_gets_a_new_id(self):
         alt = self.store.save_line({"field_id": self.feld["id"], "name": "Rand Süd 90 m", "mode": "ab",
                                     "points": [[5, 0], [95, 0]], "spacing_m": 6.0, "nudge_m": 1.0,
                                     "saison": 2026, "fahrgasse_m": 21.0})
         self.motor.randspuren_anlegen(self.feld["id"])
         linien = self.store.list_lines(self.feld["id"])
         nachfolger = next(l for l in linien if l["id"] == alt["id"])
-        self.assertEqual(nachfolger["name"], "Rand Süd 100 m")
+        self.assertEqual(nachfolger, alt)
+        self.assertTrue(any(l["name"] == "Rand Süd 100 m" and l["id"] != alt["id"] for l in linien))
         self.assertEqual((nachfolger["nudge_m"], nachfolger["saison"], nachfolger["fahrgasse_m"]),
                          (1.0, 2026, 21.0))
-        self.assertEqual(len([l for l in linien if l["name"].startswith("Rand ")]), 4)
+        self.assertEqual(len([l for l in linien if l["name"].startswith("Rand ")]), 5)
 
     def test_own_lines_are_never_touched(self):
         eigene = self.store.save_line({"field_id": self.feld["id"], "name": "AB 07:30", "mode": "ab",

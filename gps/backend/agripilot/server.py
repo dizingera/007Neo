@@ -17,6 +17,7 @@ import hmac
 import struct
 import sys
 import contextlib
+import copy
 import json
 import os
 import time
@@ -29,7 +30,7 @@ from fastapi.staticfiles import StaticFiles
 
 from . import config as config_module
 from . import checklist as checklist_module
-from . import lenkung_einrichten
+from . import lenkung_einrichten, feldwerkzeuge
 from .teilbreiten import TeilbreitenAusgang
 from .kalibrierung import Lenkwerkstatt, KalibrierKonflikt
 from . import settings as settings_module
@@ -632,6 +633,11 @@ def create_app(config=None) -> FastAPI:
         except (RuntimeError, ValueError, KeyError) as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
+    async def im_hintergrund(fn, *args):
+        try: return await asyncio.to_thread(fn,*args)
+        except (RuntimeError,ValueError,KeyError) as exc:
+            raise HTTPException(400,str(exc)) from exc
+
     # -- live state -------------------------------------------------------
 
     @api.get("/api/state")
@@ -710,6 +716,16 @@ def create_app(config=None) -> FastAPI:
         # er irgendwo anders und der Schlag ist nicht auf dem Bildschirm.
         application.simulator_ins_feld()
         return result
+
+    @api.post("/api/fields/{field_id}/arbeitsgrenze")
+    async def arbeitsgrenze(field_id: str, payload: dict = Body(...)):
+        feld=store.get_field(field_id)
+        if feld is None or feld["deleted"]: raise HTTPException(404,"Feld nicht gefunden")
+        guard(engine._werkzeug_stillstand)
+        if payload.get("stand")!=feld["updated_at"]: raise HTTPException(409,"Feld wurde inzwischen geändert – neu öffnen")
+        punkte=payload.get("punkte")
+        geprueft=[] if punkte==[] else await im_hintergrund(feldwerkzeuge.grenze_pruefen,punkte,feld["boundary"])
+        return guard(engine.arbeitsgrenze_speichern, field_id, payload, geprueft)
 
     @api.post("/api/fields/{field_id}/randspuren")
     async def randspuren_eines_feldes(field_id: str):
@@ -809,6 +825,10 @@ def create_app(config=None) -> FastAPI:
         if heading is None:
             heading = engine.heading or 0.0
         return guard(engine.set_ab_from_heading, float(heading), payload.get("name", ""))
+
+    @api.post("/api/guidance/original")
+    async def originalspur(payload: dict = Body(...)):
+        return guard(engine.originalspur, payload.get("field_id"), payload.get("line_id"), payload.get("nudge_m"))
 
     @api.post("/api/guidance/nudge")
     async def nudge(payload: dict = Body(...)):
@@ -913,8 +933,26 @@ def create_app(config=None) -> FastAPI:
     @api.post("/api/turn/plan")
     async def plan_turn(payload: dict = Body(default={})):
         """Route berechnen und gegen die Feldgrenze prüfen - noch nicht fahren."""
-        return guard(engine.plan_turn, str(payload.get("muster", "")),
-                     str(payload.get("richtung", "")))
+        # Rechenarbeit auf einer unveränderlichen Momentaufnahme. GNSS und
+        # Abschaltüberwachung laufen während der Hüllprüfung weiter.
+        if getattr(engine, "_plan_laeuft", False):
+            raise HTTPException(409, "Eine Wende wird bereits berechnet")
+        engine._plan_laeuft = True
+        try:
+            folge=getattr(engine,"_plan_folge",0)+1
+            engine._plan_folge=folge
+            kopie=copy.copy(engine)
+            for key in ("field","profile","headland","guidance","fix","implement_heading","line"):
+                setattr(kopie,key,copy.deepcopy(getattr(engine,key)))
+            kontext=engine.wende_kontext()
+            plan=await im_hintergrund(kopie.plan_turn,str(payload.get("muster","")),str(payload.get("richtung","")))
+            if folge!=engine._plan_folge or kontext!=engine.wende_kontext() or engine.turn is not None:
+                raise HTTPException(409,"Planung überholt – Wende erneut planen")
+            for key in ("turn_preview","turn_preview_ok","turn_preview_fahrbar","turn_preview_radius","turn_huelle","_turn_kontext","_turn_kurs","_turn_geraetekurs","_turn_optionen","_turn_planned_at"):
+                setattr(engine,key,getattr(kopie,key))
+            return ok(plan)
+        finally:
+            engine._plan_laeuft = False
 
     @api.post("/api/turn/start")
     async def start_turn():
@@ -943,6 +981,15 @@ def create_app(config=None) -> FastAPI:
     async def delete_job(job_id: str):
         store.delete_job(job_id)
         return ok()
+
+    @api.get("/api/jobs/{job_id}/referenz")
+    async def arbeitslinien_vorschau(job_id: str):
+        return ok(await im_hintergrund(engine.arbeitslinien_vorschau,job_id))
+
+    @api.post("/api/jobs/{job_id}/referenz")
+    async def arbeitslinie_speichern(job_id: str, payload: dict = Body(...)):
+        plan=await im_hintergrund(engine.arbeitslinien_vorschau,job_id)
+        return guard(engine.arbeitslinie_speichern, job_id, payload, plan)
 
     @api.get("/api/jobs/{job_id}/gpx")
     async def job_gpx(job_id: str):
@@ -977,7 +1024,7 @@ def create_app(config=None) -> FastAPI:
     @api.post("/api/profile")
     async def update_profile(payload: dict = Body(...)):
         from dataclasses import asdict
-        return ok(asdict(engine.update_profile(payload)))
+        return guard(lambda: asdict(engine.update_profile(payload)))
 
     @api.get("/api/profiles")
     async def list_profiles() -> list[dict]:

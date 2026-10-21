@@ -15,6 +15,7 @@ where the tool actually is, so what the screen shows is what the field gets.
 """
 
 from __future__ import annotations
+from . import feldwerkzeuge, gespann
 
 import asyncio
 import math
@@ -219,6 +220,7 @@ class Engine:
         fields = VehicleProfile.__dataclass_fields__
         werte = asdict(self.profile)
         werte.update({k: v for k, v in (values or {}).items() if k in fields})
+        gespann.masse_pruefen(werte)
         werte["name"] = name
         neu = {"id": storage.new_id(), **asdict(VehicleProfile(**werte)), "stand": time.time()}
         profile = [p for p in self.list_profiles()]
@@ -301,6 +303,8 @@ class Engine:
         fields = VehicleProfile.__dataclass_fields__
         self.list_profiles()          # legt auf einem frischen Gerät die erste Maschine an
         current = asdict(self.profile)
+        values = dict(values)
+        gespann.masse_pruefen(values)
         current.update({k: v for k, v in values.items() if k in fields})
         self.profile = VehicleProfile(**current)
         self.store.set_setting("vehicle_profile", current)
@@ -323,6 +327,9 @@ class Engine:
         # umgekehrt). Die nachlaufende Ausrichtung des alten Geräts weiterzu-
         # schleppen hieße, mit der Geometrie des vorigen zu markieren.
         self.implement_heading.reset(self.heading)
+        if self.turn is not None: self.stop_turn("Gespann geändert")
+        self.turn_preview=[]
+        self.turn_preview_ok=False
         return self.profile
 
     # -- Traktoren ----------------------------------------------------------
@@ -408,6 +415,7 @@ class Engine:
             raise ValueError(f"Einen Traktor „{name}“ gibt es schon")
         werte = self._traktor_werte()
         werte.update({k: v for k, v in (values or {}).items() if k in TRAKTOR_FELDER})
+        gespann.masse_pruefen(werte)
         kennung = self.traktor_kennung(name)
         if any(t["id"] == kennung for t in liste):
             kennung = storage.new_id()
@@ -419,6 +427,8 @@ class Engine:
 
     def update_traktor(self, values: dict) -> dict:
         """Den gewählten Traktor ändern: Name, Antenne, Lenkung."""
+        values=dict(values)
+        gespann.masse_pruefen(values)
         liste = [dict(t) for t in self.list_traktoren()]
         name = (values.get("name") or "").strip() if "name" in values else None
         for t in liste:
@@ -471,6 +481,8 @@ class Engine:
             sauber = {"id": str(t["id"]), "name": str(t["name"]).strip(), "stand": stand,
                       **{k: v for k, v in t.items() if k in TRAKTOR_FELDER}}
             alt = lokal.get(t["id"])
+            if alt is not None:
+                sauber.update({k: alt[k] for k in gespann.MASSE if k in TRAKTOR_FELDER and k not in t and k in alt})
             if alt is not None and not self.config.is_master:
                 # Die Kabine bestimmt ihre Fahrzeug- und Lenkabstimmung. Vom Büro
                 # kommen Namen und Listen, keine Ersatzwerte für den lokalen Einbau.
@@ -536,6 +548,8 @@ class Engine:
             sauber = {"id": str(p["id"]), "stand": stand,
                       **{k: v for k, v in p.items() if k in felder}}
             alt = lokal.get(p["id"])
+            if alt is not None:
+                sauber.update({k: alt[k] for k in gespann.MASSE if k not in p and k in alt})
             if alt is None:
                 lokal[p["id"]] = sauber
                 zaehler["neu"] += 1
@@ -570,6 +584,8 @@ class Engine:
         Werten geplant, und eine Route halb nach neuen Zahlen weiterzufahren
         wäre die schlechteste von beiden.
         """
+        if "grenzabstand_m" in values and (not math.isfinite(float(values["grenzabstand_m"])) or not 0<=float(values["grenzabstand_m"])<=20):
+            raise ValueError("Grenzabstand muss zwischen 0 und 20 m liegen")
         felder = headland_module.HeadlandSettings.__dataclass_fields__
         aktuell = self.headland.to_dict()
         aktuell.update({k: v for k, v in values.items() if k in felder})
@@ -773,9 +789,12 @@ class Engine:
     def _rand_innen(self, line: GuidanceLine) -> float:
         """Randspur: auf welcher Seite das Feld liegt, damit eine Saisonspur ihr
         Raster an der Grenze beginnt statt auf ihr (GuidanceLine.am_rand)."""
+        record = self.store.get_line(line.id) if line.id else None
+        if record is not None and record.get("rand_innen") is not None:
+            return float(record["rand_innen"])
         if not randspuren_module.ist_randspur(line.name) or self.field is None:
             return 0.0
-        return rand_seite(line, [tuple(p) for p in (self.field.get("boundary") or [])])
+        return rand_seite(line, [tuple(p) for p in self.field["boundary"]])
 
     def clear_line(self) -> None:
         self.line = None
@@ -786,18 +805,20 @@ class Engine:
         """Aus der Feldgrenze Spuren machen: gerade Kanten ab 20 m als AB-Spur,
         gebogene Ränder ab 20 m als Kurvenspur (siehe randspuren.py).
 
-        Wiederholbar: eine Randspur mit gleichem Namen wird aktualisiert (ihr
-        Versatz bleibt), Randspuren, die es nach einer neuen Grenze nicht mehr
-        gibt, verschwinden. Selbst angelegte Spuren werden nie angefasst.
+        Ungebundene Randspuren werden aktualisiert. Saisonspuren bleiben samt
+        Geometrie und Randbezug erhalten; geänderte Ränder erhalten eigene IDs.
+        Selbst angelegte Spuren werden nie angefasst.
         """
         feld = self.store.get_field(field_id)
         if feld is None:
             raise KeyError("Feld nicht gefunden")
-        grenze = [tuple(p) for p in (feld.get("boundary") or [])]
+        grenze = [tuple(p) for p in (feldwerkzeuge.arbeitsgrenze(feld))]
         if len(grenze) < 3:
             return {"feld": feld["name"], "angelegt": [], "hinweis": "keine Grenze"}
-        vorhanden = {l["name"]: l for l in self.store.list_lines(field_id)
-                     if randspuren_module.ist_randspur(l["name"])}
+        randlinien = [l for l in self.store.list_lines(field_id)
+                      if randspuren_module.ist_randspur(l["name"])]
+        geschuetzt = [l for l in randlinien if l.get("saison", 0) > 0]
+        vorhanden = {l["name"]: l for l in randlinien if l.get("saison", 0) <= 0}
         neu: list[str] = []
         namen_gesehen: dict[str, int] = {}
         benannt = []
@@ -806,10 +827,14 @@ class Engine:
             namen_gesehen[name] = namen_gesehen.get(name, 0) + 1
             if namen_gesehen[name] > 1:
                 name = f"{name} ({namen_gesehen[name]})"
-            benannt.append((name, kante))
-        # Erst nach Namen zuordnen, dann was übrig ist nach Lage: eine Randspur,
-        # die nur anders heißt (länger geworden, anders zerlegt), behält ihre
-        # Kennung, ihren Versatz und ihre Saison.
+            punkte = randspuren_module.runden(kante["points"])
+            gleiche = next((l for l in geschuetzt if l["mode"] == kante["mode"]
+                            and l["points"] == punkte), None)
+            if gleiche is not None:
+                neu.append(gleiche["name"])
+            else:
+                benannt.append((name, kante))
+        # Ungebundene Vorgänger nach Namen, dann nach Lage zuordnen.
         vorgaenger = {name: vorhanden.pop(name) for name, _ in benannt if name in vorhanden}
         for name, kante in benannt:
             if name in vorgaenger or not vorhanden:
@@ -828,6 +853,8 @@ class Engine:
                 "name": name,
                 "mode": kante["mode"],
                 "points": randspuren_module.runden(kante["points"]),
+                "rand_innen": rand_seite(GuidanceLine(kante["mode"], kante["points"],
+                                                      self.profile.spacing_m, name), grenze),
                 "spacing_m": self.profile.spacing_m,
             })
             neu.append(name)
@@ -846,7 +873,7 @@ class Engine:
         feld = self.store.get_field(field_id)
         if feld is None:
             raise KeyError("Feld nicht gefunden")
-        grenze = [tuple(p) for p in (feld.get("boundary") or [])]
+        grenze = [tuple(p) for p in (feldwerkzeuge.arbeitsgrenze(feld))]
         if len(grenze) < 3:
             raise ValueError(f"{feld['name']} hat keine Grenze - erst umfahren oder Shapefile einlesen")
         return feld, grenze
@@ -985,7 +1012,7 @@ class Engine:
         """
         if self.field is None:
             raise RuntimeError("Kein Feld ausgewählt")
-        grenze = [tuple(p) for p in (self.field.get("boundary") or [])]
+        grenze = [tuple(p) for p in (feldwerkzeuge.arbeitsgrenze(self.field))]
         if len(grenze) < 3:
             raise RuntimeError("Ohne Feldgrenze gibt es keine Kontur - erst die "
                                "Grenze abfahren (⬠)")
@@ -1114,7 +1141,7 @@ class Engine:
         """
         if self.field is None:
             return None
-        grenze = self.field.get("boundary") or []
+        grenze = feldwerkzeuge.arbeitsgrenze(self.field)
         mitte = ((sum(p[0] for p in grenze) / len(grenze),
                   sum(p[1] for p in grenze) / len(grenze)) if len(grenze) >= 3 else (0.0, 0.0))
         if self.line is not None and self.line.mode == "ab" and len(self.line.points) >= 2:
@@ -1135,6 +1162,103 @@ class Engine:
             return None
         lat, lon = self.plane.to_wgs(ziel[0], ziel[1])
         return lat, lon, ziel[2]
+
+    def _werkzeug_stillstand(self):
+        if ((self.steering is not None and self.steering.armed) or self.turn is not None
+                or self.job is not None or self.record_mode is not None
+                or (self.fix is not None and abs(self.fix.speed_ms or 0)>0.3)):
+            raise RuntimeError("Erst anhalten, Lenkung ausschalten und laufende Arbeit/Aufzeichnung beenden")
+
+    def originalspur(self, feld_id, spur_id, erwartet):
+        self._werkzeug_stillstand()
+        if self.field is None or self.line is None or self.field["id"]!=feld_id or self.line.id!=spur_id:
+            raise RuntimeError("Die aktive Spur hat sich geändert – neu auswählen")
+        if not isinstance(erwartet,(float,int)) or not math.isfinite(float(erwartet)) or abs(self.line.nudge_m-float(erwartet))>1e-9:
+            raise RuntimeError("Der Versatz wurde inzwischen geändert – Anzeige neu laden")
+        if not self.line.derived:
+            alt=self.store.get_line(spur_id)
+            if (alt is None or alt["deleted"] or abs(alt["nudge_m"]-float(erwartet))>1e-9
+                    or alt["mode"]!=self.line.mode or alt["points"]!=[list(p) for p in self.line.points]):
+                raise RuntimeError("Die gespeicherte Spur wurde inzwischen geändert – neu laden")
+            self.store.save_line({**alt,"nudge_m":0.})
+        self.line.nudge_m=0.
+        self._nudge_zeit=time.time()
+        self.turn_preview=[]
+        self.note("Seitlicher Versatz auf Originalspur zurückgesetzt")
+        return {"nudge_m":0.}
+
+    def arbeitsgrenze_speichern(self, feld_id, werte, geprueft=None):
+        feld=self.store.get_field(feld_id)
+        if feld is None or feld["deleted"]: raise ValueError("Feld nicht gefunden")
+        self._werkzeug_stillstand()
+        if werte.get("stand")!=feld["updated_at"]:
+            raise RuntimeError("Die Feldgrenze wurde inzwischen geändert. Entwurf verwerfen und neu öffnen.")
+        punkte=werte.get("punkte")
+        if punkte != []: punkte=geprueft if geprueft is not None else feldwerkzeuge.grenze_pruefen(punkte,feld["boundary"])
+        neu=self.store.save_field({**feld,"working_boundary":punkte})
+        self.grenze_abgleichen()
+        return neu
+
+    def grenze_abgleichen(self):
+        if self.field is None: return
+        neu=self.store.get_field(self.field["id"])
+        if neu is None or neu["deleted"]: return
+        if (neu["boundary"],neu.get("working_boundary"))==(self.field["boundary"],self.field.get("working_boundary")): return
+        try: self._werkzeug_stillstand()
+        except RuntimeError: return
+        self.field=neu
+        self.turn_preview=[]
+        self.turn_preview_ok=False
+        if self.line is not None and self.line.derived and self.line.mode=="contour": self.use_contour()
+        self._update_headland()
+        self.note("Aktuelle Arbeitsgrenze übernommen")
+
+    def arbeitslinien_vorschau(self, job_id):
+        job=self.store.get_job(job_id)
+        if job is None or job["deleted"]: raise ValueError("Arbeit nicht gefunden")
+        if not job["ended_at"]: raise ValueError("Arbeit zuerst beenden")
+        feld=self.store.get_field(job["field_id"])
+        if feld is None or feld["deleted"]: raise ValueError("Zugehöriges Feld fehlt")
+        punkte=self.store.track_points(job_id)
+        segmente=feldwerkzeuge.arbeitslinien(punkte,geo.LocalPlane(feld["datum_lat"],feld["datum_lon"]))
+        return {"job_id":job_id,"field_id":feld["id"],"feldname":feld["name"],"bezug":[feld["datum_lat"],feld["datum_lon"]],"jobstand":job["updated_at"],
+                "grenze":feld["boundary"],"stand":feldwerkzeuge.stand([punkte,feld["datum_lat"],feld["datum_lon"]]),
+                "abstand_m":job.get("reference_spacing_m",0),"segmente":segmente,
+                "hinweis":"Keine geeigneten lokalen Spurpunkte. Auf dem aufzeichnenden Tablet öffnen; gespeicherte Referenzspuren werden anschließend abgeglichen." if not segmente else ""}
+
+    def arbeitslinie_speichern(self, job_id, werte, plan=None):
+        plan=plan if plan is not None else self.arbeitslinien_vorschau(job_id)
+        aktuell=self.store.get_job(job_id)
+        feld=self.store.get_field(plan["field_id"])
+        if (aktuell is None or aktuell["deleted"] or feld is None or feld["deleted"]
+                or aktuell["field_id"]!=plan["field_id"] or aktuell["updated_at"]!=plan["jobstand"]
+                or [feld["datum_lat"],feld["datum_lon"]]!=plan["bezug"]):
+            raise RuntimeError("Arbeit oder Feld nicht mehr verfügbar")
+        if werte.get("stand")!=plan["stand"]: raise RuntimeError("Die Aufzeichnung hat sich geändert – Vorschau neu öffnen")
+        index=werte.get("segment")
+        if type(index) is not int or not 0<=index<len(plan["segmente"]): raise ValueError("Abschnitt auswählen")
+        segment=plan["segmente"][index]
+        if segment["altaufzeichnung"] and werte.get("antenne_bestaetigt") is not True:
+            raise ValueError("Altaufzeichnung enthält die Antennenspur ohne gesicherten Geräteversatz/Arbeitszustand. Bitte ausdrücklich bestätigen.")
+        try: abstand=float(werte.get("abstand_m") or 0)
+        except (ValueError,TypeError): raise ValueError("Bitte einen gültigen Spurabstand eingeben") from None
+        if not math.isfinite(abstand) or not 0.1<=abstand<=100: raise ValueError("Spurabstand muss zwischen 0,1 und 100 m liegen")
+        name=str(werte.get("name") or "").strip()
+        if not name or len(name)>120: raise ValueError("Bitte einen Spurnamen mit höchstens 120 Zeichen angeben")
+        # Neue Kennung, kein load_line: weder die aktuelle Lenkung noch die Aussaat
+        # ändert sich durch eine reine Archivaktion.
+        punkte=feldwerkzeuge.abschnitt_kuerzen(segment["punkte"],werte.get("anfang_m",0),werte.get("ende_m",0))
+        import uuid
+        try: kennung="ref-"+uuid.UUID(str(werte.get("request_id"))).hex
+        except ValueError: raise ValueError("Ungültiger Speichervorgang – Vorschau neu öffnen") from None
+        datensatz={"id":kennung,"field_id":plan["field_id"],"name":name,"mode":"curve",
+                   "points":punkte,"spacing_m":abstand}
+        alt=self.store.get_line(kennung)
+        if alt is not None:
+            if alt["deleted"] or any(alt[k]!=v for k,v in datensatz.items()):
+                raise RuntimeError("Dieser Speichervorgang wurde bereits abgeschlossen – Vorschau neu öffnen")
+            return alt
+        return self.store.save_line(datensatz)
 
     def nudge(self, metres: float, bildschirm_rechts: Optional[list] = None) -> float:
         """Trim the whole pattern sideways.
@@ -1269,7 +1393,7 @@ class Engine:
         man steht, ist nicht das, dessen Ebene gerade geladen ist."""
         cache = []
         for feld in self.store.list_fields():
-            grenze = [tuple(p) for p in (feld.get("boundary") or [])]
+            grenze = [tuple(p) for p in (feldwerkzeuge.arbeitsgrenze(feld))]
             if len(grenze) >= 3:
                 cache.append((feld["id"], feld["name"],
                               geo.LocalPlane(feld["datum_lat"], feld["datum_lon"]), grenze))
@@ -1393,7 +1517,7 @@ class Engine:
             self._ring_key = schluessel
             self._ring_cache = [
                 list(p) for p in headland_module.ring(
-                    [tuple(p) for p in self.field["boundary"]], tiefe)
+                    [tuple(p) for p in feldwerkzeuge.arbeitsgrenze(self.field)], tiefe)
             ]
         return self._ring_cache
 
@@ -1404,9 +1528,9 @@ class Engine:
         der Karte liegen, dann startet er sie. Eine Wende, die auf Knopfdruck
         sofort losfährt, hat niemand vorher angesehen.
 
-        Geprüft wird gegen die Feldgrenze, Punkt für Punkt. Ragt auch nur ein
-        Stück hinaus, bleibt ``im_feld`` falsch - und mit der
-        Sicherheitsprüfung an lässt sich die Route dann nicht starten.
+        Fahrzeug, Gerät und ihre Verbindung werden als abgetastete Hülle
+        gegen die Arbeitsgrenze samt Abstand geprüft. Ohne vollständige Maße
+        oder mit einer Außenkante jenseits der Grenze bleibt ``im_feld`` falsch.
         """
         self._require_position()
         if self.heading is None:
@@ -1420,7 +1544,7 @@ class Engine:
                 werte["richtung"] = richtung
             einstellung = headland_module.HeadlandSettings.from_dict(werte)
 
-        grenze = [tuple(p) for p in (self.field.get("boundary") or [])] \
+        grenze = [tuple(p) for p in (feldwerkzeuge.arbeitsgrenze(self.field))] \
             if self.field else []
         # Geplant wird ab dem Punkt, auf den auch gelenkt wird - der Achse.
         # Ab dem Gerät geplant, läge die Route sieben Meter hinter der
@@ -1439,9 +1563,17 @@ class Engine:
         tiefe = einstellung.tiefe_m(self.profile.width_m)
         bogen = headland_module.plan(wendepunkt, kurs, einstellung, self.profile.spacing_m, tiefe, grenze)
         pfad = gerade + bogen
-        im_feld = headland_module.route_im_feld(pfad, grenze)
-        vorschlag = ""
-        if not im_feld and anlauf > 0.0 and len(grenze) >= 3:
+        mitte_im_feld = headland_module.route_im_feld(pfad, grenze)
+        huelle = gespann.pruefen(pfad, grenze, self.profile, einstellung.grenzabstand_m,
+                                self.implement_heading.value, self.heading, (kurs+180)%360)
+        im_feld = mitte_im_feld and huelle["im_feld"]
+        self.turn_huelle = huelle
+        self._turn_kontext = self.wende_kontext()
+        self._turn_geraetekurs = self.implement_heading.value
+        self._turn_kurs = self.heading
+        self._turn_optionen = (muster, richtung)
+        vorschlag = huelle["hinweis"] if not im_feld else ""
+        if not mitte_im_feld and anlauf > 0.0 and len(grenze) >= 3:
             vorschlag = self._wende_vorschlag(bogen, wendepunkt, kurs, tiefe, einstellung)
         # Kann die Maschine den engsten Bogen überhaupt fahren? Radstand und
         # größter Einschlag geben den kleinsten Kreis; ein enger geplanter Bogen
@@ -1471,6 +1603,7 @@ class Engine:
             "grenze_vorhanden": len(grenze) >= 3,
             "anlauf_m": round(anlauf, 1),
             "vorschlag": vorschlag,
+            "gespann": huelle,
         }
 
     def _wende_vorschlag(self, bogen, wendepunkt, kurs, tiefe, einstellung) -> str:
@@ -1519,10 +1652,22 @@ class Engine:
                                f"letzten {self.WENDE_VORLAUF_MAX_M:.0f} m planen")
         return rest, self.guidance.target_heading_deg
 
+    def wende_kontext(self) -> str:
+        """Feld, Gespann und tatsächliche Spur der Vorschau unverwechselbar binden."""
+        return feldwerkzeuge.stand([self.field, asdict(self.profile), self.headland.to_dict(),
+                                   self.line.to_dict() if self.line else None])
+
     def start_turn(self) -> dict:
         """Die geplante Route übernehmen und ihr folgen."""
         if not self.turn_preview:
             raise RuntimeError("Erst eine Wende planen")
+        self.grenze_abgleichen()
+        if getattr(self,"_turn_kontext",None)!=self.wende_kontext():
+            self.turn_preview=[]
+            raise RuntimeError("Feld, Spur oder Gespann geändert – Wende neu planen")
+        aktuell=self.store.get_field(self.field["id"]) if self.field else None
+        if aktuell and (aktuell["boundary"],aktuell.get("working_boundary"))!=(self.field["boundary"],self.field.get("working_boundary")):
+            raise RuntimeError("Neue Arbeitsgrenze liegt vor – anhalten und Wende neu planen")
         if not self.turn_preview_fahrbar:
             engster, kleinster = self.turn_preview_radius
             raise RuntimeError(
@@ -1531,19 +1676,42 @@ class Engine:
                 "Wendekreis größer einstellen oder mehr Spuren überspringen.")
         if self.headland.nur_im_feld and not self.turn_preview_ok:
             raise RuntimeError(
-                "Die Route liegt nicht vollständig im Feld. Wenderichtung, "
-                "Wendekreis oder Vorgewendetiefe ändern - oder die "
-                "Sicherheitsprüfung bewusst abschalten.")
+                getattr(self, "turn_huelle", {}).get("hinweis") or
+                "Das Gespann liegt nicht vollständig im Feld. Wenderichtung, "
+                "Wendekreis oder Vorgewendetiefe ändern und neu planen.")
         self._require_position()
         losgefahren = getattr(self, "_turn_planned_at", None)
         if losgefahren is not None and \
-                geo.distance(losgefahren, self._lenkpunkt()) > 5.0:
-            # Die Route beginnt dort, wo sie geplant wurde - inzwischen ist die
-            # Maschine weitergefahren. Von hier neu planen (gleiche Einstellung)
-            # und erneut prüfen, statt den Fahrer noch einmal drücken zu lassen.
-            self.plan_turn()
-            if not self.turn_preview_fahrbar or (self.headland.nur_im_feld and not self.turn_preview_ok):
-                raise RuntimeError("Von hier aus passt die Wende nicht mehr ins Feld - neu planen")
+                (geo.distance(losgefahren, self._lenkpunkt()) > 1.0 or abs(geo.angle_difference(self.heading or 0,getattr(self,"_turn_kurs",0)))>5.0):
+            # Eine neue Startlage benötigt eine erneut betrachtete Vorschau.
+            self.turn_preview=[]
+            raise RuntimeError("Position oder Richtung geändert – Wende neu planen und Vorschau prüfen")
+        if self.headland.nur_im_feld:
+            jetzt=self._lenkpunkt()
+            profil=self.profile
+            ausladung=max(profil.width_m,profil.geraet_breite_m,profil.hitch_length_m,
+                          profil.traktor_vorn_m,profil.traktor_hinten_m,abs(profil.tool_trailing_m),1.)*3
+            geraetekurs = self.implement_heading.value
+            if geraetekurs is None:
+                geraetekurs = self.heading or 0
+            geplant = getattr(self, "_turn_geraetekurs", None)
+            if geplant is None:
+                geplant = getattr(self, "_turn_kurs", 0)
+            winkel=max(abs(geo.angle_difference(self.heading or 0,getattr(self,"_turn_kurs",0))),
+                       abs(geo.angle_difference(geraetekurs, geplant)))
+            if ausladung*math.radians(winkel)>0.05:
+                raise RuntimeError("Ausrichtung des Gespanns geändert – Wende neu planen")
+            h=math.radians(self.heading or 0)
+            kurz=[jetzt,(jetzt[0]+math.sin(h)*.01,jetzt[1]+math.cos(h)*.01)]
+            lage=gespann.pruefen(kurz,feldwerkzeuge.arbeitsgrenze(self.field),profil,self.headland.grenzabstand_m,
+                                self.implement_heading.value,self.heading)
+            if not lage["im_feld"]:
+                raise RuntimeError("Die aktuelle Gespannlage hält den Grenzabstand nicht ein – Wende neu planen")
+            alte_huellen=getattr(self,"turn_huelle",{}).get("huellen",[])
+            if alte_huellen and lage["huellen"]:
+                verbindung=gespann._hulle([tuple(p) for p in alte_huellen[0]+lage["huellen"][0]])
+                if not feldwerkzeuge.flaeche_enthalten(verbindung,feldwerkzeuge.arbeitsgrenze(self.field),self.headland.grenzabstand_m+.10):
+                    raise RuntimeError("Anfahrt zur Wenderoute verlässt den Grenzabstand – neu planen")
         # Der Folger gibt spätestens dort auf, wo auch die Lenkung aufgäbe -
         # sonst zeigte die Anzeige "Wende läuft", während der Motor längst
         # abgeschaltet hat und der Fahrer allein lenkt.
@@ -1591,6 +1759,7 @@ class Engine:
             self.line.id if self.line else None,
             tractor=self.aktiver_traktor()["name"],
         )
+        self.store.update_job(self.job["id"], reference_spacing_m=self.profile.spacing_m)
         self.distance_m = 0.0
         self.working_time_s = 0.0
         self.note(f"Arbeit gestartet{': ' + operation if operation else ''}")
@@ -1752,7 +1921,7 @@ class Engine:
 
     def _update_headland(self) -> None:
         """Restdistanz, Vorgewendelage und Annäherungsalarm nachführen."""
-        grenze = [tuple(p) for p in (self.field.get("boundary") or [])] \
+        grenze = [tuple(p) for p in (feldwerkzeuge.arbeitsgrenze(self.field))] \
             if self.field else []
         vorher = self.headland_status.alarm
         self.headland_status = headland_module.status(
@@ -1861,7 +2030,7 @@ class Engine:
             kurs = self.heading
         boundary = None
         if self.field and self.field.get("boundary"):
-            boundary = [tuple(p) for p in self.field["boundary"]]
+            boundary = [tuple(p) for p in feldwerkzeuge.arbeitsgrenze(self.field)]
         if self.auto_sections:
             self.coverage.update_auto_sections(
                 self.implement_position, kurs, self.sections,
@@ -1926,9 +2095,12 @@ class Engine:
                 < TRACK_MIN_DISTANCE_M):
             return
         self._last_track_point = self.tool_position
+        geraet = self.plane.to_wgs(*self.implement_position) if self.implement_position is not None else (None,None)
+        arbeitet = any(s.enabled and not s.forced_off for s in self._wirksame_teilbreiten())
         self._track_buffer.append((
             now, fix.lat, fix.lon, fix.altitude, fix.speed_ms,
             self.heading, fix.fix_quality, self.guidance.cross_track_m,
+            *geraet, int(arbeitet), int(self.turn is not None),
         ))
         self._flush_track()
 
@@ -1950,6 +2122,9 @@ class Engine:
         """
         now = now or time.time()
         self._checkpoint(now)
+        if now-getattr(self,"_grenzabgleich_at",0)>1:
+            self._grenzabgleich_at=now
+            self.grenze_abgleichen()
         self._pruefe_feldvorschlag(now)
         age = now - self.fix.received_at if (self.fix and self.fix.received_at) else 99.0
         if self.teilbreiten is not None and (self.job is None or age>GPS_STILLSTAND_S):
@@ -2006,6 +2181,7 @@ class Engine:
                 "geplant": bool(self.turn_preview) and self.turn is None,
                 "im_feld": self.turn_preview_ok,
                 "fahrbar": self.turn_preview_fahrbar,
+                "gespann": getattr(self,"turn_huelle",{}) if self.turn_preview or self.turn else {},
             },
             "line": self.line.to_dict() if self.line else None,
             "saisonspur_neu": self.saisonspur_neu,
@@ -2019,6 +2195,7 @@ class Engine:
                 "name": self.field["name"],
                 "area_ha": self.field["area_ha"],
                 "boundary": self.field["boundary"],
+                "working_boundary": self.field.get("working_boundary", []),
                 "datum": [self.field["datum_lat"], self.field["datum_lon"]],
                 # Steht die Maschine im Feld? None ohne Grenze oder Position.
                 "im_feld": (geo.point_in_polygon(self.position, [tuple(p) for p in self.field["boundary"]])

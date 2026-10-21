@@ -1913,6 +1913,9 @@ class EngineHeadlandTest(unittest.TestCase):
         store = Storage(os.path.join(ordner.name, "e.db"))
         self.addCleanup(store.close)
         motor = Engine(config_module.load("/kein-solcher-pfad.yaml"), store)
+        # Synthetisch gemessene Testhülle; echte Profile bleiben bis zur Messung unbekannt.
+        motor.update_profile(dict(traktor_breite_m=2,traktor_vorn_m=3,traktor_hinten_m=1,
+                                  geraet_breite_m=3,geraet_vorn_m=1,geraet_hinten_m=1))
         motor.update_profile({"width_m": 6.0, "antenna_forward_m": 0.0,
                               "tool_trailing_m": 0.0, **profil})
         feld = store.save_field({
@@ -1969,17 +1972,18 @@ class EngineHeadlandTest(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             motor.start_turn()
 
-    def test_a_stale_plan_is_replanned_from_where_the_machine_is(self):
-        """Zwischen Planen und Starten fährt die Maschine weiter. Die alte Route
-        begänne dort, wo geplant wurde - ihr erster Bogen wäre ein Sprung quer
-        über das Feld. Deshalb wird beim Start von der jetzigen Lage aus neu
-        geplant (früher: abgelehnt, und der Fahrer musste noch einmal drücken)."""
+    def test_a_stale_plan_requires_a_fresh_preview(self):
+        """Neue Startlage erfordert eine erneut geprüfte und bestätigte Vorschau."""
         motor = self._motor()
         motor.tool_position = (50.0, 50.0)
         motor.heading = 0.0
         motor.update_headland({"muster": "u", "radius_m": 4.0})
         motor.plan_turn()
         motor.tool_position = (50.0, 80.0)
+        with self.assertRaisesRegex(RuntimeError,"neu planen"):
+            motor.start_turn()
+        self.assertIsNone(motor.turn)
+        motor.plan_turn()
         motor.start_turn()
         self.assertLess(math.dist(motor.turn.pfad[0], (50.0, 80.0)), 1.0)
 
@@ -2049,6 +2053,9 @@ class TurnDrivenTest(unittest.TestCase):
         store = Storage(os.path.join(ordner.name, "e.db"))
         self.addCleanup(store.close)
         motor = Engine(config_module.load("/kein-solcher-pfad.yaml"), store)
+        # Synthetisch gemessene Testhülle; echte Profile bleiben bis zur Messung unbekannt.
+        motor.update_profile(dict(traktor_breite_m=2,traktor_vorn_m=3,traktor_hinten_m=1,
+                                  geraet_breite_m=3,geraet_vorn_m=1,geraet_hinten_m=1))
         motor.update_profile({"width_m": 12.0, "overlap_m": 0.0,
                               "antenna_forward_m": 0.0, "tool_trailing_m": 0.0,
                               "wheelbase_m": 2.6, "max_steer_deg": 35.0})
@@ -2584,6 +2591,9 @@ class WendeabbruchTest(unittest.TestCase):
         store = Storage(os.path.join(ordner.name, "e.db"))
         self.addCleanup(store.close)
         motor = Engine(config_module.load("/kein-solcher-pfad.yaml"), store)
+        # Synthetisch gemessene Testhülle; echte Profile bleiben bis zur Messung unbekannt.
+        motor.update_profile(dict(traktor_breite_m=2,traktor_vorn_m=3,traktor_hinten_m=1,
+                                  geraet_breite_m=3,geraet_vorn_m=1,geraet_hinten_m=1))
         motor.update_profile({"width_m": 3.0, "antenna_forward_m": 0.0, "tool_trailing_m": 0.0})
         feld = store.save_field({"name": "Feld", "datum_lat": 48.0, "datum_lon": 11.0,
                                  "boundary": [list(p) for p in QUADRAT], "area_ha": 1.0})
@@ -3159,6 +3169,9 @@ class GeraetHinterAchseTest(unittest.TestCase):
         store = Storage(os.path.join(ordner.name, "s.db"))
         self.addCleanup(store.close)
         motor = Engine(config_module.load("/kein-solcher-pfad.yaml"), store)
+        # Synthetisch gemessene Testhülle; echte Profile bleiben bis zur Messung unbekannt.
+        motor.update_profile(dict(traktor_breite_m=2,traktor_vorn_m=3,traktor_hinten_m=1,
+                                  geraet_breite_m=3,geraet_vorn_m=1,geraet_hinten_m=1))
         motor.update_profile({"width_m": 21.0, "antenna_forward_m": 1.2, "wheelbase_m": 2.6,
                               "tool_trailing_m": 5.0, "trailed": True, "hitch_length_m": 4.0,
                               "steer_gain": 0.9, "max_steer_deg": 35.0, **profil})

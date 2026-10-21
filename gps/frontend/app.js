@@ -642,10 +642,14 @@ function polyline(points, close) {
 function drawBoundary() {
   const field = state.live && state.live.field;
   if (!field || !field.boundary || field.boundary.length < 3) return;
+  ctx.save();
+  if(field.working_boundary?.length)ctx.setLineDash([5/state.view.scale,5/state.view.scale]);
   polyline(field.boundary, true);
   ctx.strokeStyle = F.grenze;
   ctx.lineWidth = 2.5 / state.view.scale;
-  ctx.stroke();
+  ctx.stroke();ctx.setLineDash([]);
+  if(field.working_boundary?.length){polyline(field.working_boundary,true);ctx.stroke();}
+  ctx.restore();
 }
 
 /* Vorgewende: die Linie, an der die Arbeit endet und die Wende beginnt.
@@ -757,6 +761,8 @@ function drawTurn() {
   const turn = state.live && state.live.turn;
   if (!turn || !turn.punkte || turn.punkte.length < 2) return;
   ctx.save();
+  const huellen=turn.gespann?.huellen||[];
+  if(huellen.length){ctx.beginPath();for(const polygon of huellen){polygon.forEach(([x,y],i)=>i?ctx.lineTo(x,y):ctx.moveTo(x,y));ctx.closePath();}ctx.fillStyle=turn.im_feld?F.wende:F.vg;ctx.globalAlpha=.14;ctx.fill();ctx.globalAlpha=1;}
   polyline(turn.punkte);
   if (turn.aktiv) {
     ctx.strokeStyle = F.wende;
@@ -1153,7 +1159,25 @@ function wendeErgebnis(text, gut) {
   el('wfStarten').disabled = !gut;
 }
 
+let wendeInArbeit = false, wendeNachholen = false;
 async function wendePlanen(speichern = true) {
+  if (wendeInArbeit) {
+    if (speichern) { wendeNachholen = true; wendeErgebnis('Neue Auswahl wird anschließend geplant …', false); }
+    return;
+  }
+  wendeInArbeit = true;
+  try { await wendeBerechnen(speichern); }
+  finally {
+    wendeInArbeit = false;
+    if (wendeNachholen) {
+      wendeNachholen = false;
+      if (!el('wendeFenster').hidden) await wendePlanen(true);
+    }
+  }
+}
+
+async function wendeBerechnen(speichern) {
+  wendeErgebnis('Plane …', false);
   const auslassen = parseInt(wahlLesen('wfAuslassen') || '0', 10);
   if (speichern) {
     wendeErgebnis('Plane …', false);
@@ -1163,9 +1187,11 @@ async function wendePlanen(speichern = true) {
     if (!gespeichert.ok) { wendeErgebnis(gespeichert.detail || 'Einstellung nicht übernommen', false); return; }
   }
   const plan = await apiRoh('POST', '/api/turn/plan', {});
+  if (wendeNachholen || el('wendeFenster').hidden) return;
   if (!plan.ok) { wendeErgebnis(plan.detail || 'Keine Wende möglich', false); return; }
   const d = plan.data;
-  if (!d.fahrbar) {
+  if(d.gespann&&!d.gespann.vollstaendig){wendeErgebnis(d.gespann.hinweis,false);
+  } else if (!d.fahrbar) {
     wendeErgebnis(`Zu eng: engster Bogen ${d.engster_radius_m} m, die Lenkung schafft ${d.kleinster_radius_m} m – ` +
                   'mehr Spuren auslassen oder U-Wende.', false);
   } else if (!d.grenze_vorhanden) {
@@ -1303,6 +1329,13 @@ function bildschirmRechts() {
   const laenge = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1;
   return [(b[0] - a[0]) / laenge, (b[1] - a[1]) / laenge];
 }
+const feldwerkzeuge = new FeldwerkzeugeModul.Feldwerkzeuge({el,api:apiRoh,aktualisieren:refreshLists,profil:()=>state.live?.profile});
+el('btnOriginalspur').onclick=async()=>{
+  const s=state.live,linie=s?.line,feld=s?.field;if(!linie||!feld)return;
+  const payload={field_id:feld.id,line_id:linie.id,nudge_m:linie.nudge_m};
+  if(!confirm(`Seitlichen Versatz der Spur „${linie.name}“ von ${(linie.nudge_m*100).toFixed(0)} cm auf 0 zurücksetzen?`))return;
+  if(await api('POST','/api/guidance/original',payload)){toast('Originalspur wiederhergestellt');refreshLists();}
+};
 el('btnNudgeLeft').onclick = () => api('POST', '/api/guidance/nudge', { metres: -0.10, bildschirm_rechts: bildschirmRechts() });
 el('btnNudgeRight').onclick = () => api('POST', '/api/guidance/nudge', { metres: 0.10, bildschirm_rechts: bildschirmRechts() });
 
@@ -1425,7 +1458,7 @@ function menueSchliessen() {
 
 el('btnMenu').onclick = menueOeffnen;
 document.addEventListener('keydown', (event) => {
-  if (event.key === 'Escape' && !el('aussaatDialog').open && !el('sheet').hidden) menueSchliessen();
+  if (event.key === 'Escape' && !(el('aussaatDialog').open||el('feldWerkzeug').open) && !el('sheet').hidden) menueSchliessen();
 });
 
 /* Ein Reiter lässt sich direkt ansteuern: /#menu=setup öffnet die Inbetriebnahme.
@@ -2285,6 +2318,7 @@ function simulatorLaeuft() {
   return Boolean(system && system.gnss && system.gnss.source === 'simulator');
 }
 function simulatorTasteErlaubt(event) {
+  if(document.querySelector("dialog[open]"))return false;
   if (!simulatorLaeuft() || !el('sheet').hidden) return false;
   const ziel = event.target;
   return !(ziel && (ziel.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(ziel.tagName)));
@@ -2420,6 +2454,7 @@ function erntejahrWaehlen(vorgabe = new Date().getFullYear()) {
 
 function renderFields(fields, lines) {
   const host = el('fieldList');
+  const offeneAktionen=new Set([...host.querySelectorAll('.item[data-field]')].filter(r=>r.querySelector('.mehr')?.getAttribute('aria-expanded')==='true').map(r=>r.dataset.field));
   const currentId = state.live && state.live.field ? state.live.field.id : null;
   const jeFeld = {};
   (lines || []).forEach((line) => { (jeFeld[line.field_id] = jeFeld[line.field_id] || []).push(line); });
@@ -2433,6 +2468,7 @@ function renderFields(fields, lines) {
       title: field.name,
       sub: `${field.area_ha.toFixed(2)} ha` +
            (field.boundary.length ? ` · ${field.boundary.length} Grenzpunkte` : ' · keine Grenze') +
+           (field.working_boundary?.length?' · Arbeitsgrenze aktiv':'') +
            ` · ${spuren.length} ${spuren.length === 1 ? 'Spur' : 'Spuren'}` +
            (saison ? ` · Fahrgassen Erntejahr ${saison.saison}: alle ${saison.fahrgasse_m.toFixed(0)} m` : ''),
       actions: [
@@ -2445,6 +2481,7 @@ function renderFields(fields, lines) {
           if (offen) aufgeklappt.delete(field.id); else aufgeklappt.add(field.id);
           refreshLists();
         }],
+        ...(field.boundary.length >= 3 ? [['Arbeitsgrenze bearbeiten',()=>feldwerkzeuge.grenze(field)]] : []),
         ...(field.boundary.length >= 3 ? [['Randspuren anlegen', async () => {
           const antwort = await api('POST', `/api/fields/${field.id}/randspuren`);
           if (antwort) {
@@ -2469,6 +2506,8 @@ function renderFields(fields, lines) {
         }],
       ],
     });
+    row.dataset.field=field.id;
+    if(offeneAktionen.has(field.id))row.querySelector('.mehr')?.click();
     host.appendChild(row);
     if (offen) host.appendChild(spurenListe(field, spuren));
   });
@@ -2537,6 +2576,9 @@ function spurZeile(fieldId, line, aussaatId) {
 }
 
 function renderLines(lines) {
+  const aktiv=state.live?.line;
+  el('btnOriginalspur').disabled=!aktiv||!aktiv.nudge_m;
+  el('originalspurInfo').textContent=aktiv?`Aktiver Versatz: ${(aktiv.nudge_m*100).toFixed(0)} cm · Rücksetzen im Stillstand bei ausgeschalteter Lenkung.`:'Keine Spur aktiv.';
   const host = el('lineList');
   const fieldId = state.live && state.live.field ? state.live.field.id : null;
   const saison = letzteAussaat(lines);
@@ -2631,6 +2673,7 @@ function jobZeile(job) {
   });
   row.dataset.job = job.id;
   const actions = row.querySelector('.actions');
+  if(job.ended_at){const b=document.createElement('button');b.textContent='Arbeitslinie übernehmen';b.onclick=()=>feldwerkzeuge.referenz(job);actions.appendChild(b);}
   if (job.ended_at && job.area_ha > 0) {
     const knopf = document.createElement('button');
     knopf.textContent = 'MyTerra';

@@ -3,7 +3,7 @@ const assert=require('node:assert/strict');
 const {Kartenfarben}=require('../kartenfarben.js');
 function umgebung(speicher=new Map(),fehler=false) {
   const elemente={};const stil=new Map();let aenderungen=0;
-  for(const id of ['kartenfarbenThema','kartenfarbe_grenze','kartenfarbe_fahrgasse','kartenfarbenSpeichern','kartenfarbenStandard','kartenfarbenInfo','kartenfarbenPalette','tagNacht'])elemente[id]={value:'',textContent:''};
+  for(const id of ['kartenfarbenThema','kartenfarbe_grenze','kartenfarbe_fahrgasse','kartenfarbe_flaeche','kartenfarbe_doppelt','kartenfarbenSpeichern','kartenfarbenStandard','kartenfarbenInfo','kartenfarbenPalette','tagNacht'])elemente[id]={value:'',textContent:''};
   const blau={dataset:{art:'grenze',farbe:'#4b9dff'}};
   elemente.kartenfarbenPalette.querySelectorAll=()=>[blau];
   const k=new Kartenfarben({el:id=>elemente[id],speicher:{getItem:key=>speicher.get(key),setItem:(key,wert)=>{if(fehler)throw new Error('gesperrt');speicher.set(key,wert);}},stil:{setProperty:(key,wert)=>stil.set(key,wert),removeProperty:key=>stil.delete(key)},geaendert:()=>aenderungen++});
@@ -40,4 +40,12 @@ test('Schreibfehler bleibt ehrlich und erlaubt Farben nur für die Sitzung',()=>
 test('ungültige Eingaben überschreiben keine gespeicherte Farbe',()=>{
   const u=umgebung();u.blau.onclick();u.k.speichern();u.elemente.kartenfarbe_grenze.value='red';u.k.speichern();
   assert.equal(u.stil.get('--f-grenze'),'#4b9dff');assert.match(u.elemente.kartenfarbenInfo.textContent,/gültige/);
+});
+
+test('Flächenfarben bleiben durchsichtig und getrennt für Tag und Nacht erhalten',()=>{
+ const u=umgebung();u.elemente.kartenfarbe_flaeche.value='#123456';u.elemente.kartenfarbe_doppelt.value='#abcdef';u.k.speichern();
+ assert.equal(u.stil.get('--f-flaeche'),'rgba(18,52,86,0.4)');assert.equal(u.stil.get('--f-doppelt'),'rgba(171,205,239,0.72)');
+ const neu=umgebung(u.speicher);assert.equal(neu.stil.get('--f-flaeche'),'rgba(18,52,86,0.4)');
+ neu.k.themaSetzen('tag');assert.equal(neu.stil.size,0);neu.k.speichern();assert.equal(neu.stil.get('--f-doppelt'),'rgba(200,104,12,0.64)');
+ neu.k.zuruecksetzen();neu.k.themaSetzen('nacht');assert.equal(neu.stil.get('--f-doppelt'),'rgba(171,205,239,0.72)');
 });

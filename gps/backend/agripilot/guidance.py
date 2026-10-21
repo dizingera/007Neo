@@ -69,6 +69,13 @@ class VehicleProfile:
     tool_trailing_m: float = 0.0    # distance from rear axle back to the tool
     trailed: bool = False           # gezogenes Gerät statt starrer Anbau
     hitch_length_m: float = 4.0     # Zugpunkt bis Geräteachse (nur gezogen)
+    # Ausdehnung ab Hinterachse bzw. Geräte-Arbeitspunkt; 0 = noch nicht gemessen.
+    traktor_breite_m: float = 0.0
+    traktor_vorn_m: float = 0.0
+    traktor_hinten_m: float = 0.0
+    geraet_breite_m: float = 0.0
+    geraet_vorn_m: float = 0.0
+    geraet_hinten_m: float = 0.0
     max_steer_deg: float = 35.0
     # Viele Traktoren schlagen nicht nach beiden Seiten gleich weit ein. 0 heißt:
     # wie max_steer_deg. Begrenzt den Einschlag der Führung und den engsten
@@ -203,6 +210,7 @@ class VehicleProfile:
 # Ein Traktor zieht viele Geräte - diese Werte misst und stellt man einmal je Traktor
 # ein, nicht für jedes Gerät neu. Der Rest der VehicleProfile gehört zum Gerät.
 TRAKTOR_FELDER = (
+    "traktor_breite_m", "traktor_vorn_m", "traktor_hinten_m",
     "antenna_forward_m", "antenna_right_m", "antenna_height_m",
     "wheelbase_m", "max_steer_deg", "max_steer_left_deg", "max_steer_right_deg", "max_steer_rate_deg_s",
     "regelart", "lenk_traegheit_s",
@@ -275,7 +283,7 @@ class GuidanceLine:
         self.saison = 0
         # Randspur: auf welcher Seite (Vorzeichen von "lateral") das Feld liegt,
         # +1 rechts der Spurrichtung, -1 links, 0 = keine Randspur. Setzt die
-        # Engine beim Laden aus der Feldgrenze (siehe rand_seite).
+        # Engine aus dem dauerhaft gespeicherten Randbezug (siehe rand_seite).
         self.rand_innen = 0.0
         self._vorausregler = None      # nur bei regelart "voraus", hält den geschätzten Radwinkel
         # Saatplan: wo genau die Fahrgassen liegen, in Metern neben der Spur

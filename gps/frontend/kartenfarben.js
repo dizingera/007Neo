@@ -2,8 +2,14 @@
 (function (ziel) {
   'use strict';
   const SCHLUESSEL = 'agripilot.kartenfarben.v1';
-  const STANDARD = {nacht: {grenze: '#ffb020', fahrgasse: '#ff5c5c'},
-    tag: {grenze: '#b57c0e', fahrgasse: '#d8362f'}};
+  const ARTEN=['grenze','fahrgasse','flaeche','doppelt'];
+  const STANDARD = {nacht: {grenze:'#ffb020',fahrgasse:'#ff5c5c',flaeche:'#48cc77',doppelt:'#ffae30'},
+    tag: {grenze:'#b57c0e',fahrgasse:'#d8362f',flaeche:'#178c46',doppelt:'#c8680c'}};
+  const deckkraft={nacht:{flaeche:.40,doppelt:.72},tag:{flaeche:.38,doppelt:.64}};
+  function ansichtsfarbe(art,farbe,thema){
+    if(!['flaeche','doppelt'].includes(art))return farbe;
+    return `rgba(${parseInt(farbe.slice(1,3),16)},${parseInt(farbe.slice(3,5),16)},${parseInt(farbe.slice(5,7),16)},${deckkraft[thema][art]})`;
+  }
   const farbeGueltig = wert => typeof wert === 'string' && /^#[0-9a-f]{6}$/i.test(wert);
   class Kartenfarben {
     constructor({el, speicher, stil, geaendert}) {
@@ -14,18 +20,18 @@
         const roh=speicher.getItem(SCHLUESSEL);
         if(roh) {
           const daten=JSON.parse(roh);
-          for(const thema of ['tag','nacht']) for(const art of ['grenze','fahrgasse']) {
+          for(const thema of ['tag','nacht']) for(const art of ARTEN) {
             if(farbeGueltig(daten?.[thema]?.[art])) this.farben[thema][art]=daten[thema][art].toLowerCase();
           }
         }
       } catch {lesefehler=true;}
       el('kartenfarbenThema').onchange=()=>this.themaWaehlen(el('kartenfarbenThema').value);
-      for(const art of ['grenze','fahrgasse']) {
+      for(const art of ARTEN) {
         el('kartenfarbe_'+art).oninput=()=>this.entwurfMerken();
       }
       el('kartenfarbenSpeichern').onclick=()=>this.speichern();
       el('kartenfarbenStandard').onclick=()=>this.zuruecksetzen();
-      el('kartenfarbenPalette').querySelectorAll('button[data-farbe]').forEach(knopf=>{
+      for(const id of ['kartenfarbenPalette','kartenfarbenMehrPalette'])el(id)?.querySelectorAll('button[data-farbe]').forEach(knopf=>{
         knopf.onclick=()=>{
           el('kartenfarbe_'+knopf.dataset.art).value=knopf.dataset.farbe;
           this.entwurfMerken();
@@ -36,8 +42,8 @@
     }
     melden(text){this.el('kartenfarbenInfo').textContent=text;}
     entwurfMerken(){
-      this.entwuerfe[this.thema]=Object.fromEntries(['grenze','fahrgasse'].map(art=>[art,this.el('kartenfarbe_'+art).value]));
-      this.melden('Farbauswahl geändert – bitte übernehmen.');
+      this.entwuerfe[this.thema]=Object.fromEntries(ARTEN.map(art=>[art,this.el('kartenfarbe_'+art).value]));
+      this.vorschau();this.melden('Farbauswahl geändert – bitte übernehmen.');
     }
     themaWaehlen(thema){
       if(!['tag','nacht'].includes(thema)||thema===this.thema)return;
@@ -47,15 +53,20 @@
     themaSetzen(thema){
       this.thema=thema;this.el('kartenfarbenThema').value=thema;
       const werte=this.entwuerfe[thema]||{...STANDARD[thema],...this.farben[thema]};
-      for(const art of ['grenze','fahrgasse'])this.el('kartenfarbe_'+art).value=werte[art];
-      this.anwenden();
+      for(const art of ARTEN)this.el('kartenfarbe_'+art).value=werte[art];
+      this.vorschau();this.anwenden();
       if(this.entwuerfe[thema])this.melden('Farbauswahl geändert – bitte übernehmen.');
       else this.melden('');
     }
+    vorschau(){
+      const box=this.el('kartenfarbenVorschau');if(!box)return;
+      for(const art of ARTEN){const farbe=this.el('kartenfarbe_'+art).value;
+        if(farbeGueltig(farbe))box.style.setProperty('--v-'+art,ansichtsfarbe(art,farbe,this.thema));}
+    }
     anwenden(){
-      for(const art of ['grenze','fahrgasse']) {
+      for(const art of ARTEN) {
         const farbe=this.farben[this.thema][art];
-        if(farbe)this.stil.setProperty('--f-'+art,farbe);
+        if(farbe)this.stil.setProperty('--f-'+art,ansichtsfarbe(art,farbe,this.thema));
         else this.stil.removeProperty('--f-'+art);
       }
     }
@@ -64,8 +75,8 @@
       catch {return false;}
     }
     speichern(){
-      const werte=Object.fromEntries(['grenze','fahrgasse'].map(art=>[art,this.el('kartenfarbe_'+art).value]));
-      if(!Object.values(werte).every(farbeGueltig)){this.melden('Bitte zwei gültige Farben auswählen.');return;}
+      const werte=Object.fromEntries(ARTEN.map(art=>[art,this.el('kartenfarbe_'+art).value]));
+      if(!Object.values(werte).every(farbeGueltig)){this.melden('Bitte gültige Farben auswählen.');return;}
       this.farben[this.thema]=werte;delete this.entwuerfe[this.thema];
       const gespeichert=this.ablegen();this.anwenden();this.geaendert();
       this.melden(gespeichert?'Kartenfarben in diesem Browser gespeichert.':'Für diese Sitzung übernommen; der Browser konnte die Farben nicht speichern.');

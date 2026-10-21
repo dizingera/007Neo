@@ -22,6 +22,7 @@ CREATE TABLE IF NOT EXISTS fields (
     datum_lat REAL NOT NULL,
     datum_lon REAL NOT NULL,
     boundary TEXT NOT NULL DEFAULT '[]',
+    working_boundary TEXT NOT NULL DEFAULT '[]',
     area_ha REAL NOT NULL DEFAULT 0,
     note TEXT NOT NULL DEFAULT '',
     updated_at REAL NOT NULL,
@@ -36,6 +37,7 @@ CREATE TABLE IF NOT EXISTS lines (
     points TEXT NOT NULL,
     spacing_m REAL NOT NULL,
     nudge_m REAL NOT NULL DEFAULT 0,
+    rand_innen REAL,                       -- fester Randbezug der gespeicherten Spur
     saison INTEGER NOT NULL DEFAULT 0,      -- Jahr der Fahrgassen, 0 = keine Saisonspur
     fahrgasse_m REAL NOT NULL DEFAULT 0,    -- Fahrgassenabstand, 0 = keine Fahrgassen
     fahrgassen TEXT NOT NULL DEFAULT '',    -- Saatplan: Fahrgassen in m neben der Spur (JSON), '' = alle fahrgasse_m
@@ -145,9 +147,24 @@ class Storage:
                                    ("fahrgassen", "TEXT NOT NULL DEFAULT ''")):
             if spalte not in vorhanden:
                 self.db.execute(f"ALTER TABLE lines ADD COLUMN {spalte} {definition}")
+        if "rand_innen" not in vorhanden:
+            self.db.execute("ALTER TABLE lines ADD COLUMN rand_innen REAL")
+        # Bestehende Spuren beziehen sich auf die ursprüngliche Feldgrenze.
+        # Der Bezug bleibt mit der Spur erhalten, auch nach einer Arbeitsgrenze.
+        for row in self.db.execute("SELECT * FROM lines WHERE rand_innen IS NULL").fetchall():
+            record = _line_row(row)
+            self.db.execute("UPDATE lines SET rand_innen=? WHERE id=?",
+                            (self._randbezug(record), record["id"]))
         if "aussaat_at" not in vorhanden:
             self.db.execute("ALTER TABLE lines ADD COLUMN aussaat_at REAL NOT NULL DEFAULT 0")
             self.db.execute("UPDATE lines SET aussaat_at=updated_at WHERE saison>0 AND fahrgasse_m>0")
+        if "working_boundary" not in {c[1] for c in self.db.execute("PRAGMA table_info(fields)")}:
+            self.db.execute("ALTER TABLE fields ADD COLUMN working_boundary TEXT NOT NULL DEFAULT '[]'")
+        for name,typ in (("tool_lat","REAL"),("tool_lon","REAL"),("working","INTEGER"),("turning","INTEGER")):
+            if name not in {c[1] for c in self.db.execute("PRAGMA table_info(track_points)")}:
+                self.db.execute(f"ALTER TABLE track_points ADD COLUMN {name} {typ}")
+        if "reference_spacing_m" not in {c[1] for c in self.db.execute("PRAGMA table_info(jobs)")}:
+            self.db.execute("ALTER TABLE jobs ADD COLUMN reference_spacing_m REAL NOT NULL DEFAULT 0")
         # Seit 1.5.7: mit welchem Traktor eine Arbeit gefahren wurde (Gerät steht in vehicle).
         if "tractor" not in {c[1] for c in self.db.execute("PRAGMA table_info(jobs)")}:
             self.db.execute("ALTER TABLE jobs ADD COLUMN tractor TEXT NOT NULL DEFAULT ''")
@@ -164,20 +181,24 @@ class Storage:
         record = dict(record)
         record.setdefault("id", new_id())
         record.setdefault("boundary", [])
+        alt = self.get_field(record["id"])
+        record.setdefault("working_boundary", (alt or {}).get("working_boundary", [])
+                          if alt and alt["boundary"] == record["boundary"] else [])
         record.setdefault("note", "")
         record.setdefault("area_ha", 0.0)
         record["updated_at"] = time.time()
         self.db.execute(
-            """INSERT INTO fields (id, name, datum_lat, datum_lon, boundary, area_ha,
+            """INSERT INTO fields (id, name, datum_lat, datum_lon, boundary, working_boundary, area_ha,
                                    note, updated_at, deleted)
-               VALUES (:id, :name, :datum_lat, :datum_lon, :boundary, :area_ha,
+               VALUES (:id, :name, :datum_lat, :datum_lon, :boundary, :working_boundary, :area_ha,
                        :note, :updated_at, 0)
                ON CONFLICT(id) DO UPDATE SET
-                   name=excluded.name, boundary=excluded.boundary,
+                   name=excluded.name, boundary=excluded.boundary, working_boundary=excluded.working_boundary,
                    area_ha=excluded.area_ha, note=excluded.note,
                    datum_lat=excluded.datum_lat, datum_lon=excluded.datum_lon,
                    updated_at=excluded.updated_at, deleted=0""",
-            {**record, "boundary": json.dumps(record["boundary"])},
+            {**record, "boundary": json.dumps(record["boundary"]),
+             "working_boundary": json.dumps(record["working_boundary"])},
         )
         self.db.commit()
         return self.get_field(record["id"])
@@ -197,11 +218,30 @@ class Storage:
 
     # -- guidance lines ---------------------------------------------------
 
+    def _randbezug(self, record: dict, grenze=None) -> float:
+        from .guidance import GuidanceLine, rand_seite
+        from .randspuren import ist_randspur
+        if not ist_randspur(record.get("name", "")):
+            return 0.0
+        feld = self.get_field(record.get("field_id"))
+        if feld is None:
+            return 0.0
+        if grenze is None:
+            grenze = feld["boundary"]
+        punkte = record.get("points", [])
+        if isinstance(punkte, str):
+            punkte = json.loads(punkte)
+        if len(punkte) < 2:
+            return 0.0
+        linie = GuidanceLine(record["mode"], punkte, record["spacing_m"], record["name"])
+        return rand_seite(linie, [tuple(p) for p in grenze])
+
     def save_line(self, record: dict) -> dict:
         record = dict(record)
         record.setdefault("id", new_id())
         record.setdefault("nudge_m", 0.0)
         alt = self.get_line(record["id"])
+        record.setdefault("rand_innen", alt["rand_innen"] if alt else self._randbezug(record))
         # Versatz-/Geometriespeicherung ist keine neue Aussaat. Fehlende Angaben
         # einer vorhandenen Spur erhalten deren gemeinsame Fahrgassen.
         record.setdefault("saison", (alt or {}).get("saison", 0))
@@ -212,12 +252,12 @@ class Storage:
         record["updated_at"] = time.time()
         self.db.execute(
             """INSERT INTO lines (id, field_id, name, mode, points, spacing_m,
-                                  nudge_m, saison, fahrgasse_m, fahrgassen, aussaat_at, updated_at, deleted)
+                                  nudge_m, rand_innen, saison, fahrgasse_m, fahrgassen, aussaat_at, updated_at, deleted)
                VALUES (:id, :field_id, :name, :mode, :points, :spacing_m,
-                       :nudge_m, :saison, :fahrgasse_m, :fahrgassen, :aussaat_at, :updated_at, 0)
+                       :nudge_m, :rand_innen, :saison, :fahrgasse_m, :fahrgassen, :aussaat_at, :updated_at, 0)
                ON CONFLICT(id) DO UPDATE SET
                    name=excluded.name, mode=excluded.mode, points=excluded.points,
-                   spacing_m=excluded.spacing_m, nudge_m=excluded.nudge_m,
+                   spacing_m=excluded.spacing_m, nudge_m=excluded.nudge_m, rand_innen=excluded.rand_innen,
                    saison=excluded.saison, fahrgasse_m=excluded.fahrgasse_m,
                    fahrgassen=excluded.fahrgassen, aussaat_at=excluded.aussaat_at,
                    updated_at=excluded.updated_at, deleted=0""",
@@ -378,9 +418,9 @@ class Storage:
         """Bulk insert. Called with a buffered batch, not per fix."""
         self.db.executemany(
             """INSERT INTO track_points
-               (job_id, t, lat, lon, altitude, speed_ms, heading, fix_quality, cross_track_m)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            [(job_id, *p) for p in points],
+               (job_id, t, lat, lon, altitude, speed_ms, heading, fix_quality, cross_track_m, tool_lat, tool_lon, working, turning)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            [(job_id, *p, *([None] * (12-len(p)))) for p in points],
         )
         self.db.commit()
 
@@ -467,6 +507,9 @@ class Storage:
             ).fetchone()
             if existing and existing["updated_at"] >= record.get("updated_at", 0):
                 continue
+            if table == "lines" and "rand_innen" not in record:
+                alt = self.get_line(record["id"])
+                record["rand_innen"] = alt["rand_innen"] if alt else self._randbezug(record)
             if table == "lines" and "aussaat_at" not in record:
                 # Alte Gegenstellen kennen die Spalte noch nicht. Vorhandene
                 # Aussaatzeit bewahren; beim ersten Empfang den Altstand übernehmen.
@@ -474,6 +517,10 @@ class Storage:
                 record["aussaat_at"] = (alt["aussaat_at"] if alt else
                     record.get("updated_at", 0) if record.get("saison", 0) > 0
                     and record.get("fahrgasse_m", 0) > 0 else 0.0)
+            if table == "fields" and "working_boundary" not in record:
+                alt = self.get_field(record["id"])
+                if alt and json.loads(record.get("boundary") or "[]") != alt["boundary"]:
+                    record["working_boundary"] = "[]"
             columns = [c[1] for c in self.db.execute(f"PRAGMA table_info({table})")]
             record = {k: v for k, v in record.items() if k in columns}
             placeholders = ", ".join(f":{k}" for k in record)
@@ -505,6 +552,7 @@ class Storage:
 def _field_row(row: sqlite3.Row) -> dict:
     record = dict(row)
     record["boundary"] = json.loads(record["boundary"] or "[]")
+    record["working_boundary"] = json.loads(record.get("working_boundary") or "[]")
     return record
 
 

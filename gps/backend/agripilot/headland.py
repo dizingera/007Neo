@@ -1,19 +1,17 @@
 """Vorgewende: der Rand des Feldes - und das Wenden darin.
 
 Das Vorgewende ist kein eigenes Feld, sondern eine Tiefe: so viele Arbeitsbreiten
-vom Rand nach innen, wie zum Wenden gebraucht werden. Alles hier leitet sich
-deshalb aus der gespeicherten Feldgrenze ab, nicht aus einer zweiten, getrennt
-gepflegten Geometrie - eine zweite Geometrie läuft der ersten früher oder später
-davon, und niemand merkt es.
+vom Rand nach innen, wie zum Wenden gebraucht werden. Die Engine übergibt die
+aktive Arbeitsgrenze, sofern vorhanden, sonst die ursprüngliche Feldgrenze.
+Die flächige Gespannprüfung ergänzt gespann.py.
 
 Drei Dinge stehen hier:
 
 * **Wie weit ist es noch?** Ein Strahl in Fahrtrichtung bis zur Feldgrenze,
   abzüglich der Vorgewendetiefe. Das ist die Zahl, die der Fahrer wirklich
   braucht, und sie kommt ohne Versatzpolygon aus.
-* **Zwei Wendemuster.** Die Ω-Wende (weiter Bogen) und die U-Wende (zwei
-  Viertelkreise mit Zwischengerade). Beide werden vor der Fahrt geplant und
-  vollständig gegen die Feldgrenze geprüft.
+* **Wendemuster.** Ω-Wende, U-Wende und Dubins-Bögen werden vor der Fahrt
+  geplant und zusammen mit der Gespannhülle gegen die Grenze geprüft.
 * **Das Nachfahren der geplanten Route.** Mit derselben Ehrlichkeit wie die
   Spurführung: die gemeldete Abweichung ist die Abweichung von der *Wenderoute*,
   nicht von der verlassenen Spur. Nur so bleibt die Sicherheitsgrenze der
@@ -88,6 +86,7 @@ class HeadlandSettings:
     muster: str = "omega"           # "omega" | "u"
     richtung: str = "links"         # "links" | "rechts"
     ueberspringen: int = 1          # Wiedereinfahrt: um so viele Spuren versetzt
+    grenzabstand_m: float = 0.5     # zusätzliche Reserve um die gemessene Gespannfläche
     radius_m: float = 6.0           # kleinster Wendekreis der Maschine
     nur_im_feld: bool = True        # Sicherheitsprüfung erzwingen
     reihenfolge: str = "egal"       # "zuerst" | "zuletzt" | "egal" - wann das Vorgewende dran ist
@@ -107,6 +106,7 @@ class HeadlandSettings:
             muster=self.muster if self.muster in MUSTER else "omega",
             richtung=self.richtung if self.richtung in RICHTUNGEN else "links",
             ueberspringen=int(max(1, min(8, self.ueberspringen))),
+            grenzabstand_m=float(max(0.0, min(20.0, self.grenzabstand_m))),
             radius_m=float(max(1.5, min(30.0, self.radius_m))),
             nur_im_feld=bool(self.nur_im_feld),
             reihenfolge=self.reihenfolge if self.reihenfolge in REIHENFOLGEN else "egal",

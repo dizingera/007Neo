@@ -113,10 +113,10 @@ Spur. Für Gegenlenkbögen gilt die strengere der beiden Lenkwinkelgrenzen.
 Die kürzeste abgetastet im Feld liegende Variante wird bevorzugt, wenn die
 Feldgrenzenprüfung eingeschaltet ist. Passt keine, bleibt die entsprechende
 Startfreigabe gesperrt. Vorschau ansehen und die Wende weiterhin bewusst starten.
-Die Prüfung erfasst den geplanten Fahrzeugpfad, keine vollständige Hüllkurve
-des Anbaugeräts und keine Hindernisse oder Fahrbarkeit des Bodens. Dubins-Bögen
-haben ideale Krümmungswechsel; Lenkdynamik und tatsächliche Wendefläche sind
-vor realem Einsatz zu erproben. Keine automatische Hindernisumfahrung.
+Ab 1.5.45 wird zusätzlich die berechnete Gespannhülle geprüft (siehe unten).
+Hindernisse und die Fahrbarkeit des Bodens werden dadurch nicht erkannt.
+Dubins-Bögen haben ideale Krümmungswechsel; Lenkdynamik und tatsächliche
+Wendefläche sind vor realem Einsatz zu erproben. Keine automatische Hindernisumfahrung.
 
 ## Gemeinsame Aussaat-Fahrgassen ab 1.5.40
 
@@ -1160,3 +1160,83 @@ Tablet-Abgleich, die sofortige Lenkabschaltung bei ungültigem GPS-Fix, eine ern
 Stillstandsprüfung nach dem Online-Download und den Zugriffsschutz der externen
 Live-Verbindung. Gerätenamen werden ausschließlich als Text angezeigt.
 Prüfungen am echten Traktor und an noch nicht gewählter Teilbreitenhardware stehen aus.
+
+
+## Feldwerkzeuge und Gespannprüfung ab 1.5.45
+
+### Kartenfarben für Arbeit und Überlappung
+
+Unter **Einstellungen → Kartenfarben** lassen sich neben Feldgrenze und Fahrgassen nun
+auch **Bearbeitet** und **Überlappung** einstellen. Die Vorschau zeigt die vier
+Farben zusammen. Tag und Nacht haben eigene Einstellungen. Erst **Kartenfarben
+übernehmen** ändert die Karte. Die Flächen bleiben durchsichtig, damit Spuren
+und Grenzen erkennbar bleiben. Gespeichert wird auf diesem Tablet/Browser.
+
+### Zur ursprünglichen Spur zurück
+
+Unter **Spuren → Versatz auf Originalspur zurücksetzen** wird der manuelle seitliche Versatz der geladenen
+Spur auf null gesetzt. AgriPilot zeigt vorher den aktuellen Versatz. Die Aktion
+ist nur im Stillstand, ohne laufende Arbeit, Aufnahme, Wende oder Lenkfreigabe
+möglich. Eine zwischenzeitlich andere Spur oder ein geänderter Versatz wird
+abgewiesen. Das setzt weder das Erntejahr noch die Aussaatfestlegung zurück.
+
+### Arbeitsgrenze bearbeiten
+
+**Felder → Mehr → Arbeitsgrenze bearbeiten** öffnet die Punktbearbeitung. Die gestrichelte
+Linie ist die ursprüngliche Feldgrenze; die durchgezogene Linie ist der Entwurf.
+Punkt in Karte oder Liste wählen, Schrittweite einstellen und mit den
+Richtungstasten versetzen. Alternativ Ost/Nord als lokale Meter eingeben.
+Punkte lassen sich einfügen, entfernen und schrittweise zurücknehmen.
+**Ursprüngliche Grenze** holt den ursprünglichen Umriss in den Entwurf zurück.
+Erst **Arbeitsgrenze speichern** übernimmt ihn.
+
+Der Entwurf muss ein geschlossenes, nicht selbstüberschneidendes Feld von
+mindestens 100 m² innerhalb der ursprünglichen Grenze ergeben. Ein ungültiger
+Entwurf bleibt mit verständlicher Meldung geöffnet. Die ursprüngliche Grenze
+wird nicht überschrieben. Die Arbeitsgrenze gilt für Vorgewende, Wendeprüfung,
+Teilbreiten, Saatplan und neue Randspuren und wird zwischen Geräten abgeglichen.
+Während einer laufenden Arbeit oder Lenkung wird eine empfangene Grenze erst
+später im Stillstand übernommen. Bereits gespeicherte Aussaat-Randspuren behalten
+Geometrie, Randbezug und Fahrgassen. Neue Arbeitsränder erhalten eigene Spuren.
+
+### Gefahrene Arbeitslinie wiederverwenden
+
+Unter **Arbeiten** bei einer abgeschlossenen Aufzeichnung **Arbeitslinie übernehmen** öffnen.
+AgriPilot schlägt zusammenhängende gefahrene Abschnitte vor. Abschnitt auswählen,
+bei Bedarf am Anfang/Ende kürzen, Verlauf prüfen und Namen sowie Spurabstand
+festlegen. Mindestens 20 m müssen bleiben. **Als neue Referenz speichern** legt
+eine zusätzliche Kurvenspur an; die gemeinsame Aussaat bleibt bestehen.
+Soll diese Spur künftig die Fahrgassen bestimmen, anschließend unter **Spuren**
+bewusst **Als Aussaat festlegen** und das Erntejahr wählen.
+
+Neue Aufzeichnungen speichern die berechnete Geräteposition und den Arbeits-/
+Wendezustand. Unterbrechungen, Sprünge und erkannte Wendebögen werden getrennt.
+Alte Aufzeichnungen enthalten nur die Antennenposition; dafür ist eine bewusste
+Bestätigung nach Prüfung des Geräteversatzes nötig. Die automatische Erkennung
+ersetzt die Vorschaukontrolle nicht. Die Aufzeichnungspunkte müssen auf dem
+Gerät vorhanden sein, das die Referenz erzeugt. Die daraus gespeicherte
+Referenzspur wird anschließend über den Master geteilt.
+
+### Außenmaße und Wendehülle
+
+Unter **Traktor & Gerät** die tatsächlich gemessenen Außenmaße des Traktors und Geräts
+angeben: Breite sowie Ausladung nach vorn/hinten. Traktormaße beziehen sich auf
+die Hinterachse, Gerätemaße auf den eingestellten Gerätemittelpunkt. Null bedeutet
+**noch nicht gemessen**. Die Arbeitsbreite bleibt eine eigene Betreiberangabe;
+für die Außenkante zählt der größere Wert aus Arbeits- und Außenbreite.
+
+Unter **Vorgewende & Wende** den Grenzabstand festlegen (Vorgabe 0,5 m). Die
+Vorschau zeigt zusätzlich zur Route die berechnete Fläche, die Traktor, Gerät
+und Verbindung dazwischen überstreichen. Gezogene Geräte folgen dem eingestellten
+Zugpunkt und Deichselmaß; angebaute Geräte der Traktorausrichtung. Die Prüfung
+berücksichtigt den Grenzabstand plus mindestens 0,1 m Rechenreserve. Die Darstellung
+fasst mehrere berechnete Lagen konservativ zusammen und kann etwas größer
+erscheinen als die einzelnen geprüften Teilflächen.
+
+Ohne vollständige Maße oder wenn die Hülle den Abstand verletzt, gibt die
+Oberfläche die Wende nicht frei. Nach Änderungen an Feld, Spur, Gespann oder
+Startlage muss erneut geplant werden. Langsame Planungen laufen nacheinander;
+eine neue Auswahl wird anschließend einmal neu berechnet. Die Hülle ist eine
+geometrische Modellprüfung, keine Freigabe für ein reales Gespann. Hindernisse,
+Hang, Schlupf, mechanische Grenzen und reale Lenkdynamik benötigen praktische
+Prüfung. An echter Hardware wurde diese Erweiterung noch nicht erprobt.
