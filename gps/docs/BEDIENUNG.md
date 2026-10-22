@@ -918,7 +918,7 @@ Traktor leicht schräg, das Rad steht dabei trotzdem gerade.
 
 **Einschlag bei Tempo begrenzen** (ab 1.5.53). Je schneller, desto kleiner der
 Einschlag, den die Automatik verlangen darf – begrenzt wird die Querbeschleunigung
-(Vorgabe 1,5 m/s²): bei 15 km/h höchstens rund 13°, bei 10 km/h rund 25°, beim Wenden mit
+(Vorgabe 1,5 m/s²): bei 15 km/h höchstens rund 13°, bei 10 km/h rund 28°, beim Wenden mit
 6 km/h der volle Einschlag. Ein GPS-Sprung oder ein Spurwechsel in schneller Fahrt reißt
 den Traktor so nicht herum. Greift die Grenze, steht oben „Einschlag wegen Tempo auf …°
 begrenzt“. Einstellen: *Einstellungen → Lenkautomatik → Einschlag bei Tempo begrenzen*
