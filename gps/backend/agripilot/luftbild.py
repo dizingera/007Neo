@@ -38,6 +38,8 @@ STANDARD_QUELLE = "Luftbild © LGL, www.lgl-bw.de (dl-de/by-2-0)"
 ERSATZ = ("https://sgx.geodatenzentrum.de/wms_sen2europe", "rgb",
           "Satellitenbild © BKG, enthält Copernicus Sentinel-2-Daten (10 m) – Luftbild gerade nicht erreichbar")
 ERSATZ_NEU_S = 6 * 3600.0
+GESTOERT_S = 600.0          # nach einem Ausfall den Dienst so lange nicht mehr abwarten
+_gestoert_bis: dict[str, float] = {}
 RAND_M = 150.0
 M_JE_PIXEL = 0.3
 MAX_PIXEL = 4096
@@ -141,12 +143,15 @@ def holen(feld: dict, ordner: Path, wms: str = STANDARD_WMS, ebene: str = STANDA
         except Exception as exc:  # noqa: BLE001 - dann eben direkt beim Dienst
             fehler.append(f"Master: {_fehlertext(exc)}")
             daten = b""
-    if not ist_jpeg(daten):
+    if not ist_jpeg(daten) and time.time() < _gestoert_bis.get(wms, 0.0) and ersatz is not None:
+        fehler.append("Dienst: eben erst nicht erreichbar")
+    elif not ist_jpeg(daten):
         breite, hoehe = bildgroesse(feld, box)
         try:
             daten = lesen(getmap_url(wms, ebene, box, breite, hoehe), {}, timeout)
         except Exception as exc:  # noqa: BLE001
             fehler.append(f"Dienst: {_fehlertext(exc)}")
+            _gestoert_bis[wms] = time.time() + GESTOERT_S
             daten = b""
     if not ist_jpeg(daten) and ersatz is not None:
         breite, hoehe = bildgroesse(feld, box)

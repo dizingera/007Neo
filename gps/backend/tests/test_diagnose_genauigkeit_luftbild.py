@@ -137,6 +137,25 @@ class LuftbildErsatz(unittest.TestCase):
             luftbild.holen(FELD, Path(ordner), lesen=lesen, ersatz=ersatz)
             self.assertEqual(len(aufrufe), n)             # Ersatz frisch: Dienst nicht erneut abwarten
 
+    def test_after_an_outage_the_next_field_does_not_wait_for_the_service(self):
+        aufrufe = []
+
+        def lesen(url, kopf, timeout):
+            aufrufe.append(url)
+            if "ersatz.example" in url:
+                return JPEG
+            raise TimeoutError("timed out")
+
+        ersatz = ("https://ersatz.example/wms", "rgb", "Ersatz")
+        luftbild._gestoert_bis.clear()
+        with tempfile.TemporaryDirectory() as ordner:
+            luftbild.holen(FELD, Path(ordner), wms="https://dienst.example/wms", lesen=lesen, ersatz=ersatz)
+            zweites = {**FELD, "id": "f2"}
+            aufrufe.clear()
+            luftbild.holen(zweites, Path(ordner), wms="https://dienst.example/wms", lesen=lesen, ersatz=ersatz)
+            self.assertEqual([u for u in aufrufe if "dienst.example" in u], [])
+        luftbild._gestoert_bis.clear()
+
     def test_timeout_reads_like_german(self):
         def lesen(url, kopf, timeout):
             raise TimeoutError("timed out")
