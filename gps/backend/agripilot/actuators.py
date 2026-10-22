@@ -730,7 +730,17 @@ class PhidgetOutput(SteerOutput):
             return 0.0
         return self._target_angle - measured
 
+    def mitte_korrigieren(self, grad: float) -> None:
+        """Die Radmitte um ``grad`` verschieben (aus der Fahrt gelernt, radmitte.py)."""
+        self.config.mitte_versatz_deg = round(float(getattr(self.config, "mitte_versatz_deg", 0.0)) + grad, 3)
+
     def measured_angle(self) -> Optional[float]:
+        roh = self._roher_winkel()
+        if roh is None:
+            return None
+        return roh - float(getattr(self.config, "mitte_versatz_deg", 0.0) or 0.0)
+
+    def _roher_winkel(self) -> Optional[float]:
         try:
             if self.was is not None:
                 ratio = self.was.getVoltageRatio()

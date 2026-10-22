@@ -1642,6 +1642,9 @@ def create_app(config=None) -> FastAPI:
             simulator_source.set_steer(float(payload["steer_deg"]))
         if "fix_quality" in payload:
             simulator_source.fix_quality = int(payload["fix_quality"])
+        for name in ("seitendrift_ms", "rad_versatz_deg", "mess_korrektur_deg"):
+            if name in payload and hasattr(simulator_source, name):
+                setattr(simulator_source, name, float(payload[name]))
         if "east" in payload and "north" in payload:
             simulator_source.teleport(
                 float(payload["east"]), float(payload["north"]),
@@ -1738,6 +1741,32 @@ def create_app(config=None) -> FastAPI:
         if eigene and not eigene["simulator"]:
             engine.flotte.melden(config.network.device_id, eigene)
         return {"flotte": engine.flotte.liste(ohne=geraet)}
+
+    # -- Radmitte aus der Fahrt ------------------------------------------
+
+    @api.get("/api/lenkung/radmitte")
+    async def radmitte_stand() -> dict:
+        return engine.radmitte.ergebnis()
+
+    @api.post("/api/lenkung/radmitte")
+    async def radmitte_aktion(payload: dict = Body(default={})):
+        aktion = str(payload.get("aktion") or "")
+        if aktion == "start":
+            engine.radmitte.start()
+        elif aktion == "stop":
+            engine.radmitte.stop()
+        elif aktion == "zuruecksetzen":
+            engine.radmitte.zuruecksetzen()
+        elif aktion == "uebernehmen":
+            try:
+                ergebnis = engine.radmitte_uebernehmen()
+            except RuntimeError as exc:
+                raise HTTPException(400, str(exc)) from exc
+            if ergebnis.get("speichern"):
+                config.save()
+        else:
+            raise HTTPException(400, "Unbekannte Aktion")
+        return ok(engine.radmitte.ergebnis())
 
     # -- Luftbild ---------------------------------------------------------
 

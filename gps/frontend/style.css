@@ -705,3 +705,5 @@ label.button { display: inline-flex; align-items: center; cursor: pointer; }
 .diagnose-notiz textarea { width: 100%; padding: 10px 12px; border-radius: 8px; font: inherit; font-size: 15px;
   background: var(--panel-2); color: var(--text); border: 1px solid var(--m-feld-rand, var(--line)); }
 .sheet .item .sub { white-space: pre-line; }
+
+#lenkLiveArbeit { white-space: pre-line; }

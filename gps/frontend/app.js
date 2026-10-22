@@ -2298,8 +2298,13 @@ function renderLenkLive() {
       return li;
     }));
     el('lenkLiveZahlen').textContent = lenkLiveZahlen(k);
-    el('lenkLiveArbeit').textContent = state.live && state.live.genauigkeit
-      ? `Laufende Arbeit: ${genauigkeitText(state.live.genauigkeit)}` : '';
+    const ausgleich = state.live && state.live.spurausgleich;
+    const grad = (x) => `${x > 0 ? '+' : ''}${Number(x).toLocaleString('de-DE', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}°`;
+    el('lenkLiveArbeit').textContent = [
+      state.live && state.live.genauigkeit ? `Laufende Arbeit: ${genauigkeitText(state.live.genauigkeit)}` : '',
+      ausgleich && (ausgleich.integral_deg || ausgleich.hang_deg)
+        ? `Ausgleich Dauerversatz ${grad(ausgleich.integral_deg)} · Hang ${grad(ausgleich.hang_deg)}` : '',
+    ].filter(Boolean).join('\n');
   }
   if (aufKarte) {
     LenkLive.zeichnen(el('lenkLiveKlein'), lenkAufzeichnung, { sekunden: 30, schritte, kompakt: true });
@@ -2342,8 +2347,41 @@ function renderAbstimmung() {
   el('abstInfo').textContent = zeilen.join('\n');
 }
 setInterval(() => {
-  if (!el('sheet').hidden && document.querySelector('.tab.active').dataset.tab === 'lenkung') renderAbstimmung();
+  if (!el('sheet').hidden && document.querySelector('.tab.active').dataset.tab === 'lenkung') {
+    renderAbstimmung();
+    renderRadmitte();
+  }
 }, 2000);
+
+/* Radmitte aus der Fahrt lernen (radmitte.py). */
+async function renderRadmitte(stand) {
+  const e = stand || await fetch('/api/lenkung/radmitte').then((r) => r.json()).catch(() => null);
+  if (!e) return;
+  const z = (x, n = 2) => Number(x).toLocaleString('de-DE', { minimumFractionDigits: n, maximumFractionDigits: n });
+  el('btnRadmitteStart').textContent = e.sammelt ? 'Sammeln anhalten' : 'Sammeln starten';
+  el('btnRadmitteStart').classList.toggle('primary', !e.sammelt);
+  el('btnRadmitteUebernehmen').disabled = !e.gueltig;
+  el('radmitteInfo').textContent = e.proben < e.noetig
+    ? `${e.sammelt ? 'Sammelt' : 'Angehalten'}: ${e.proben} von ${e.noetig} Messungen.`
+    : `${e.proben} Messungen · Radwinkel geradeaus im Mittel ${z(e.median_deg)}° · Streuung ${z(e.streuung_deg)}° · ` +
+      `Sicherheit ${z(e.vertrauen * 100, 0)} %` +
+      (e.gueltig ? ` – Korrektur ${z(-e.korrektur_deg)}° bereit.` : Math.abs(e.median_deg) < 0.05
+        ? ' – die Mitte stimmt.' : ' – noch nicht sicher genug, weiter fahren.');
+}
+
+async function radmitteAktion(aktion) {
+  const antwort = await api('POST', '/api/lenkung/radmitte', { aktion });
+  if (antwort) renderRadmitte(antwort.data);
+  return antwort;
+}
+el('btnRadmitteStart').onclick = async () => {
+  const e = await fetch('/api/lenkung/radmitte').then((r) => r.json()).catch(() => null);
+  radmitteAktion(e && e.sammelt ? 'stop' : 'start');
+};
+el('btnRadmitteVerwerfen').onclick = () => radmitteAktion('zuruecksetzen');
+el('btnRadmitteUebernehmen').onclick = async () => {
+  if (await radmitteAktion('uebernehmen')) toast('Radmitte korrigiert und gespeichert');
+};
 
 el('abstModus').onchange = async (event) => {
   const antwort = await api('POST', '/api/abstimmung', { modus: event.target.value });

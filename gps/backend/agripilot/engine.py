@@ -44,6 +44,8 @@ from . import hindernisse as hindernisse_module
 from .flotte import Flotte
 from .rtkbruecke import RtkBruecke
 from .genauigkeit import Genauigkeit
+from .spurintegral import SpurIntegral, hang_vorsteuerung
+from .radmitte import Radmitte
 import json
 from .writer import HintergrundSchreiber
 
@@ -107,6 +109,10 @@ class Engine:
         self.positionsfilter = Positionsfilter()
         self.rtk_bruecke = RtkBruecke()
         self.genauigkeit = Genauigkeit()     # wie genau bei der laufenden Arbeit gelenkt wird
+        self.spur_integral = SpurIntegral()  # Dauerversatz ausgleichen (spurintegral.py)
+        self.spurausgleich = {"integral_deg": 0.0, "hang_deg": 0.0}
+        self._ausgleich_at: Optional[float] = None
+        self.radmitte = Radmitte()           # Radmitte aus der Fahrt lernen
         # Hindernisse des geladenen Feldes in lokalen Metern (hindernisse.py).
         self._hindernisse: list[dict] = []
         self._hindernisse_feld: Optional[str] = None
@@ -2025,11 +2031,56 @@ class Engine:
         self.guidance = self.line.solve(
             fuehrungspunkt, self.heading, fix.speed_ms, self.profile
         )
+        self._spurausgleich(fix)
         if self.line.mode == "contour":
             ecke = self.line.naechste_ecke(fuehrungspunkt, self.heading)
             if ecke is not None and ecke < 40.0:
                 self.guidance.message = (f"Ecke in {ecke:.0f} m - von Hand um die Ecke, "
                                          "danach greift die Lenkung wieder")
+
+    def _spurausgleich(self, fix: Fix) -> None:
+        """Dauerversatz und Hangabtrieb gegenlenken (spurintegral.py)."""
+        jetzt = fix.received_at or time.time()
+        dt = jetzt - self._ausgleich_at if self._ausgleich_at else 0.0
+        self._ausgleich_at = jetzt
+        befehl = getattr(self.steering, "command", None)
+        lenkt = bool(befehl is not None and befehl.engaged)
+        auf_spur = (self.guidance.active and self.turn is None
+                    and not self.heading_filter.rueckwaerts)
+        richtung = f"{self.line.id if self.line else ''}:{'her' if self.guidance.reversed_direction else 'hin'}"
+        integral = self.spur_integral.update(self.guidance.cross_track_m, dt, fix.speed_ms, lenkt,
+                                             auf_spur, self.profile.spur_integral, richtung)
+        hang = 0.0
+        lage = self.imu.attitude if self.imu is not None else None
+        if lage is not None and lage.fresh and self.profile.hang_vorsteuerung and auf_spur:
+            hang = hang_vorsteuerung(lage.roll_deg * self.config.imu.roll_sign,
+                                     self.profile.hang_vorsteuerung)
+        self.spurausgleich = {"integral_deg": round(integral, 2), "hang_deg": round(hang, 2)}
+        if integral or hang:
+            self.guidance.steer_angle_deg = self.profile.einschlag_begrenzen(
+                self.guidance.steer_angle_deg + integral + hang)
+
+    def radmitte_uebernehmen(self) -> dict:
+        """Die aus der Fahrt gelernte Korrektur der Radmitte übernehmen."""
+        ergebnis = self.radmitte.ergebnis()
+        if not ergebnis["gueltig"]:
+            raise RuntimeError("Noch kein sicheres Ergebnis - weiter auf gerader Spur mit Lenkung fahren")
+        korrektur = ergebnis["korrektur_deg"]
+        ausgang = self.steering.output if self.steering is not None else None
+        speichern = False
+        if ausgang is not None and hasattr(ausgang, "mitte_korrigieren"):
+            ausgang.mitte_korrigieren(korrektur)
+            speichern = True
+        elif self.simulator is not None and hasattr(self.simulator, "mess_korrektur_deg"):
+            self.simulator.mess_korrektur_deg -= korrektur
+        else:
+            raise RuntimeError("Dieser Lenkausgang kann die Radmitte nicht verschieben")
+        self.radmitte.verschieben(korrektur)
+        # Den Teil, den der Ausgleich bisher für die schiefe Mitte gegengelenkt hat,
+        # gleich herausnehmen - sonst liefe die Maschine kurz daneben, bis er sich neu einstellt.
+        self.spur_integral.verschieben(-korrektur)
+        self.note(f"Radmitte um {korrektur:+.2f}° korrigiert")
+        return {"korrektur_deg": korrektur, "speichern": speichern}
 
     def _lenkpunkt(self) -> Optional[geo.Point]:
         """Worauf geführt wird: die Hinterachse (siehe VehicleProfile.steer_position).
@@ -2121,10 +2172,14 @@ class Engine:
             elif self._steering_was_engaged:
                 self.simulator.set_steer(0.0)
             # Was das virtuelle Rad wirklich tut - wie ein Drehgeber am echten.
-            rad = getattr(self.simulator, "rad_deg", None)
-            if self.steering is not None and rad is not None:
-                self.steering.output.feedback.wheel_angle_deg = rad
+            messen = getattr(self.simulator, "gemessener_radwinkel", None)
+            if self.steering is not None and messen is not None:
+                self.steering.output.feedback.wheel_angle_deg = messen()
         self._steering_was_engaged = command.engaged
+        ausgang = getattr(self.steering, "output", None)
+        self.radmitte.probe(ausgang.feedback.wheel_angle_deg if ausgang is not None else None, command.engaged,
+                            self.line is not None and self.line.mode == "ab" and self.turn is None,
+                            fix.speed_ms, self.guidance.cross_track_m, self.guidance.heading_error_deg)
 
     def _record_track(self, fix: Fix, now: float) -> None:
         if self.job is None or self.tool_position is None:
@@ -2279,6 +2334,8 @@ class Engine:
             "steering": self.steering.status() if self.steering else None,
             "genauigkeit": self.genauigkeit.ergebnis(self.steering.abgaben if self.steering else 0)
                            if self.job else None,
+            "spurausgleich": self.spurausgleich,
+            "radmitte": {"sammelt": self.radmitte.sammelt, "proben": len(self.radmitte.proben)},
             "rtk_bruecke": self.rtk_bruecke.status(time.time(), self.config.steering.rtk_ueberbrueckung_s),
             "hindernisse": [{k: h[k] for k in ("id", "name", "x", "y", "radius_m")} for h in self._hindernisse],
             "hindernis_warnung": self.hindernis_warnung,

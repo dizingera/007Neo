@@ -169,6 +169,7 @@ class PhidgetConfig:
     counts_per_deg: float = 40.0
     max_wheel_angle_deg: float = 35.0   # mechanischer Anschlag, harte Grenze
     dead_band_deg: float = 0.3          # darunter wird nicht nachgeregelt
+    mitte_versatz_deg: float = 0.0      # aus der Fahrt gelernte Korrektur der Radmitte (radmitte.py)
     velocity_limit: float = 0.55        # 0..1, Anteil der vollen Leistung
     stall_velocity: float = 0.0         # 0 = Blockiererkennung der Platine aus
     position_kp: float = 12000.0

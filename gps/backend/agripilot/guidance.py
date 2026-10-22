@@ -80,6 +80,10 @@ class VehicleProfile:
     marke: str = "standard"
     spurweite_m: float = 1.9
     geraet_art: str = "balken"
+    # Dauerversatz ausgleichen (spurintegral.py): Stärke in Grad je Meter und Sekunde,
+    # 0 = aus. Hang-Vorsteuerung: Grad Einschlag je Grad Seitenneigung, 0 = aus.
+    spur_integral: float = 2.0
+    hang_vorsteuerung: float = 0.0
     geraet_vorn_m: float = 0.0
     geraet_hinten_m: float = 0.0
     max_steer_deg: float = 35.0
@@ -220,6 +224,7 @@ TRAKTOR_FELDER = (
     "antenna_forward_m", "antenna_right_m", "antenna_height_m",
     "wheelbase_m", "max_steer_deg", "max_steer_left_deg", "max_steer_right_deg", "max_steer_rate_deg_s",
     "regelart", "lenk_traegheit_s", "bauform", "marke", "spurweite_m",
+    "spur_integral", "hang_vorsteuerung",
     "steer_gain", "steer_softening", "speed_gain_limit_kmh", "speed_gain_rest",
     "actuator_latency_ms",
 )

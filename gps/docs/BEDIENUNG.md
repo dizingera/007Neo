@@ -882,6 +882,43 @@ nicht nach.
 **Durchsichtig:** unter *Einstellungen → Kartenfarben → Traktor und Gerät* deckend,
 70 % oder 45 % – dann sieht man Spur und Fläche unter der Maschine.
 
+## Dauerversatz, Hang und Radmitte (ab 1.5.52, nach AgOpenGPS)
+
+**Ausgleich Dauerversatz.** Am Seitenhang, mit einem seitlich ziehenden Gerät (Pflug)
+oder bei leicht verstellter Radmitte läuft die Maschine sonst dauerhaft ein paar
+Zentimeter neben der Spur – die Lenkung korrigiert nur, solange eine Abweichung da
+ist. Jetzt wird der Restfehler langsam aufsummiert und gegengelenkt (wie das
+„Stanley integral“ in AgOpenGPS):
+
+* nur bei eingeschalteter Lenkung, über 1 m/s, nahe der Spur (unter 25 cm) und ruhig;
+  beim Einlenken, in der Wende und rückwärts nicht,
+* gemerkt **je Spur und Fahrtrichtung** – am Hang drückt es hin nach rechts und
+  zurück nach links; nach der Wende geht es mit dem passenden Wert weiter,
+* höchstens 6°; zeigt er in die falsche Richtung, baut er sich dreimal so schnell ab.
+
+Einstellen beim Traktor: *Lenkung → Ausgleich Dauerversatz* (Vorgabe 2, 0 = aus,
+höchstens 5). Im Simulator: 25 cm Abtrieb bzw. 1° verstellte Mitte → nach rund 13 s
+unter 2 cm. Höher (3) wird schneller, ab etwa 8 schaukelt es. Zu sehen unter
+*Lenkung live*: „Ausgleich Dauerversatz −2,7°“.
+
+**Hang-Vorsteuerung.** Mit Neigungssensor lenkt die Maschine sofort gegen den Hang,
+statt erst abzudriften: Einschlag = Faktor × Seitenneigung. Beim Traktor
+*Hang-Vorsteuerung (° je ° Neigung)*, Vorgabe 0 (aus). Zum Herantasten: am Hang fahren,
+den Ausgleich unter *Lenkung live* ablesen und durch die Neigung teilen.
+
+**Radmitte aus der Fahrt lernen** (Menü → Lenkung, wie „Smart WAS“ in AgOpenGPS).
+„Mitte lernen“ im Stand verlässt sich darauf, dass die Räder in dem Moment gerade
+stehen. Genauer geht es beim Fahren: **Sammeln starten**, auf einer geraden Spur mit
+Lenkung fahren (über 2 km/h, nahe der Spur). Ab 200 Messungen steht der mittlere
+Radwinkel geradeaus da, mit Streuung und Sicherheit. Ist sie hoch genug,
+**Korrektur übernehmen** – die Mitte wird verschoben und gespeichert
+(*Einstellungen → Lenkmotor → Korrektur der Radmitte*), der Ausgleich nimmt seinen
+Anteil sofort heraus. Ein Seitenhang verfälscht das nicht: gegen den Hang fährt der
+Traktor leicht schräg, das Rad steht dabei trotzdem gerade.
+
+**Totzone** gibt es schon: *Einstellungen → Lenkmotor → Totband* (0,3°) – darunter
+regelt der Motor nicht nach.
+
 ## Das Menü
 
 Links stehen alle Seiten in drei Gruppen:

@@ -237,6 +237,12 @@ class SimulatorSource(GnssSource):
         self.antenne_vor_m = 0.0
         self.antenne_rechts_m = 0.0
         self.auto_steer = False
+        # Störungen wie im Feld, zum Prüfen von Ausgleich und Radmitte:
+        # seitlicher Abtrieb (Hang, ziehendes Gerät, + nach rechts), verstellte
+        # Mechanik (das Rad zieht um diesen Winkel) und die Korrektur der Messung.
+        self.seitendrift_ms = 0.0
+        self.rad_versatz_deg = 0.0
+        self.mess_korrektur_deg = 0.0
 
     def fahrzeug_setzen(self, profil) -> None:
         """Radstand und Antennenlage vom aktiven Traktor übernehmen."""
@@ -250,7 +256,11 @@ class SimulatorSource(GnssSource):
                 self.north + math.cos(h) * self.antenne_vor_m - math.sin(h) * self.antenne_rechts_m)
 
     def set_steer(self, degrees: float) -> None:
-        self.steer_deg = max(-40.0, min(40.0, degrees))
+        # Der Befehl gilt für den gemessenen Winkel; das Rad selbst steht um die Korrektur daneben.
+        self.steer_deg = max(-40.0, min(40.0, degrees - self.mess_korrektur_deg))
+
+    def gemessener_radwinkel(self) -> float:
+        return self.rad_deg + self.mess_korrektur_deg
 
     def set_speed_kmh(self, kmh: float) -> None:
         self.speed_ms = max(0.0, kmh / 3.6)
@@ -292,13 +302,13 @@ class SimulatorSource(GnssSource):
         schritt = (self.steer_deg - self.rad_deg) * min(1.0, dt / max(0.01, self.lenk_traegheit_s))
         grenze = self.lenk_rate_deg_s * dt
         self.rad_deg += max(-grenze, min(grenze, schritt))
-        steer = math.radians(self.rad_deg)
+        steer = math.radians(self.rad_deg + self.rad_versatz_deg)
         if abs(steer) > 1e-6 and self.speed_ms > 0.01:
             turn_rate = self.speed_ms / self.wheelbase * math.tan(steer)
             self.heading = (self.heading + math.degrees(turn_rate) * dt) % 360.0
         h = math.radians(self.heading)
-        self.east += math.sin(h) * self.speed_ms * dt
-        self.north += math.cos(h) * self.speed_ms * dt
+        self.east += (math.sin(h) * self.speed_ms + math.cos(h) * self.seitendrift_ms) * dt
+        self.north += (math.cos(h) * self.speed_ms - math.sin(h) * self.seitendrift_ms) * dt
 
     def _rmc(self, lat: float, lon: float) -> str:
         from datetime import datetime, timezone

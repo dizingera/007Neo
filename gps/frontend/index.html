@@ -473,6 +473,8 @@
               </select>
             </label>
             <label>Trägheit der Lenkung (s)<input type="number" step="0.05" min="0.05" max="2" name="lenk_traegheit_s"></label>
+            <label>Ausgleich Dauerversatz (0 = aus)<input type="number" step="0.5" min="0" max="5" name="spur_integral"></label>
+            <label>Hang-Vorsteuerung (° je ° Neigung)<input type="number" step="0.05" min="0" max="1" name="hang_vorsteuerung"></label>
           </fieldset>
           <fieldset>
             <legend>Aussehen auf der Karte</legend>
@@ -621,6 +623,19 @@
           Anschlag lenken, dann beenden - daraus folgen die Zählwerte je Grad.</p>
         <div class="row"><button id="btnEinmessUebernehmen" class="primary" hidden>Ergebnis übernehmen</button></div>
       </div>
+    </section>
+    <section class="karte" id="radmitteKarte">
+      <h3>Radmitte aus der Fahrt lernen</h3>
+      <p class="note">Auf einer geraden Spur mit eingeschalteter Lenkung fahren: geradeaus muss der
+        gemessene Radwinkel im Mittel 0° sein. Weicht er ab, sitzt die Mitte daneben – und die Maschine
+        läuft dauerhaft zur Seite. Gesammelt wird nur bei über 2 km/h, nahe der Spur und kleinem Winkel;
+        ab 200 Messungen gibt es ein Ergebnis.</p>
+      <div class="row">
+        <button id="btnRadmitteStart" class="primary">Sammeln starten</button>
+        <button id="btnRadmitteVerwerfen">Verwerfen</button>
+        <button id="btnRadmitteUebernehmen" disabled>Korrektur übernehmen</button>
+      </div>
+      <p class="note" id="radmitteInfo" role="status" aria-atomic="true"></p>
     </section>
     <section class="karte lenkwerkstatt" id="lenkEinrichten" aria-labelledby="werkstattTitel">
       <div class="werkstatt-kopf"><div><p class="note" id="werkstattGeraet">Traktor-Tablet</p>

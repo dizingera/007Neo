@@ -282,6 +282,10 @@ GRUPPEN: list[Gruppe] = [
                        "die Lenkung."),
             Feld("phidget.dead_band_deg", "Totband", "zahl", einheit="°",
                  minimum=0.0, maximum=5.0, hilfe="Darunter wird nicht nachgeregelt."),
+            Feld("phidget.mitte_versatz_deg", "Korrektur der Radmitte", "zahl", einheit="°",
+                 minimum=-5.0, maximum=5.0, sofort=True,
+                 hilfe="Wird von „Radmitte aus der Fahrt lernen“ gesetzt. Vom gemessenen "
+                       "Radwinkel abgezogen."),
             Feld("phidget.current_limit_a", "Stromgrenze", "zahl", einheit="A",
                  minimum=0.1, maximum=8.0,
                  warnung="Niedrig halten - das Lenkrad muss von Hand übersteuerbar bleiben.",
