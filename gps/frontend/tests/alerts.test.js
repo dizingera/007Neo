@@ -51,3 +51,20 @@ test('Rückwärtsfahrt: Warnung statt Alarm', () => {
   const e = ereignisse(lenkt, aus('Rückwärtsfahrt'));
   assert.strictEqual(e[0].stufe, 'warn');
 });
+
+test('lost RTK while bridged is a warning that says how long', () => {
+  const vorher = { fix: { rank: 4 }, steering: { armed: true, command: { engaged: true } } };
+  const jetzt = { fix: { rank: 3, fix_label: 'RTK float' }, steering: { armed: true, command: { engaged: true } },
+    rtk_bruecke: { aktiv: true, rest_s: 59.6 } };
+  const e = ereignisse(vorher, jetzt, true).find((x) => x.id === 'fix-verloren');
+  assert.strictEqual(e.stufe, 'warn');
+  assert.match(e.text, /überbrückt, noch 60 s/);
+});
+
+test('an obstacle ahead alarms once per obstacle', () => {
+  const hd = { id: 'm1', name: 'Mast', abstand_m: 18.4 };
+  const erst = ereignisse({}, { hindernis_warnung: hd }, true).find((x) => x.id.startsWith('hindernis'));
+  assert.strictEqual(erst.stufe, 'alarm');
+  assert.match(erst.text, /Mast in 18 m/);
+  assert.ok(!ereignisse({ hindernis_warnung: hd }, { hindernis_warnung: hd }, true).some((x) => x.id.startsWith('hindernis')));
+});

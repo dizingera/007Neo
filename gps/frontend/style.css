@@ -681,3 +681,16 @@ label.button { display: inline-flex; align-items: center; cursor: pointer; }
 .sheet .lenkwerkstatt a { color: var(--blue); padding: 12px 0; }
 .sheet #werkstattInfo { white-space: pre-line; }
 @media(max-width:650px) { .sheet .werkstatt-masse { grid-template-columns: 1fr; } }
+
+/* Hindernis voraus: rot, groß, unter dem Lichtbalken. */
+.hindernis-ruf { position: absolute; left: var(--frei-mitte); transform: translateX(-50%);
+  top: calc(15 * var(--u)); z-index: 4; padding: 10px 22px; border-radius: 12px;
+  background: #c62828; color: #fff; font-weight: 800; font-size: max(20px, calc(2.2 * var(--u)));
+  box-shadow: 0 8px 26px rgba(0,0,0,.45); pointer-events: none; white-space: nowrap; }
+.hindernis-ruf[hidden] { display: none; }
+.wf-wahl.umbruch { flex-wrap: wrap; }
+.wf-wahl.umbruch button { flex: 1 1 30%; }
+/* Fernansicht. */
+.flotte-karte { width: 100%; height: 360px; display: block; border-radius: 10px;
+  border: 2px solid var(--m-linie, var(--line)); margin-bottom: 14px; }
+.sheet .item.veraltet { opacity: .55; }

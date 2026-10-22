@@ -38,11 +38,23 @@
     const fix = jetzt.fix;
     const braucht = (jetztSteuer && jetztSteuer.armed) || jetzt.job;
     if (braucht && vorFix && vorFix.rank >= 4 && (!fix || fix.rank < 4)) {
+      // Wird der Ausfall überbrückt, lenkt die Maschine weiter: Hinweis statt Alarm.
+      const bruecke = jetzt.rtk_bruecke && jetzt.rtk_bruecke.aktiv;
       liste.push({
         id: 'fix-verloren',
-        stufe: jetztSteuer && jetztSteuer.armed ? 'alarm' : 'warn',
-        text: fix ? `Kein RTK mehr: ${fix.fix_label}` : 'Kein GPS mehr',
+        stufe: bruecke ? 'warn' : jetztSteuer && jetztSteuer.armed ? 'alarm' : 'warn',
+        text: !fix ? 'Kein GPS mehr' : bruecke
+          ? `Kein RTK – überbrückt, noch ${Math.round(jetzt.rtk_bruecke.rest_s)} s`
+          : `Kein RTK mehr: ${fix.fix_label}`,
       });
+    }
+
+    // Hindernis voraus: einmal je Hindernis, sobald es in Reichweite kommt.
+    const hd = jetzt.hindernis_warnung;
+    const vorHd = vorher && vorher.hindernis_warnung;
+    if (hd && (!vorHd || vorHd.id !== hd.id)) {
+      liste.push({ id: 'hindernis-' + hd.id, stufe: 'alarm',
+        text: `Achtung: ${hd.name} in ${Math.round(hd.abstand_m)} m` });
     }
 
     // Vorgewende kommt näher: einmal, beim Überschreiten der Schwelle.

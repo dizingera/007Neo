@@ -246,7 +246,9 @@ function updateHud(s) {
 
   // Genauigkeit ist die Zahl, an der alles hängt – deshalb immer sichtbar.
   if (!fix) chip('fixChip', 'kein GPS', 'bad');
-  else {
+  else if (s.rtk_bruecke && s.rtk_bruecke.aktiv) {
+    chip('fixChip', `RTK überbrückt · noch ${Math.round(s.rtk_bruecke.rest_s)} s · ${fix.fix_label}`, 'warn');
+  } else {
     const accuracy = fix.accuracy_m != null ? ` ±${(fix.accuracy_m * 100).toFixed(0)} cm` : '';
     chip('fixChip', `${fix.fix_label}${accuracy} · ${fix.satellites} Sat`,
          fix.rank >= 4 ? 'good' : fix.rank >= 2 ? 'warn' : 'bad');
@@ -329,6 +331,12 @@ function updateHud(s) {
   el('richtungText').textContent = rueck ? 'Rückwärts' : 'Richtung';
   el('btnSpur').classList.toggle('recording', spurAufnahmeLaeuft());
   el('fahrgasseHinweis').hidden = !s.fahrgasse_aktiv;
+  const hd = s.hindernis_warnung;
+  el('hindernisRuf').hidden = !hd;
+  if (hd) {
+    el('hindernisRuf').textContent = `⚠ ${hd.name} in ${Math.round(hd.abstand_m)} m` +
+      (hd.seite === 'mitte' ? '' : ` · ${hd.seite}`);
+  }
   if (s.fahrgasse_aktiv) el('fahrgasseSpur').textContent = s.guidance.pass_number;
 
   const steer = el('btnSteer');
@@ -603,6 +611,8 @@ function zeichnen() {
   drawTrail();
   drawRecording();
   drawTurn();
+  drawHindernisse();
+  drawFlotte();
   drawVehicle();
   ctx.restore();
 
@@ -751,6 +761,57 @@ function drawSaatplan() {
       const vz = (naechste.stuecke[0][0][0] - a[0]) * nx + (naechste.stuecke[0][0][1] - a[1]) * ny > 0 ? 1 : -1;
       weltText(`${d.toLocaleString('de-DE')} m`, mx + nx * vz * d / 2 + ex / l * 25, my + ny * vz * d / 2 + ey / l * 25, F.fahrgasse);
     }
+  });
+  ctx.restore();
+}
+
+/* Hindernisse: roter Kreis in ihrer Größe, Name daneben. */
+const HINDERNIS_ROT = '#ff5c5c';
+function drawHindernisse() {
+  const liste = (state.live && state.live.hindernisse) || [];
+  if (!liste.length) return;
+  const px = 1 / state.view.scale;
+  const warnId = state.live.hindernis_warnung && state.live.hindernis_warnung.id;
+  ctx.save();
+  liste.forEach((h) => {
+    const r = Math.max(h.radius_m, 6 * px);
+    ctx.beginPath();
+    ctx.arc(h.x, h.y, r, 0, Math.PI * 2);
+    ctx.fillStyle = HINDERNIS_ROT;
+    ctx.globalAlpha = h.id === warnId ? 0.55 : 0.3;
+    ctx.fill();
+    ctx.globalAlpha = 1;
+    ctx.lineWidth = 2.5 * px;
+    ctx.strokeStyle = HINDERNIS_ROT;
+    ctx.stroke();
+    weltText(`⚠ ${h.name}`, h.x, h.y + r + 10 * px, HINDERNIS_ROT);
+  });
+  ctx.restore();
+}
+
+/* Die anderen Maschinen (Fernansicht): blauer Pfeil mit Namen, grau wenn die Meldung alt ist. */
+function drawFlotte() {
+  const liste = ((state.live && state.live.flotte) || []).filter((m) => m.x != null);
+  if (!liste.length) return;
+  const px = 1 / state.view.scale;
+  ctx.save();
+  liste.forEach((m) => {
+    const alt = window.Fernansicht.veraltet(m);
+    const farbe = alt ? F.raster : '#4b9dff';
+    const h = ((m.kurs || 0) * Math.PI) / 180;
+    const vor = [Math.sin(h), Math.cos(h)], re = [Math.cos(h), -Math.sin(h)];
+    const g = Math.max(3, 14 * px);
+    ctx.beginPath();
+    ctx.moveTo(m.x + vor[0] * g * 1.4, m.y + vor[1] * g * 1.4);
+    ctx.lineTo(m.x - vor[0] * g + re[0] * g, m.y - vor[1] * g + re[1] * g);
+    ctx.lineTo(m.x - vor[0] * g * 0.4, m.y - vor[1] * g * 0.4);
+    ctx.lineTo(m.x - vor[0] * g - re[0] * g, m.y - vor[1] * g - re[1] * g);
+    ctx.closePath();
+    ctx.fillStyle = farbe;
+    ctx.globalAlpha = 0.9;
+    ctx.fill();
+    ctx.globalAlpha = 1;
+    weltText(m.name + (alt ? ` (${window.Fernansicht.alterText(m.alter_s)})` : ''), m.x, m.y - g * 2, farbe);
   });
   ctx.restore();
 }
@@ -1231,6 +1292,45 @@ function wendeFensterZu() {
   el('btnTurn').setAttribute('aria-expanded', 'false');
   clearInterval(wendeTakt);
 }
+
+/* Hindernis markieren: Wo, Was, Größe wählen, "Markieren". Die Wahl bleibt für das nächste Mal. */
+function hindernisFensterAuf() {
+  werkzeugeZeigen(false);
+  if (!el('wendeFenster').hidden) wendeFensterZu();
+  if (!wahlLesen('hfSeite')) wahlSetzen('hfSeite', 'hier');
+  if (!wahlLesen('hfArt')) wahlSetzen('hfArt', 'Mast');
+  if (!wahlLesen('hfGroesse')) wahlSetzen('hfGroesse', '1.5');
+  el('hfErgebnis').textContent = '„Hier“ = unter der Maschine. Kante = halbe Arbeitsbreite daneben.';
+  el('hfErgebnis').className = 'wf-ergebnis';
+  el('hindernisFenster').hidden = false;
+  el('btnHindernis').setAttribute('aria-expanded', 'true');
+}
+
+function hindernisFensterZu() {
+  el('hindernisFenster').hidden = true;
+  el('btnHindernis').setAttribute('aria-expanded', 'false');
+}
+
+el('btnHindernis').onclick = () => (el('hindernisFenster').hidden ? hindernisFensterAuf() : hindernisFensterZu());
+el('hfZu').onclick = hindernisFensterZu;
+['hfSeite', 'hfArt', 'hfGroesse'].forEach((gruppe) => {
+  el(gruppe).addEventListener('click', (ereignis) => {
+    const knopf = ereignis.target.closest('button');
+    if (knopf) wahlSetzen(gruppe, knopf.dataset.wert);
+  });
+});
+el('hfSetzen').onclick = async () => {
+  const antwort = await apiRoh('POST', '/api/hindernisse', {
+    seite: wahlLesen('hfSeite'), name: wahlLesen('hfArt'), radius_m: parseFloat(wahlLesen('hfGroesse')),
+  });
+  if (!antwort.ok) {
+    el('hfErgebnis').textContent = antwort.detail || 'Nicht markiert';
+    el('hfErgebnis').className = 'wf-ergebnis schlecht';
+    return;
+  }
+  toast(`${antwort.data.name} markiert – alle Tablets bekommen es beim Abgleich`);
+  hindernisFensterZu();
+};
 
 ['wfRichtung', 'wfAuslassen', 'wfForm'].forEach((gruppe) => {
   el(gruppe).addEventListener('click', (ereignis) => {
@@ -2388,7 +2488,9 @@ async function refreshLists() {
     const fieldId = state.live && state.live.field ? state.live.field.id : '';
     // Ohne Feld keine Liste: die Anfrage ohne field_id gäbe die Spuren aller Felder.
     renderLines(fieldId ? await (await fetch(`/api/lines?field_id=${fieldId}`)).json() : []);
+    renderHindernisse(fieldId ? await (await fetch(`/api/hindernisse?field_id=${fieldId}`)).json() : null);
   }
+  if (active === 'maschinen') renderFlotte();
   if (active === 'jobs') {
     const [jobs, fields] = await Promise.all([
       fetch('/api/jobs').then((r) => r.json()), fetch('/api/fields').then((r) => r.json())]);
@@ -2588,6 +2690,98 @@ function renderLines(lines) {
   if (!lines.length) host.innerHTML = fieldId
     ? '<p class="note">Für dieses Feld gibt es noch keine Spur.</p>'
     : '<p class="note">Kein Feld geladen – Spuren gehören zu ihrem Feld (Menü → Felder).</p>';
+}
+
+/* Hindernisse des geladenen Feldes: Name, Entfernung, Löschen. */
+function renderHindernisse(liste) {
+  const host = el('hindernisListe');
+  host.innerHTML = '';
+  if (liste === null) { host.innerHTML = '<p class="note">Kein Feld geladen.</p>'; return; }
+  if (!liste.length) { host.innerHTML = '<p class="note">Noch keine Hindernisse in diesem Feld.</p>'; return; }
+  const lokal = Object.fromEntries(((state.live && state.live.hindernisse) || []).map((h) => [h.id, h]));
+  const pos = state.live && state.live.position;
+  liste.forEach((h) => {
+    const l = lokal[h.id];
+    const weg = l && pos ? ` · ${Math.round(Math.hypot(l.x - pos[0], l.y - pos[1]))} m entfernt` : '';
+    host.appendChild(item({
+      title: h.name,
+      sub: `Größe ${h.radius_m.toLocaleString('de-DE')} m${weg} · markiert ${new Date(h.updated_at * 1000).toLocaleDateString('de-DE')}`,
+      actions: [['Löschen', async () => {
+        if (!confirm(`Hindernis „${h.name}“ löschen?`)) return;
+        await api('DELETE', `/api/hindernisse/${h.id}`);
+        refreshLists();
+      }]],
+    }));
+  });
+}
+
+/* Fernansicht: alle Maschinen auf einer Übersichtskarte und als Liste. */
+let flotteTakt = null;
+async function renderFlotte() {
+  clearTimeout(flotteTakt);
+  const daten = await fetch('/api/flotte').then((r) => r.json()).catch(() => null);
+  const aktiv = !el('sheet').hidden && document.querySelector('.tab.active').dataset.tab === 'maschinen';
+  if (!aktiv) return;
+  flotteTakt = setTimeout(renderFlotte, 5000);
+  if (!daten) { el('flotteHinweis').textContent = 'Fernansicht nicht erreichbar.'; return; }
+  const maschinen = daten.maschinen || [];
+  const system = state.live && state.live.system;
+  el('flotteHinweis').textContent = !maschinen.length
+    ? (system && system.role !== 'master'
+      ? 'Noch keine Meldungen – das Tablet fragt alle 5 s beim Master nach (Abgleich muss laufen).'
+      : 'Noch keine Maschine gemeldet. Die Tablets melden sich, sobald sie eine Position haben und den Master erreichen.')
+    : `${maschinen.length} ${maschinen.length === 1 ? 'Maschine' : 'Maschinen'} · aktualisiert alle 5 s`;
+  flotteKarte(maschinen, daten.felder || {});
+  const host = el('flotteListe');
+  host.innerHTML = '';
+  maschinen.forEach((m) => {
+    const zeile = item({
+      title: `${m.name || m.id}${m.selbst ? ' (dieses Gerät)' : ''}${m.simulator ? ' · Simulator' : ''}`,
+      sub: `${window.Fernansicht.zustandText(m)} · ${window.Fernansicht.alterText(m.alter_s)}`,
+      actions: [],
+    });
+    if (window.Fernansicht.veraltet(m)) zeile.classList.add('veraltet');
+    host.appendChild(zeile);
+  });
+}
+
+function flotteKarte(maschinen, felder) {
+  const leinwand = el('flotteKarte');
+  const k = window.devicePixelRatio || 1;
+  const breite = leinwand.clientWidth, hoehe = leinwand.clientHeight;
+  leinwand.width = breite * k; leinwand.height = hoehe * k;
+  const c = leinwand.getContext('2d');
+  c.setTransform(k, 0, 0, k, 0, 0);
+  c.fillStyle = F.boden; c.fillRect(0, 0, breite, hoehe);
+  const punkte = maschinen.map((m) => [m.lat, m.lon]);
+  Object.values(felder).forEach((f) => f.grenze.forEach((p) => punkte.push(p)));
+  const proj = window.Fernansicht.projektion(punkte);
+  if (!proj) return;
+  const bild = window.Fernansicht.einpassen(proj, breite, hoehe);
+  const nachBild = (p) => bild(proj.nachMetern(p));
+  c.font = '600 13px system-ui, sans-serif';
+  c.textAlign = 'center';
+  Object.values(felder).forEach((f) => {
+    c.beginPath();
+    f.grenze.forEach((p, i) => { const [x, y] = nachBild(p); i ? c.lineTo(x, y) : c.moveTo(x, y); });
+    c.closePath();
+    c.strokeStyle = F.grenze; c.lineWidth = 2; c.stroke();
+    const [mx, my] = nachBild([f.grenze.reduce((s, p) => s + p[0], 0) / f.grenze.length,
+      f.grenze.reduce((s, p) => s + p[1], 0) / f.grenze.length]);
+    c.fillStyle = F.grenze; c.fillText(f.name, mx, my);
+  });
+  maschinen.forEach((m) => {
+    const [x, y] = nachBild([m.lat, m.lon]);
+    const h = ((m.kurs || 0) * Math.PI) / 180;
+    c.save();
+    c.translate(x, y); c.rotate(h);
+    c.beginPath(); c.moveTo(0, -14); c.lineTo(9, 10); c.lineTo(0, 5); c.lineTo(-9, 10); c.closePath();
+    c.fillStyle = m.selbst ? F.akzent || '#ffd84a' : window.Fernansicht.veraltet(m) ? F.raster : '#4b9dff';
+    c.fill();
+    c.restore();
+    c.fillStyle = F.traktor || '#fff';
+    c.fillText(m.name || m.id, x, y - 20);
+  });
 }
 
 let jobFelderOffen = null;   // aufgeklappte Felder in der Liste der Arbeiten

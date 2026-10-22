@@ -40,6 +40,9 @@ from .guidance import (
 from .imu import terrain_offset
 from .nmea import Fix
 from .kalman import Positionsfilter
+from . import hindernisse as hindernisse_module
+from .flotte import Flotte
+from .rtkbruecke import RtkBruecke
 from .writer import HintergrundSchreiber
 
 TRACK_MIN_DISTANCE_M = 1.0
@@ -100,6 +103,14 @@ class Engine:
         self.job: Optional[dict] = None
 
         self.positionsfilter = Positionsfilter()
+        self.rtk_bruecke = RtkBruecke()
+        # Hindernisse des geladenen Feldes in lokalen Metern (hindernisse.py).
+        self._hindernisse: list[dict] = []
+        self._hindernisse_feld: Optional[str] = None
+        self._hindernisse_at = -1e9
+        self.hindernis_warnung: Optional[dict] = None
+        # Fernansicht: die Lage der anderen Maschinen (flotte.py).
+        self.flotte = Flotte()
         self.fix: Optional[Fix] = None
         self.position: Optional[geo.Point] = None      # antenna, local metres
         self.tool_position: Optional[geo.Point] = None
@@ -1567,6 +1578,11 @@ class Engine:
         huelle = gespann.pruefen(pfad, grenze, self.profile, einstellung.grenzabstand_m,
                                 self.implement_heading.value, self.heading, (kurs+180)%360)
         im_feld = mitte_im_feld and huelle["im_feld"]
+        hindernis = hindernisse_module.auf_route(pfad, self.profile.width_m, self._hindernisse)
+        if hindernis is not None:
+            im_feld = False
+            huelle = {**huelle, "im_feld": False,
+                      "hinweis": f"Hindernis „{hindernis['name']}“ liegt auf der Wenderoute"}
         self.turn_huelle = huelle
         self._turn_kontext = self.wende_kontext()
         self._turn_geraetekurs = self.implement_heading.value
@@ -1801,6 +1817,7 @@ class Engine:
         if not fix.valid:
             self.fix = fix  # den tatsächlichen Fixverlust auch sofort anzeigen
             self.positionsfilter.reset()
+            self.rtk_bruecke.zuruecksetzen()
             self._last_update_at = None
             self.tool_position = None
             self.implement_position = None
@@ -1819,6 +1836,14 @@ class Engine:
             self.plane = geo.LocalPlane(fix.lat, fix.lon)
 
         self.position = self.plane.to_local(fix.lat, fix.lon)
+        # Kurzer RTK-Ausfall: Versatz der Ersatzlösung herausrechnen (rtkbruecke.py).
+        self.position = self.rtk_bruecke.update(
+            self.position, fix.rank, fix.speed_ms, self.heading, now,
+            self.config.steering.rtk_ueberbrueckung_s)
+        if self.rtk_bruecke.ereignis:
+            self.note(self.rtk_bruecke.ereignis)
+        if self.steering is not None:
+            self.steering.rtk_ueberbrueckt = self.rtk_bruecke.aktiv
         dt = (now - self._last_update_at) if self._last_update_at else 0.0
         self._last_update_at = now
 
@@ -1886,6 +1911,7 @@ class Engine:
             self.implement_heading.reset(heading)
 
         self._update_headland()
+        self._hindernisse_pruefen(fix)
         self._update_guidance(fix)
         self._update_coverage(previous_implement if plausible else None)
         self._update_steering(fix)
@@ -2122,6 +2148,7 @@ class Engine:
         """
         now = now or time.time()
         self._checkpoint(now)
+        self._hindernisse_laden(now)
         if now-getattr(self,"_grenzabgleich_at",0)>1:
             self._grenzabgleich_at=now
             self.grenze_abgleichen()
@@ -2237,10 +2264,104 @@ class Engine:
                 "compensation": self.config.imu.terrain_compensation,
             } if self.imu is not None else None),
             "steering": self.steering.status() if self.steering else None,
+            "rtk_bruecke": self.rtk_bruecke.status(time.time(), self.config.steering.rtk_ueberbrueckung_s),
+            "hindernisse": [{k: h[k] for k in ("id", "name", "x", "y", "radius_m")} for h in self._hindernisse],
+            "hindernis_warnung": self.hindernis_warnung,
+            "flotte": self.flotte_lokal(),
             "abstimmung": (self.abstimmung.status() if self.abstimmung.modus != "aus"
                            else {"modus": "aus"}),
             "messages": self.messages[-6:],
         }
+
+    # -- Hindernisse ------------------------------------------------------
+
+    def _hindernisse_laden(self, now: Optional[float] = None, erzwingen: bool = False) -> None:
+        """Die Hindernisse des geladenen Feldes - alle 5 s neu, damit abgeglichene ankommen."""
+        now = now or time.time()
+        feld = self.field["id"] if self.field else None
+        if not erzwingen and feld == self._hindernisse_feld and now - self._hindernisse_at < 5.0:
+            return
+        self._hindernisse_feld, self._hindernisse_at = feld, now
+        if feld is None or self.plane is None:
+            self._hindernisse = []
+            return
+        lokal = []
+        for h in self.store.list_hindernisse(feld):
+            x, y = self.plane.to_local(h["lat"], h["lon"])
+            lokal.append({**h, "x": x, "y": y})
+        self._hindernisse = lokal
+
+    def _hindernisse_pruefen(self, fix: Fix) -> None:
+        if self._hindernisse_feld != (self.field["id"] if self.field else None):
+            self._hindernisse_laden(erzwingen=True)
+        vorher = self.hindernis_warnung
+        self.hindernis_warnung = hindernisse_module.warnung(
+            self.steer_position or self.position, self.heading, fix.speed_ms,
+            self.profile.width_m, self._hindernisse)
+        if self.hindernis_warnung and (not vorher or vorher.get("id") != self.hindernis_warnung["id"]):
+            self.note(f"Achtung: {self.hindernis_warnung['name']} in "
+                      f"{self.hindernis_warnung['abstand_m']:.0f} m")
+
+    def hindernis_setzen(self, name: str = "Hindernis", seite: str = "hier",
+                         radius_m: float = 1.0) -> dict:
+        """Ein Hindernis an der aktuellen Lage: unter der Maschine oder an einer Gerätekante."""
+        self._require_position()
+        if self.field is None:
+            raise RuntimeError("Erst ein Feld laden - Hindernisse gehören zu einem Feld")
+        if self.heading is None:
+            raise RuntimeError("Noch kein Kurs - ein Stück fahren")
+        punkt = self.steer_position or self.position
+        if seite in ("links", "rechts"):
+            h = math.radians(self.heading)
+            seitlich = (self.profile.width_m / 2.0) * (1 if seite == "rechts" else -1)
+            punkt = (punkt[0] + math.cos(h) * seitlich, punkt[1] - math.sin(h) * seitlich)
+        lat, lon = self.plane.to_wgs(*punkt)
+        name = (name or "Hindernis").strip()[:40] or "Hindernis"
+        radius_m = max(0.2, min(25.0, float(radius_m)))
+        record = self.store.save_hindernis({"field_id": self.field["id"], "name": name,
+                                            "lat": lat, "lon": lon, "radius_m": radius_m})
+        self._hindernisse_laden(erzwingen=True)
+        self.note(f"Hindernis „{name}“ markiert")
+        return record
+
+    def hindernis_loeschen(self, hindernis_id: str) -> None:
+        self.store.delete_hindernis(hindernis_id)
+        self._hindernisse_laden(erzwingen=True)
+
+    # -- Fernansicht ------------------------------------------------------
+
+    def live_meldung(self) -> Optional[dict]:
+        """Was diese Maschine an die anderen meldet - oder None ohne gültige Lage."""
+        from . import __version__
+        fix = self.fix
+        if fix is None or not fix.valid:
+            return None
+        return {
+            "name": self.config.network.device_name or self.config.network.device_id,
+            "lat": fix.lat, "lon": fix.lon,
+            "kurs": self.heading, "tempo_ms": fix.speed_ms,
+            "feld": self.field["name"] if self.field else "",
+            "feld_id": self.field["id"] if self.field else "",
+            "arbeit": (self.job.get("operation") or "Arbeit") if self.job else "",
+            "flaeche_ha": round(self.coverage.area_ha, 2) if self.job else 0.0,
+            "lenkt": bool(self.steering and self.steering.command.engaged),
+            "markiert": self.job is not None,
+            "fix": fix.fix_label,
+            "version": __version__,
+            "simulator": self.config.gnss.source == "simulator",
+            "rolle": self.config.network.role,
+        }
+
+    def flotte_lokal(self) -> list[dict]:
+        """Die anderen Maschinen, mit Lage in den Metern des geladenen Feldes."""
+        aus = []
+        for m in self.flotte.liste(ohne=self.config.network.device_id):
+            eintrag = dict(m)
+            if self.plane is not None:
+                x, y = self.plane.to_local(m["lat"], m["lon"])
+                eintrag["x"], eintrag["y"] = round(x, 2), round(y, 2)
+            aus.append(eintrag)
+        return aus
 
     def _require_position(self) -> None:
         if self.tool_position is None:

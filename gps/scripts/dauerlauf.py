@@ -354,10 +354,14 @@ class Lauf:
         m, s = self.motor, self.lenkung
         jetzt = self.uhr()
         befehl = s.command
+        # Kurzer RTK-Ausfall darf überbrückt werden (rtkbruecke.py) - aber nur so lange,
+        # wie eingestellt, und nur, solange überhaupt eine Position kommt.
+        frist = self.config.steering.rtk_ueberbrueckung_s
+        ueberbrueckt = m.rtk_bruecke.aktiv and jetzt >= self.stumm_bis
         if befehl.engaged:
             if fix is None or jetzt - fix.received_at > 1.0:
                 self.melde("lenkt mit veralteten Daten")
-            elif fix.rank < 4:
+            elif fix.rank < 4 and not ueberbrueckt:
                 self.melde(f"lenkt ohne RTK-fix ({fix.fix_label})")
             if abs(befehl.cross_track_m) > self.config.steering.max_cross_track_m + 1e-6:
                 self.melde(f"lenkt {befehl.cross_track_m:.2f} m neben der Spur")
@@ -375,7 +379,8 @@ class Lauf:
         if ausfall:
             if self.ausfall_seit is None:
                 self.ausfall_seit = jetzt
-            if befehl.engaged and jetzt - self.ausfall_seit > 1.25:
+            erlaubt = frist + 1.25 if ueberbrueckt else 1.25
+            if befehl.engaged and jetzt - self.ausfall_seit > erlaubt:
                 self.melde("lenkt weiter trotz Ausfall der Daten/RTK")
         else:
             self.ausfall_seit = None

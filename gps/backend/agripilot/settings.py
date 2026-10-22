@@ -223,6 +223,11 @@ GRUPPEN: list[Gruppe] = [
             Feld("steering.port", "Port der Lenkplatine", "ganzzahl", minimum=1, maximum=65535),
             Feld("steering.require_rtk", "Nur mit RTK-Fix lenken", "schalter", sofort=True,
                  hilfe="'RTK float' ist nicht 'RTK fix' - Float springt um Dezimeter."),
+            Feld("steering.rtk_ueberbrueckung_s", "RTK-Ausfall überbrücken", "zahl", einheit="s",
+                 minimum=0.0, maximum=180.0, sofort=True,
+                 hilfe="Fällt RTK kurz weg (Baumreihe, Funkloch), lenkt AgriPilot so lange mit der "
+                       "Ersatzlösung weiter und rechnet deren Versatz heraus. Springt sie, ist sofort "
+                       "Schluss. 0 = aus, dann gibt die Lenkung beim RTK-Verlust sofort ab."),
             Feld("steering.min_speed_ms", "Mindestgeschwindigkeit", "zahl", einheit="m/s",
                  minimum=0.0, maximum=3.0, sofort=True,
                  hilfe="Darunter wird nicht gelenkt: im Stand ist der Kurs aus GPS wertlos."),

@@ -34,7 +34,7 @@ from . import lenkung_einrichten, feldwerkzeuge
 from .teilbreiten import TeilbreitenAusgang
 from .kalibrierung import Lenkwerkstatt, KalibrierKonflikt
 from . import settings as settings_module
-from . import export, geraete as geraete_module, imu as imu_module
+from . import export, geo, geraete as geraete_module, imu as imu_module
 from . import recorder as recorder_module, shapefile as shapefile_module, sync
 from . import update as update_module
 from . import backup as backup_module
@@ -60,7 +60,7 @@ MINDESTLAENGE_AUSSEN = 8
 SPERRE_VERSUCHE = 8             # falsche Versuche ...
 SPERRE_FENSTER_S = 900.0        # ... innerhalb von 15 Minuten sperren den Absender
 # Was über einen Tunnel hereinkommen darf: der Abgleich und das Update für die Arbeiter.
-VON_AUSSEN_ERLAUBT = frozenset({"/api/sync", "/api/sync/setup", "/api/sync/setup/datei"})
+VON_AUSSEN_ERLAUBT = frozenset({"/api/sync", "/api/sync/live", "/api/sync/setup", "/api/sync/setup/datei"})
 
 FRONTEND_DIR = (Path(getattr(sys, "_MEIPASS", "")) / "frontend"
                 if getattr(sys, "frozen", False)
@@ -1723,6 +1723,56 @@ def create_app(config=None) -> FastAPI:
             "changes": sync.collect_changes(store, since),
             "maschinen": engine.profile_export(),
         }
+
+    @api.post("/api/sync/live")
+    async def sync_live(request: Request, payload: dict = Body(...)) -> dict:
+        """Ein Arbeiter meldet seine Lage; zurück kommen die Lagen aller anderen."""
+        arbeiter_pruefen(request)
+        geraet = str((payload.get("device") or {}).get("id") or "")
+        if payload.get("live"):
+            engine.flotte.melden(geraet, payload["live"])
+        eigene = engine.live_meldung()
+        if eigene and not eigene["simulator"]:
+            engine.flotte.melden(config.network.device_id, eigene)
+        return {"flotte": engine.flotte.liste(ohne=geraet)}
+
+    # -- Hindernisse ------------------------------------------------------
+
+    @api.get("/api/hindernisse")
+    async def hindernisse_liste(field_id: str = "") -> list[dict]:
+        return store.list_hindernisse(field_id or None)
+
+    @api.post("/api/hindernisse")
+    async def hindernis_neu(payload: dict = Body(default={})):
+        return guard(engine.hindernis_setzen, str(payload.get("name") or "Hindernis"),
+                     str(payload.get("seite") or "hier"), float(payload.get("radius_m") or 1.0))
+
+    @api.delete("/api/hindernisse/{hindernis_id}")
+    async def hindernis_weg(hindernis_id: str):
+        engine.hindernis_loeschen(hindernis_id)
+        return ok()
+
+    # -- Fernansicht ------------------------------------------------------
+
+    @api.get("/api/flotte")
+    async def flotte_liste() -> dict:
+        """Alle Maschinen mit Lage, dazu die Grenzen ihrer Felder in WGS84 - für die Übersichtskarte."""
+        maschinen = engine.flotte.liste(ohne=config.network.device_id)
+        eigene = engine.live_meldung()
+        if eigene:
+            maschinen.append({**eigene, "id": config.network.device_id, "alter_s": 0.0, "selbst": True})
+        felder = {}
+        for m in maschinen:
+            fid = m.get("feld_id")
+            if not fid or fid in felder:
+                continue
+            feld = store.get_field(fid)
+            if not feld or len(feld["boundary"]) < 3:
+                continue
+            ebene = geo.LocalPlane(feld["datum_lat"], feld["datum_lon"])
+            felder[fid] = {"name": feld["name"],
+                           "grenze": [list(ebene.to_wgs(*p)) for p in feld["boundary"]]}
+        return {"maschinen": maschinen, "felder": felder}
 
     # -- Datenpaket: Master -> Arbeiter als Datei --------------------------
 

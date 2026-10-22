@@ -754,11 +754,58 @@ Pendelt die Maschine langsam um die Spur, den Wert erhöhen; lenkt sie zu
 zögerlich, senken. Die Verstärkung wirkt wie gewohnt und kann weiter mit dem
 Lenk-Assistenten abgestimmt werden.
 
+## RTK-Ausfall überbrücken (ab 1.5.47)
+
+Hinter einer Baumreihe oder im Funkloch fällt der Empfänger von RTK-Fix auf Float,
+DGPS oder Einzelpunkt zurück. Bisher gab die Lenkung dann sofort ab. Jetzt lenkt
+AgriPilot bis zu **60 s** weiter (wie Trimble xFill oder John Deere RTK Extend):
+beim Abriss wird die letzte RTK-Position mit Tempo und Kurs fortgeschrieben, der
+Unterschied zur Ersatzlösung gemerkt und ab da herausgerechnet. So bleibt die Spur
+ohne Sprung; die Abweichung wächst nur so schnell, wie die Ersatzlösung driftet.
+
+* Oben rechts steht dann orange **„RTK überbrückt · noch 42 s“**, dazu ein Warnton.
+* **Schluss** nach Ablauf der Frist, sofort, wenn die Ersatzlösung springt, und
+  wenn gar keine Position mehr kommt. Dann gibt die Lenkung wie bisher ab (Alarm).
+* Erst ein neuer RTK-Fix erlaubt die nächste Überbrückung.
+* Einstellen: **Lenkung → Lenkautomatik → RTK-Ausfall überbrücken** (Sekunden,
+  0 = aus). Gilt nur, wenn „Nur mit RTK-Fix lenken“ an ist.
+
+## Hindernisse markieren (ab 1.5.47)
+
+Mast, Stein, Schacht, Baum: **Spur → Hindernis** öffnet ein kleines Fenster.
+
+* **Wo:** *Hier* (unter der Maschine) oder *Linke/Rechte Kante* (halbe Arbeitsbreite
+  daneben – wenn man am Mast vorbeifährt). **Was** und **Größe** (klein 0,5 m,
+  mittel 1,5 m, groß 4 m Radius) wählen, **Markieren**.
+* Das Hindernis gehört zum geladenen Feld und geht über den Master an **alle
+  Tablets**. Auf der Karte ein roter Kreis mit Namen.
+* **Warnung:** liegt ein Hindernis voraus in der Breite des Geräts (+1 m), erscheint
+  unter dem Lichtbalken rot **„⚠ Mast in 18 m“** mit Alarmton – vorausgeschaut wird
+  so weit, wie die Maschine in 8 s fährt, mindestens 15 m.
+* **Wende:** führt eine geplante Wende durch ein Hindernis, wird sie nicht
+  freigegeben („Hindernis „Mast“ liegt auf der Wenderoute“).
+* Liste und Löschen: **Menü → Spuren**, unten „Hindernisse im geladenen Feld“.
+
+## Fernansicht: alle Maschinen (Menü → Maschinen, ab 1.5.47)
+
+Jedes Tablet meldet alle **5 s** seine Lage an den Master (Büro-PC) und bekommt die
+der anderen zurück. **Menü → Maschinen** zeigt eine Übersichtskarte mit den Feldern
+und allen Maschinen, darunter je Maschine: Feld, Arbeit und Hektar, Tempo, ob sie
+lenkt, Fix und wie alt die Meldung ist. Auf der **Fahrkarte** erscheinen die anderen
+als blaue Pfeile mit Namen – praktisch, wenn zwei auf demselben Schlag arbeiten.
+
+* Läuft nur, solange am Büro-PC AgriPilot offen ist. Im Hof-WLAN direkt, draußen
+  über den Tunnel – der muss im Cloudflare-Dashboard auf `localhost:8080` zeigen.
+* Älter als eine Minute: grau. Nach 15 Minuten ohne Meldung verschwindet die
+  Maschine. Positionen werden nicht gespeichert, nur im Speicher des Masters gehalten.
+* Ein Gerät im Simulator wird als „Simulator“ gekennzeichnet; der Master meldet sich
+  selbst nur mit echtem Empfänger.
+
 ## Das Menü
 
 Links stehen alle Seiten in drei Gruppen:
 
-* **Im Feld:** Felder, Spuren, Arbeiten, Saatplan, Vorgewende & Wende.
+* **Im Feld:** Felder, Spuren, Arbeiten, Maschinen (Fernansicht), Saatplan, Vorgewende & Wende.
 * **Maschine:** Traktor & Gerät (Maße, Lenkschärfe, Regelart, unten die
   Teilbreiten-Hardware) und **Lenkung**. Auf der Seite Lenkung von oben nach unten:
   *Lenkung live*, der *Lenk-Assistent*, die *Lenkwerkstatt* als ein Ablauf (Maße des

@@ -98,6 +98,17 @@ CREATE TABLE IF NOT EXISTS sync_received (
 );
 CREATE INDEX IF NOT EXISTS idx_sync_received ON sync_received(table_name, received_at);
 
+CREATE TABLE IF NOT EXISTS hindernisse (
+    id TEXT PRIMARY KEY,
+    field_id TEXT NOT NULL DEFAULT '',
+    name TEXT NOT NULL DEFAULT 'Hindernis',
+    lat REAL NOT NULL,
+    lon REAL NOT NULL,
+    radius_m REAL NOT NULL DEFAULT 1.0,
+    updated_at REAL NOT NULL,
+    deleted INTEGER NOT NULL DEFAULT 0
+);
+
 CREATE TABLE IF NOT EXISTS settings (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL,
@@ -105,7 +116,7 @@ CREATE TABLE IF NOT EXISTS settings (
 );
 """
 
-SYNCED_TABLES = ("fields", "lines", "jobs", "devices")
+SYNCED_TABLES = ("fields", "lines", "jobs", "devices", "hindernisse")
 
 
 def new_id() -> str:
@@ -451,6 +462,32 @@ class Storage:
             "SELECT * FROM devices WHERE deleted=0 ORDER BY last_seen DESC"
         ).fetchall()
         return [dict(r) for r in rows]
+
+    # -- hindernisse ------------------------------------------------------
+
+    def save_hindernis(self, record: dict) -> dict:
+        record = {"id": new_id(), "field_id": "", "name": "Hindernis", "radius_m": 1.0, **record}
+        record["updated_at"] = time.time()
+        self.db.execute(
+            """INSERT INTO hindernisse (id, field_id, name, lat, lon, radius_m, updated_at, deleted)
+               VALUES (:id, :field_id, :name, :lat, :lon, :radius_m, :updated_at, 0)
+               ON CONFLICT(id) DO UPDATE SET field_id=excluded.field_id, name=excluded.name,
+                   lat=excluded.lat, lon=excluded.lon, radius_m=excluded.radius_m,
+                   updated_at=excluded.updated_at, deleted=0""", record)
+        self.db.commit()
+        return record
+
+    def list_hindernisse(self, field_id: Optional[str] = None) -> list[dict]:
+        if field_id:
+            rows = self.db.execute("SELECT * FROM hindernisse WHERE deleted=0 AND field_id=? "
+                                   "ORDER BY updated_at DESC", (field_id,)).fetchall()
+        else:
+            rows = self.db.execute("SELECT * FROM hindernisse WHERE deleted=0 "
+                                   "ORDER BY updated_at DESC").fetchall()
+        return [dict(r) for r in rows]
+
+    def delete_hindernis(self, hindernis_id: str) -> None:
+        self._soft_delete("hindernisse", hindernis_id)
 
     # -- settings ---------------------------------------------------------
 

@@ -84,6 +84,9 @@ def _merge_job_coverage(store: Storage, record: dict) -> dict:
     return {**record, "coverage": base64.b64encode(merged.pack()).decode()}
 
 
+LIVE_TAKT_S = 5.0
+
+
 class SyncClient:
     """Runs on a client Pi: pushes local changes, pulls the master's."""
 
@@ -107,9 +110,41 @@ class SyncClient:
 
     async def run(self) -> None:
         self.running = True
+        live = asyncio.create_task(self.live_schleife())
+        try:
+            while self.running:
+                await self.sync_once()
+                await asyncio.sleep(max(5, self.config.network.sync_interval_s))
+        finally:
+            live.cancel()
+
+    async def live_schleife(self) -> None:
+        """Alle LIVE_TAKT_S die eigene Lage melden und die der anderen holen (flotte.py)."""
         while self.running:
-            await self.sync_once()
-            await asyncio.sleep(max(5, self.config.network.sync_interval_s))
+            await self.live_once()
+            await asyncio.sleep(LIVE_TAKT_S)
+
+    async def live_once(self) -> bool:
+        if self.engine is None:
+            return False
+        try:
+            import httpx
+        except ImportError:
+            return False
+        url = self.config.network.master_url.rstrip("/") + "/api/sync/live"
+        kopf = ({"X-AgriPilot-Token": self.config.network.sync_token}
+                if self.config.network.sync_token else {})
+        payload = {"device": {"id": self.config.network.device_id,
+                              "name": self.config.network.device_name},
+                   "live": self.engine.live_meldung()}
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                antwort = await client.post(url, json=payload, headers=kopf)
+                antwort.raise_for_status()
+                self.engine.flotte.uebernehmen(antwort.json().get("flotte") or [])
+            return True
+        except Exception:  # noqa: BLE001 - die Fernansicht darf nie etwas mitreißen
+            return False
 
     async def sync_once(self) -> dict:
         try:

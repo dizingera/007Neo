@@ -224,6 +224,9 @@ class SteeringConfig:
     max_speed_ms: float = 8.0
     max_cross_track_m: float = 1.5   # too far off the line: hand back to the driver
     require_rtk: bool = True
+    # Kurzer RTK-Ausfall (Baumreihe, Funkloch): so lange wird mit der
+    # Ersatzlösung weitergelenkt, deren Versatz herausgerechnet wird (rtkbruecke.py).
+    rtk_ueberbrueckung_s: float = 60.0
     watchdog_ms: int = 500       # no fresh command in this window -> board centres
 
 

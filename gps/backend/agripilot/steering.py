@@ -55,6 +55,7 @@ class SteeringController:
         self.simulator = simulator
         self.armed = False           # vom Fahrer gesetzt, geht bei jedem Stopp weg
         self.rueckwaerts = False     # setzt die Engine aus dem Kurs; Rückwärts lenkt nichts
+        self.rtk_ueberbrueckt = False  # setzt die Engine: kurzer RTK-Ausfall wird überbrückt
         self.command = SteerCommand()
         self.last_sent_at = 0.0
         self.max_rate_deg_s = 25.0
@@ -163,7 +164,7 @@ class SteeringController:
         age = now - fix.received_at if fix.received_at else 99.0
         if age > 1.0:
             return f"GPS-Daten veraltet ({age:.1f} s)"
-        if cfg.require_rtk and fix.rank < 4:
+        if cfg.require_rtk and fix.rank < 4 and not self.rtk_ueberbrueckt:
             return f"RTK nötig, aktuell: {fix.fix_label}"
         if fix.speed_ms < cfg.min_speed_ms:
             return "zu langsam"
