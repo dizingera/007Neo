@@ -33,5 +33,13 @@ Simulator mit Oberfläche: `backend/.venv/Scripts/python.exe scripts/run_sim.py 
   `Tablet-Paket/Tablet-einrichten.bat` enthält den Arbeitercode und wird nicht weitergegeben.
 - Arbeitsbreiten der Geräte trägt der Betreiber selbst ein – nicht ändern.
 - Nichts ist am echten Traktor geprüft, was nicht ausdrücklich so dokumentiert ist.
+- Dateien per Skript ändern: neuen Text erst vollständig im Speicher bauen, dann öffnen und
+  schreiben – ein Fehler zwischen `open(..., "w")` und `write` leert die Datei.
+- `guard()` in `server.py` liefert eine fertige `JSONResponse`, kein dict.
+- Simulator-Störungen zum Prüfen der Lenkung über `POST /api/simulator`: `seitendrift_ms`,
+  `rad_versatz_deg`, `mess_korrektur_deg`, `fix_quality`. Prüffelder in
+  `.simulator/agripilot.db` danach wieder löschen.
+- Externe Dienste (Luftbild LGL-BW, GitHub) können ausfallen; nie ohne Rückfall einbauen.
 
-Ausführliche Übergabe und offene Punkte: Obsidian-Vault, `Wiki/Projekte/AgriPilot-Uebergabe-2026-10-16.md`.
+Ausführliche Übergabe und offene Punkte: Obsidian-Vault, `Wiki/Projekte/AgriPilot-Uebergabe-2026-10-16.md`
+(fortlaufend ergänzt, aktueller Stand ganz unten).
