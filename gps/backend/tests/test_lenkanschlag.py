@@ -29,6 +29,13 @@ class LenkanschlagTest(unittest.TestCase):
         self.assertIn("max_steer_left_deg", TRAKTOR_FELDER)
         self.assertIn("max_steer_right_deg", TRAKTOR_FELDER)
 
+    def test_look_on_the_map_belongs_to_tractor_and_implement(self):
+        for feld in ("bauform", "marke", "spurweite_m", "regelart"):
+            self.assertIn(feld, TRAKTOR_FELDER)
+        self.assertNotIn("geraet_art", TRAKTOR_FELDER)        # die Art gehört zum Gerät
+        p = VehicleProfile()
+        self.assertEqual((p.bauform, p.marke, p.geraet_art), ("traktor", "standard", "balken"))
+
 
 if __name__ == "__main__":
     unittest.main()

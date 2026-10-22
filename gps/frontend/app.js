@@ -972,6 +972,27 @@ function drawRecording() {
  * Der Traktor steht an der Hinterachse, das Gerät dort, wo der Server markiert
  * (implement.position) - beim gezogenen Gerät in seiner eigenen Ausrichtung.
  * So beginnt der Streifen sichtbar am Gerät und nicht unter dem Traktor. */
+/* Traktor und Gerät durchsichtig stellen, damit Spur und Fläche darunter sichtbar bleiben. */
+let fahrzeugDeckkraft = Math.max(0.3, Math.min(1, parseFloat(gemerkt('fahrzeugDeckkraft') || '1') || 1));
+
+/* Auswahllisten für Bauform, Marke und Geräteart aus fahrzeugbild.js füllen. */
+function fahrzeugWahlFuellen() {
+  const fuellen = (id, eintraege) => {
+    const wahl = el(id);
+    if (!wahl || wahl.options.length) return;
+    Object.entries(eintraege).forEach(([wert, text]) => {
+      const o = document.createElement('option');
+      o.value = wert;
+      o.textContent = typeof text === 'string' ? text : text.name;
+      wahl.appendChild(o);
+    });
+  };
+  fuellen('wahlBauform', window.Fahrzeugbild.BAUFORMEN);
+  fuellen('wahlMarke', window.Fahrzeugbild.MARKEN);
+  fuellen('wahlGeraetArt', window.Fahrzeugbild.GERAETE);
+  el('fahrzeugDeckkraft').value = String(fahrzeugDeckkraft);
+}
+
 function drawVehicle() {
   const s = state.live;
   const pose = traktorPose(s);
@@ -988,6 +1009,7 @@ function drawVehicle() {
   const geraetVor = ox * Math.sin(roh) + oy * Math.cos(roh);
 
   ctx.save();
+  ctx.globalAlpha = fahrzeugDeckkraft;
   ctx.translate(pose[0] + rahmen[0], pose[1] + rahmen[1]);
   ctx.rotate(-kurs);           // Welt ist y-oben: +y ist vorwärts, +x rechts
   geraetZeichnen(s, profil, implement, geraetRechts, geraetVor);
@@ -1017,16 +1039,20 @@ function geraetZeichnen(s, profil, implement, rechts, vor) {
   if (implement.trailed && implement.heading != null) {
     ctx.rotate(-winkelDifferenz(implement.heading, s.heading) * Math.PI / 180);
   }
+  const art = profil.geraet_art || 'balken';
+  // Der Aufbau reicht vom Arbeitspunkt nach vorn - höchstens bis ans Heck des Traktors.
+  if (art !== 'balken') window.Fahrzeugbild.geraet(ctx, art, breite, px, F, Math.max(0.5, -1.0 - vor));
+  const leiste = art === 'balken' ? tiefe : Math.max(0.3, 5 * px);
   const teile = sections.length ? sections : [{ left_m: -breite / 2, right_m: breite / 2, enabled: true }];
   teile.forEach((t) => {
     const an = t.enabled && !t.forced_off;
     ctx.fillStyle = t.forced_off ? F.vg : an ? F.aktiv : F.geraet;
-    ctx.fillRect(t.left_m, -tiefe / 2, t.right_m - t.left_m, tiefe);
+    ctx.fillRect(t.left_m, -leiste / 2, t.right_m - t.left_m, leiste);
   });
   // Fugen zwischen den Teilbreiten und ein Rand ums ganze Gerät
   ctx.strokeStyle = F['traktor-rand'];
   ctx.lineWidth = Math.max(0.05, 1.2 * px);
-  teile.forEach((t) => ctx.strokeRect(t.left_m, -tiefe / 2, t.right_m - t.left_m, tiefe));
+  teile.forEach((t) => ctx.strokeRect(t.left_m, -leiste / 2, t.right_m - t.left_m, leiste));
   ctx.restore();
 }
 
@@ -1070,99 +1096,18 @@ function schattenAn() { ctx.shadowColor = 'rgba(0,0,0,.5)'; ctx.shadowBlur = 10;
 function schattenAus() { ctx.shadowColor = 'transparent'; ctx.shadowBlur = 0; }
 
 function traktorZeichnen(profil) {
+  // Unter einer Fingerkuppe Größe wird die Maschine vergrößert - das Gerät nicht,
+  // dessen Breite zählt. Bauform, Farbe und mitlenkende Räder: fahrzeugbild.js.
   const radstand = Math.max(2.2, Math.min(3.4, profil.wheelbase_m || 2.6));
-  const laenge = radstand + 2.4;
+  const laenge = profil.bauform === 'maehdrescher' || profil.bauform === 'knicklenker' ? 5 : radstand + 2.4;
   const k = Math.max(1, (40 / state.view.scale) / laenge);
   ctx.save();
   ctx.scale(k, k);
-  const px = 1 / (state.view.scale * k);
-  const spur = 1.0;                       // halbe Spurweite bis Reifenmitte
-
-  // Räder: hinten groß, vorn kleiner und etwas schmaler
-  reifen(-spur, 0, 0.58, 1.75, px);
-  reifen(spur, 0, 0.58, 1.75, px);
-  reifen(-spur + 0.08, radstand, 0.44, 1.15, px);
-  reifen(spur - 0.08, radstand, 0.44, 1.15, px);
-
-  // Vorderachse und Frontgewicht
-  ctx.fillStyle = F['lack-dunkel'];
-  ctx.fillRect(-spur + 0.1, radstand - 0.09, 2 * spur - 0.2, 0.18);
-  rundRechteck(-0.5, radstand + 0.78, 1.0, 0.38, 0.08);
-  ctx.fillStyle = '#2b2f2d';
-  ctx.fill();
-
-  // Haube: zur Front schmaler, mit Glanzlicht in der Mitte
-  ctx.beginPath();
-  ctx.moveTo(-0.5, 0.75);
-  ctx.lineTo(-0.44, radstand + 0.55);
-  ctx.quadraticCurveTo(-0.42, radstand + 0.86, 0, radstand + 0.9);
-  ctx.quadraticCurveTo(0.42, radstand + 0.86, 0.44, radstand + 0.55);
-  ctx.lineTo(0.5, 0.75);
-  ctx.closePath();
-  const haube = ctx.createLinearGradient(-0.5, 0, 0.5, 0);
-  haube.addColorStop(0, F['lack-dunkel']);
-  haube.addColorStop(0.42, F['lack-hell']);
-  haube.addColorStop(0.58, F['lack-hell']);
-  haube.addColorStop(1, F['lack-dunkel']);
-  ctx.fillStyle = haube;
-  schattenAn();
-  ctx.fill();
-  schattenAus();
-  ctx.lineWidth = 1.2 * px;
-  ctx.strokeStyle = 'rgba(0,0,0,.55)';
-  ctx.stroke();
-  // Gelber Zierstreifen und Lüftungsschlitze
-  ctx.fillStyle = F.akzent;
-  ctx.fillRect(-0.47, 0.95, 0.06, radstand - 0.6);
-  ctx.fillRect(0.41, 0.95, 0.06, radstand - 0.6);
-  ctx.strokeStyle = 'rgba(0,0,0,.35)';
-  ctx.lineWidth = Math.max(0.03, 1 * px);
-  for (let i = 0; i < 4; i++) {
-    const y = radstand + 0.1 + i * 0.12;
-    ctx.beginPath(); ctx.moveTo(-0.22, y); ctx.lineTo(0.22, y); ctx.stroke();
-  }
-  // Auspuff rechts vor der Kabine
-  ctx.beginPath();
-  ctx.arc(0.3, 1.05, 0.075, 0, Math.PI * 2);
-  ctx.fillStyle = '#111';
-  ctx.fill();
-
-  // Kotflügel über den Hinterrädern
-  [-1, 1].forEach((seite) => {
-    rundRechteck(seite > 0 ? spur - 0.36 : -spur - 0.36, -0.82, 0.72, 1.64, 0.3);
-    ctx.fillStyle = F.lack;
-    schattenAn();
-    ctx.fill();
-    schattenAus();
-    ctx.strokeStyle = 'rgba(0,0,0,.5)';
-    ctx.lineWidth = 1.2 * px;
-    ctx.stroke();
+  window.Fahrzeugbild.fahrzeug(ctx, {
+    profil, px: 1 / (state.view.scale * k), F,
+    p: window.Fahrzeugbild.farben(profil.marke, F),
+    winkel: window.Fahrzeugbild.radwinkel(state.live),
   });
-
-  // Kabine: Glasrand, darüber das Dach mit Glanz
-  rundRechteck(-0.78, -0.72, 1.56, 1.5, 0.16);
-  ctx.fillStyle = F.kabine;
-  schattenAn();
-  ctx.fill();
-  schattenAus();
-  rundRechteck(-0.68, -0.6, 1.36, 1.26, 0.14);
-  const dach = ctx.createRadialGradient(-0.2, 0.25, 0.1, 0, 0, 1.0);
-  dach.addColorStop(0, F['lack-hell']);
-  dach.addColorStop(1, F.lack);
-  ctx.fillStyle = dach;
-  ctx.fill();
-  ctx.lineWidth = 1 * px;
-  ctx.strokeStyle = 'rgba(0,0,0,.45)';
-  ctx.stroke();
-  // Rundumleuchte
-  ctx.beginPath();
-  ctx.arc(0.42, -0.36, 0.09, 0, Math.PI * 2);
-  ctx.fillStyle = F.akzent;
-  ctx.fill();
-
-  // Heckkraftheber
-  ctx.fillStyle = '#2b2f2d';
-  ctx.fillRect(-0.35, -1.0, 0.7, 0.22);
   ctx.restore();
 }
 
@@ -1804,6 +1749,13 @@ el('btnDeleteProfile').onclick = async () => {
   }
 };
 
+fahrzeugWahlFuellen();
+el('fahrzeugDeckkraft').onchange = () => {
+  fahrzeugDeckkraft = parseFloat(el('fahrzeugDeckkraft').value) || 1;
+  merken('fahrzeugDeckkraft', String(fahrzeugDeckkraft));
+  zeichnenAnfordern();
+};
+
 el('btnSaveProfile').onclick = async () => {
   const payload = {};
   document.querySelectorAll('#profileForm input, #profileForm select').forEach((input) => {
@@ -1824,7 +1776,7 @@ let traktorenListe = [];
 function fillTraktorForm(traktor, erzwingen = false) {
   if (!traktor || (formularOffen('traktorForm') && !erzwingen)) return;
   formularSauber('traktorForm');
-  document.querySelectorAll('#traktorForm input').forEach((input) => {
+  document.querySelectorAll('#traktorForm input, #traktorForm select').forEach((input) => {
     if (traktor[input.name] !== undefined) input.value = traktor[input.name];
   });
 }
@@ -1864,7 +1816,7 @@ el('btnDeleteTraktor').onclick = async () => {
 
 el('btnSaveTraktor').onclick = async () => {
   const payload = {};
-  document.querySelectorAll('#traktorForm input').forEach((input) => {
+  document.querySelectorAll('#traktorForm input, #traktorForm select').forEach((input) => {
     payload[input.name] = input.type === 'number' ? parseFloat(input.value) : input.value;
   });
   if (await api('POST', '/api/traktor', payload)) {

@@ -860,6 +860,28 @@ Gebäude wirklich, statt nur das Raster. Nachts ist es gedämpft.
   nur 10 m je Bildpunkt: Felder, Wege und Dörfer ja, Gräben nein. Die Quellenangabe
   unten sagt es dazu. Nach sechs Stunden wird das scharfe Luftbild erneut versucht.
 
+## Traktor- und Gerätebild (ab 1.5.51)
+
+Unter **Traktor & Gerät** steht beim Traktor ein Abschnitt **Aussehen auf der Karte**:
+
+* **Bauform:** Traktor, Mähdrescher (lenkt hinten) oder Knicklenker (knickt in der Mitte).
+* **Farbe (Marke):** John Deere, Fendt, Claas, Case IH/Steyr, New Holland, Deutz-Fahr,
+  Massey Ferguson, Valtra, Kubota – nur die Lackfarben, keine Logos. „AgriPilot“ nimmt
+  die Farben der Oberfläche.
+* **Spurweite** (Reifenmitte zu Reifenmitte) – der Traktor wird so breit gezeichnet.
+
+Beim Gerät wählt **Art (Bild auf der Karte)** das Bild von oben: Grubber, Scheibenegge,
+Sämaschine, Feldspritze, Düngerstreuer, Pflug, Mähwerk, Walze oder einfacher Balken. Die
+Teilbreiten liegen als Leiste am Arbeitspunkt darüber; der Aufbau reicht nach vorn bis
+ans Heck des Traktors (bei kurzem Anbau dafür hinter den Arbeitspunkt).
+
+**Die Räder lenken mit** – mit dem gemessenen Radwinkel vom Drehgeber, sonst mit dem
+Befehl. Steht das Rad im Bild gerade, während die Lenkung einschlägt, kommt der Motor
+nicht nach.
+
+**Durchsichtig:** unter *Einstellungen → Kartenfarben → Traktor und Gerät* deckend,
+70 % oder 45 % – dann sieht man Spur und Fläche unter der Maschine.
+
 ## Das Menü
 
 Links stehen alle Seiten in drei Gruppen:

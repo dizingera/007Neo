@@ -475,6 +475,12 @@
             <label>Trägheit der Lenkung (s)<input type="number" step="0.05" min="0.05" max="2" name="lenk_traegheit_s"></label>
           </fieldset>
           <fieldset>
+            <legend>Aussehen auf der Karte</legend>
+            <label>Bauform<select name="bauform" id="wahlBauform"></select></label>
+            <label>Farbe (Marke)<select name="marke" id="wahlMarke"></select></label>
+            <label>Spurweite (m, Reifenmitte)<input type="number" step="0.05" min="1.2" max="3" name="spurweite_m"></label>
+          </fieldset>
+          <fieldset>
             <legend>Abstimmung bei Tempo</legend>
             <label>Absenkung ab (km/h)<input type="number" step="0.5" min="0" name="speed_gain_limit_kmh"></label>
             <label>Restfaktor<input type="number" step="0.05" min="0.05" max="1" name="speed_gain_rest"></label>
@@ -522,6 +528,7 @@
             <label>Arbeitspunkt bis Gerätevorderkante (m)<input type="number" step="0.01" min="0" max="30" name="geraet_vorn_m"></label>
             <label>Arbeitspunkt bis Gerätehinterkante (m)<input type="number" step="0.01" min="0" max="30" name="geraet_hinten_m"></label>
             <p class="note ganz">Wendeprüfung: positive Ausdehnungen ab dem Arbeitspunkt messen; Geprüfte Breite = größerer Wert aus Arbeits- und gemessener Außenbreite. 0 = noch nicht gemessen.</p>
+            <label>Art (Bild auf der Karte)<select name="geraet_art" id="wahlGeraetArt"></select></label>
             <label>Gerät hinter Achse (m)<input type="number" step="0.01" name="tool_trailing_m"></label>
             <label>Gerät seitlich (m)<input type="number" step="0.01" name="tool_offset_m"></label>
             <label class="switch"><input type="checkbox" name="trailed"> gezogen (Anhängerkinematik)</label>
@@ -757,6 +764,13 @@
       <p class="note">Die Flächen bleiben durchsichtig. Die Vorschau zeigt die Auswahl; auf der Karte gilt sie nach dem Übernehmen.</p>
       <div class="row"><button id="kartenfarbenSpeichern" type="button" class="primary">Kartenfarben übernehmen</button><button id="kartenfarbenStandard" type="button">Standardfarben wiederherstellen</button></div>
       <p class="note" id="kartenfarbenInfo" role="status" aria-atomic="true"></p>
+      <label class="kartenfarben-ansicht" for="fahrzeugDeckkraft">Traktor und Gerät
+        <select id="fahrzeugDeckkraft">
+          <option value="1">deckend</option>
+          <option value="0.7">leicht durchsichtig (70 %)</option>
+          <option value="0.45">durchsichtig (45 %)</option>
+        </select>
+      </label>
     </details>
     <div id="settingsGroups"></div>
   </section>
@@ -885,6 +899,7 @@
 <script src="flaeche.js"></script>
 <script src="lenklive.js"></script>
 <script src="fernansicht.js"></script>
+<script src="fahrzeugbild.js"></script>
 <script src="spuren.js"></script>
 <script src="kalibrierung.js"></script>
 <script src="kartenfarben.js"></script>

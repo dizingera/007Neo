@@ -74,6 +74,12 @@ class VehicleProfile:
     traktor_vorn_m: float = 0.0
     traktor_hinten_m: float = 0.0
     geraet_breite_m: float = 0.0
+    # Aussehen auf der Karte (fahrzeugbild.js): Bauform und Lackfarbe des Traktors,
+    # Spurweite (Reifenmitte zu Reifenmitte) und die Art des Geräts.
+    bauform: str = "traktor"
+    marke: str = "standard"
+    spurweite_m: float = 1.9
+    geraet_art: str = "balken"
     geraet_vorn_m: float = 0.0
     geraet_hinten_m: float = 0.0
     max_steer_deg: float = 35.0
@@ -213,7 +219,7 @@ TRAKTOR_FELDER = (
     "traktor_breite_m", "traktor_vorn_m", "traktor_hinten_m",
     "antenna_forward_m", "antenna_right_m", "antenna_height_m",
     "wheelbase_m", "max_steer_deg", "max_steer_left_deg", "max_steer_right_deg", "max_steer_rate_deg_s",
-    "regelart", "lenk_traegheit_s",
+    "regelart", "lenk_traegheit_s", "bauform", "marke", "spurweite_m",
     "steer_gain", "steer_softening", "speed_gain_limit_kmh", "speed_gain_rest",
     "actuator_latency_ms",
 )
