@@ -396,6 +396,8 @@
           <label class="ganz">Name (wie in MyTerra)<input type="text" name="name" list="mtTraktoren" autocomplete="off"></label>
           <fieldset>
             <legend>Antenne – gemessen ab Mitte Hinterachse</legend>
+            <p class="note ganz">Für den gewählten Traktor misst und bestätigt man die Maße am
+              besten unter <b>Lenkung → Lenkwerkstatt</b>; hier lassen sich auch andere Traktoren pflegen.</p>
             <label>nach vorn (m)<input type="number" step="0.01" name="antenna_forward_m"></label>
             <label>nach rechts (m)<input type="number" step="0.01" name="antenna_right_m"></label>
             <label>Höhe über Boden (m)<input type="number" step="0.01" name="antenna_height_m"></label>
@@ -495,41 +497,16 @@
         </details>
       </section>
     </div>
+    <h3 class="abschnitt">Teilbreiten-Hardware</h3>
+    <div class="row">
+      <button id="btnSaveSettingsGeraet" class="primary">Übernehmen</button>
+    </div>
+    <div id="settingsGeraet"></div>
   </section>
 
   <section class="tab-panel" data-panel="lenkung" hidden>
     <!-- Alles zur Lenkung an einer Stelle: einrichten, prüfen, abstimmen, einstellen.
          Die Werte des Traktors (Lenkschärfe, Regelart) stehen bei Traktor & Gerät. -->
-    <section class="karte lenkwerkstatt" aria-labelledby="werkstattTitel">
-      <div class="werkstatt-kopf"><div><p class="note" id="werkstattGeraet">Traktor-Tablet</p>
-        <h3 id="werkstattTitel">Lenkwerkstatt</h3><p id="werkstattTraktor">Traktor wird geladen …</p></div>
-        <span class="werkstatt-befund" id="werkstattBefund" role="status">Einrichtung wird geladen</span></div>
-      <p id="werkstattFortschritt"></p>
-      <p class="note" id="werkstattSperre" role="status"></p>
-      <form id="werkstattForm">
-        <fieldset id="werkstattFelder"><legend>1 · Traktor vermessen</legend>
-          <p class="note">Antenne ab Mitte der Hinterachse messen. Einschlag der Räder am Boden, nicht des Lenkrads.</p>
-          <div class="werkstatt-masse">
-            <label>Radstand (m)<input id="wk_wheelbase_m" type="number" min="0.5" max="10" step="0.01" required></label>
-            <label>Antennenhöhe (m)<input id="wk_antenna_height_m" type="number" min="0" max="6" step="0.01" required></label>
-            <label>Antenne nach vorn (m)<input id="wk_antenna_forward_m" type="number" min="-10" max="15" step="0.01" required><small>Hinter der Achse: negativer Wert</small></label>
-            <label>Antenne nach rechts (m)<input id="wk_antenna_right_m" type="number" min="-5" max="5" step="0.01" required><small>Links der Mitte: negativer Wert</small></label>
-            <label>Einschlag links (°)<input id="wk_max_steer_left_deg" type="number" min="5" max="85" step="0.1" required></label>
-            <label>Einschlag rechts (°)<input id="wk_max_steer_right_deg" type="number" min="5" max="85" step="0.1" required></label>
-          </div>
-          <label class="switch"><input id="werkstattVermessen" type="checkbox" required>Diese Werte wurden am gewählten Traktor gemessen.</label>
-          <button id="werkstattSpeichern" type="submit" class="primary">Maße übernehmen</button>
-        </fieldset>
-      </form>
-      <div class="row"><button id="werkstattLaden">Aktuellen Traktor neu laden</button><button id="werkstattSichern">Traktorwerte sichern</button>
-        <button id="werkstattZurueck">Sicherung wiederherstellen</button></div>
-      <p class="note" id="werkstattSicherung"></p>
-      <p class="note">Die Sicherung umfasst Geometrie und Spurregler des Traktors. Motorregler, Anschlüsse und Gerätebreiten werden damit nicht verändert.</p>
-      <div class="row"><button id="werkstattProtokoll">Prüfstand dokumentieren</button>
-        <a href="/api/lenkung/kalibrierung/export" download="AgriPilot-Kalibrierung.json">Prüfbericht herunterladen</a></div>
-      <p id="werkstattInfo" class="note" role="status" aria-atomic="true"></p>
-      <p class="note">2 · Motor und Richtung: den geführten Ablauf unten durchführen. 3 · Probefahrt: danach den Lenk-Assistenten nutzen. Ein Übungsprotokoll bestätigt keinen echten Einbau.</p>
-    </section>
     <section class="karte" id="lenkLive">
       <h3>Lenkung live</h3>
       <div class="row">
@@ -584,10 +561,32 @@
         <div class="row"><button id="btnEinmessUebernehmen" class="primary" hidden>Ergebnis übernehmen</button></div>
       </div>
     </section>
-    <section class="karte" id="lenkEinrichten">
-      <h3>Lenkung einrichten</h3>
-      <p class="note">Schritt für Schritt von der Verbindung bis zur Probefahrt. Am Stand: Lenkung
-        aus, Räder in der Mitte, Not-Aus griffbereit.</p>
+    <section class="karte lenkwerkstatt" id="lenkEinrichten" aria-labelledby="werkstattTitel">
+      <div class="werkstatt-kopf"><div><p class="note" id="werkstattGeraet">Traktor-Tablet</p>
+        <h3 id="werkstattTitel">Lenkwerkstatt</h3><p id="werkstattTraktor">Traktor wird geladen …</p></div>
+        <span class="werkstatt-befund" id="werkstattBefund" role="status">Einrichtung wird geladen</span></div>
+      <p id="werkstattFortschritt"></p>
+      <p class="note" id="werkstattSperre" role="status"></p>
+      <details class="werkstatt-klapp" id="werkstattMasseBox" open>
+        <summary>Maße des Traktors</summary>
+      <form id="werkstattForm">
+        <fieldset id="werkstattFelder"><legend>1 · Traktor vermessen</legend>
+          <p class="note">Antenne ab Mitte der Hinterachse messen. Einschlag der Räder am Boden, nicht des Lenkrads.</p>
+          <div class="werkstatt-masse">
+            <label>Radstand (m)<input id="wk_wheelbase_m" type="number" min="0.5" max="10" step="0.01" required></label>
+            <label>Antennenhöhe (m)<input id="wk_antenna_height_m" type="number" min="0" max="6" step="0.01" required></label>
+            <label>Antenne nach vorn (m)<input id="wk_antenna_forward_m" type="number" min="-10" max="15" step="0.01" required><small>Hinter der Achse: negativer Wert</small></label>
+            <label>Antenne nach rechts (m)<input id="wk_antenna_right_m" type="number" min="-5" max="5" step="0.01" required><small>Links der Mitte: negativer Wert</small></label>
+            <label>Einschlag links (°)<input id="wk_max_steer_left_deg" type="number" min="5" max="85" step="0.1" required></label>
+            <label>Einschlag rechts (°)<input id="wk_max_steer_right_deg" type="number" min="5" max="85" step="0.1" required></label>
+          </div>
+          <label class="switch"><input id="werkstattVermessen" type="checkbox" required>Diese Werte wurden am gewählten Traktor gemessen.</label>
+          <button id="werkstattSpeichern" type="submit" class="primary">Maße übernehmen</button>
+        </fieldset>
+      </form>
+      </details>
+      <h4 class="werkstatt-unter">Motor, Richtung, Freigabe und Probefahrt</h4>
+      <p class="note">Am Stand: Lenkung aus, Räder in der Mitte, Not-Aus griffbereit. Erledigte Schritte sind zugeklappt – antippen, um einen zu wiederholen.</p>
       <ol class="einrichten" id="einrichtenListe"></ol>
       <label class="note">Gesamteinschlag der Räder am Boden, von Anschlag zu Anschlag (°) – für Schritt 4
         <input type="number" id="einrichtenWinkel" value="70" min="10" max="120" step="1">
@@ -596,8 +595,21 @@
       <div class="row">
         <button id="btnEinrichtenNeu">Von vorn beginnen</button>
       </div>
+      <details class="werkstatt-klapp">
+        <summary>Sicherung und Prüfbericht</summary>
+      <div class="row"><button id="werkstattLaden">Aktuellen Traktor neu laden</button><button id="werkstattSichern">Traktorwerte sichern</button>
+        <button id="werkstattZurueck">Sicherung wiederherstellen</button></div>
+      <p class="note" id="werkstattSicherung"></p>
+      <p class="note">Die Sicherung umfasst Geometrie und Spurregler des Traktors. Motorregler, Anschlüsse und Gerätebreiten werden damit nicht verändert.</p>
+      <div class="row"><button id="werkstattProtokoll">Prüfstand dokumentieren</button>
+        <a href="/api/lenkung/kalibrierung/export" download="AgriPilot-Kalibrierung.json">Prüfbericht herunterladen</a></div>
+      <p id="werkstattInfo" class="note" role="status" aria-atomic="true"></p>
+      <p class="note">Ein Übungsprotokoll bestätigt keinen echten Einbau.</p>
+      </details>
     </section>
-    <h3 class="abschnitt">Prüfen und abstimmen</h3>
+    <details class="setting-group werkzeug" id="lenkWerkzeuge">
+      <summary>Am Stand: Motortest, Mitte lernen, Neigungssensor</summary>
+      <div class="werkzeug-inhalt">
     <div class="row" id="imuRow" hidden>
       <button id="btnLevel" class="primary">Neigungssensor nullen</button>
       <label class="switch"><input type="checkbox" id="compensation" checked>
@@ -623,10 +635,13 @@
       <button id="btnCentre">Lenkung: Mitte lernen</button>
       <span class="note" id="steerInfo"></span>
     </div>
+    <p class="note" id="lenkWerkzeugeLeer">Erscheint, sobald ein Lenkmotor bzw. Neigungssensor verbunden ist.</p>
+      </div>
+    </details>
     <h3 class="abschnitt">Einstellungen Lenkautomatik und Lenkmotor</h3>
     <div class="row">
       <button id="btnSaveSettingsLenkung" class="primary">Übernehmen</button>
-      <span class="note">Lenkschärfe, Regelart und Lenkanschlag stehen bei <b>Traktor &amp; Gerät</b>.</span>
+      <span class="note">Lenkschärfe und Regelart stehen bei <b>Traktor &amp; Gerät</b>.</span>
     </div>
     <div id="settingsLenkung"></div>
   </section>
@@ -678,7 +693,7 @@
       <button id="btnSaveSettings" class="primary">Übernehmen</button>
       <span class="note" id="settingsInfo" role="status" aria-atomic="true"></span>
     </div>
-    <details class="setting-group kartenfarben" open>
+    <details class="setting-group kartenfarben">
       <summary>Kartenfarben</summary>
       <p class="note">Feldgrenze und Fahrgassen nach Wunsch hervorheben. In diesem Browser gespeichert; Tag- und Nachtansicht getrennt.</p>
       <label class="kartenfarben-ansicht" for="kartenfarbenThema">Ansicht <select id="kartenfarbenThema"><option value="nacht">Nacht</option><option value="tag">Tag</option></select></label>

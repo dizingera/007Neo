@@ -103,12 +103,13 @@ body.tag .sheet { --m-linie: #a0b09d; --m-feld-rand: #788e78;
 .sheet .sheet-titel { font-size: 24px; font-weight: 600; letter-spacing: -.025em; line-height: 1.25; }
 .sheet .close { min-height: 48px; border: 1px solid var(--m-feld-rand); border-radius: 8px;
   background: transparent; font-size: 14px; font-weight: 500; padding: 0 16px; }
-.sheet .tabs { width: 224px; background: var(--ui-nav); padding: 20px 12px;
-  gap: 4px; border-right: 1px solid var(--line); }
+/* Alle elf Seiten müssen auf das Tablet passen (1280 × 800), ohne die Leiste zu rollen. */
+.sheet .tabs { width: 224px; background: var(--ui-nav); padding: 12px 12px;
+  gap: 2px; border-right: 1px solid var(--line); }
 .sheet .tab-gruppe { color: var(--muted); font-size: 11px; letter-spacing: .09em;
-  margin: 20px 12px 6px; }
+  margin: 12px 12px 4px; }
 .sheet .tab-gruppe:first-child { margin-top: 0; }
-.sheet .tab { font-size: 15px; padding: 12px; min-height: 52px;
+.sheet .tab { font-size: 15px; padding: 10px 12px; min-height: 48px;
   border: 1px solid transparent; border-radius: 8px; font-weight: 500; }
 .sheet .tab.active { color: #fff; background: var(--blue-solid); border-color: transparent; font-weight: 600; }
 .sheet .tab-panel { padding: 28px; }
@@ -299,3 +300,18 @@ body.tag { --f-flaeche: rgba(23, 140, 70, .38); --f-doppelt: rgba(200, 104, 12, 
 .sheet .farben-vorschau span{display:flex;align-items:center;justify-content:center;flex:1;padding:12px;background:var(--v-flaeche,rgba(72,204,119,.4));color:var(--text,#ecf3ec)}
 .sheet .farben-vorschau span+span{background:var(--v-doppelt,rgba(255,174,48,.72));border-left:4px dashed var(--v-fahrgasse,#ff5c5c)}
 @media(max-width:600px){.sheet.feldwerkzeug{padding:16px}.sheet.feldwerkzeug .formular{grid-template-columns:1fr}.sheet .fw-kopf{align-items:flex-start}.sheet .fw-kopf h2{font-size:21px}}
+
+/* Lenkung einrichten: ein Ablauf, nur der anstehende Schritt ist offen. */
+.sheet .werkstatt-klapp { border-top: 1px solid var(--line); padding-top: 12px; }
+.sheet .werkstatt-klapp > summary { cursor: pointer; font-weight: 600; min-height: 44px;
+  display: flex; align-items: center; gap: 8px; }
+.sheet .werkstatt-klapp > summary::before { content: "▸"; color: var(--blau); }
+.sheet .werkstatt-klapp[open] > summary::before { content: "▾"; }
+.sheet .werkstatt-unter { margin: 8px 0 0; font-size: 16px; font-weight: 600; }
+.sheet .einrichten li.zu { padding: 12px 0; }
+.sheet .einrichten li.zu .schritt-text, .sheet .einrichten li.zu .tasten { display: none; }
+.sheet .einrichten li .kopf[role=button] { cursor: pointer; }
+.sheet .einrichten li.zu .kopf::after { content: "▸"; margin-left: auto; color: var(--muted); }
+/* Arbeiten: Feldköpfe klappen ihre Arbeiten auf und zu. */
+.sheet .gruppe.klapp { width: 100%; background: transparent; border: 0; border-bottom: 1px solid var(--line);
+  border-radius: 0; padding: 12px 4px; text-align: left; cursor: pointer; min-height: 52px; }

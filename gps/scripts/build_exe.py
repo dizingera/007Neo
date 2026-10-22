@@ -15,6 +15,14 @@ dem App-Bild das Symbol der exe).
 Die Datei ist nicht signiert: Windows SmartScreen fragt beim ersten Start nach
 ("Weitere Informationen" -> "Trotzdem ausführen").
 
+Herstellerangaben (Versionsressource): Am 17.10.2026 hat Windows Defender die
+installierte exe als "Trojan:Win32/Bearfoos.B!ml" entfernt - ein Fehlalarm der
+Verhaltenserkennung: ein unsigniertes Programm ohne jede Herkunftsangabe, das
+Aufgaben mit höchsten Rechten, Firewall-Regeln und einen Deinstallationseintrag
+anlegt. Mit Hersteller, Produkt, Version und Beschreibung schlägt die Erkennung
+deutlich seltener an; ganz sicher ist erst eine Signatur. UPX bleibt aus:
+gepackte exe-Dateien gelten den Scannern als verdächtig.
+
 Ohne Administrator-Manifest: sonst fragte Windows bei jedem Öffnen des Fensters
 nach. Die Einrichtung fordert die Rechte selbst an (exe.installieren), Dienst und
 Online-Update laufen als Aufgaben mit höchsten Rechten.
@@ -27,6 +35,36 @@ from pathlib import Path
 
 GPS = Path(__file__).resolve().parent.parent
 
+VERSIONSDATEI = """VSVersionInfo(
+  ffi=FixedFileInfo(filevers={zahlen}, prodvers={zahlen}, mask=0x3f, flags=0x0,
+                    OS=0x40004, fileType=0x1, subtype=0x0, date=(0, 0)),
+  kids=[
+    StringFileInfo([StringTable('040704B0', [
+      StringStruct('CompanyName', 'Andreas Dizinger'),
+      StringStruct('FileDescription', 'AgriPilot - GPS-Lenksystem für den Traktor (Einrichtung und Programm)'),
+      StringStruct('FileVersion', '{version}'),
+      StringStruct('InternalName', 'AgriPilot'),
+      StringStruct('LegalCopyright', 'Andreas Dizinger'),
+      StringStruct('OriginalFilename', 'AgriPilot-Setup.exe'),
+      StringStruct('ProductName', 'AgriPilot'),
+      StringStruct('ProductVersion', '{version}')])]),
+    VarFileInfo([VarStruct('Translation', [0x0407, 1200])])
+  ]
+)
+"""
+
+
+def versionsdatei(ordner: Path) -> Path:
+    """Die Versionsressource der exe (Hersteller, Produkt, Version) aus __init__.py."""
+    sys.path.insert(0, str(GPS / "backend"))
+    from agripilot import __version__
+    teile = [int(x) for x in __version__.split(".")][:4]
+    zahlen = tuple(teile + [0] * (4 - len(teile)))
+    ordner.mkdir(parents=True, exist_ok=True)
+    datei = ordner / "versionsinfo.txt"
+    datei.write_text(VERSIONSDATEI.format(zahlen=zahlen, version=__version__), encoding="utf-8")
+    return datei
+
 
 def main() -> int:
     # --test: dieselbe Datei unter anderem Namen, zum Prüfen neben der ausgelieferten.
@@ -37,8 +75,9 @@ def main() -> int:
     if arbeit.exists():
         shutil.rmtree(arbeit)
     befehl = [
-        sys.executable, "-m", "PyInstaller", "--noconfirm", "--clean", "--onefile",
+        sys.executable, "-m", "PyInstaller", "--noconfirm", "--clean", "--onefile", "--noupx",
         "--name", "AgriPilot-Setup",
+        "--version-file", str(versionsdatei(arbeit)),
         "--icon", str(GPS / "frontend" / "icon-512.png"),
         "--distpath", str(arbeit / "dist"), "--workpath", str(arbeit / "work"),
         "--specpath", str(arbeit),

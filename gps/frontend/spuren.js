@@ -26,15 +26,16 @@
       const n = points.length;
       let area = 0;
       for (let i = 0; i < n; i++) {
-        const [x1, y1] = points[i], [x2, y2] = points[(i + 1) % n];
+        const [x1, y1] = points[i],
+          [x2, y2] = points[(i + 1) % n];
         area += x1 * y2 - x2 * y1;
       }
       const inward = area > 0 ? -1 : 1;
       return points.map((p, index) => {
-        const a = points[(index - 1 + n) % n], b = points[(index + 1) % n];
+        const a = points[(index - 1 + n) % n],
+          b = points[(index + 1) % n];
         const heading = Math.atan2(b[0] - a[0], b[1] - a[1]);
-        return [p[0] + Math.cos(heading) * shift * inward,
-                p[1] - Math.sin(heading) * shift * inward];
+        return [p[0] + Math.cos(heading) * shift * inward, p[1] - Math.sin(heading) * shift * inward];
       });
     }
     return points.map((p, index) => {
@@ -63,8 +64,14 @@
       // Zwischen zwei Datenpaketen reicht der Objektvergleich. Neue Pakete mit
       // gleicher Geometrie behalten das Muster; neue Punkte und Versätze nicht.
       if (linie === this.linie && nummer === this.nummer) return this.muster;
-      const schluessel = JSON.stringify([linie.mode, linie.points, linie.spacing_m,
-        linie.nudge_m || 0, linie.raster_m || 0, nummer]);
+      const schluessel = JSON.stringify([
+        linie.mode,
+        linie.points,
+        linie.spacing_m,
+        linie.nudge_m || 0,
+        linie.raster_m || 0,
+        nummer,
+      ]);
       this.linie = linie;
       this.nummer = nummer;
       if (schluessel === this.schluessel) return this.muster;
@@ -72,8 +79,10 @@
       this.muster = [];
       for (let n = nummer - 6; n <= nummer + 6; n++) {
         if (linie.mode === 'contour' && n < 0) continue;
-        this.muster.push({ nummer: n, punkte: versetzen(linie,
-          n * linie.spacing_m + (linie.nudge_m || 0) + (linie.raster_m || 0)) });
+        this.muster.push({
+          nummer: n,
+          punkte: versetzen(linie, n * linie.spacing_m + (linie.nudge_m || 0) + (linie.raster_m || 0)),
+        });
       }
       return this.muster;
     }

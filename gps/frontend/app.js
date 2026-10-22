@@ -2395,6 +2395,7 @@ async function refreshLists() {
     renderJobs(jobs, fields);
   }
   if (active === 'machine') {
+    if (!settings.geladen) loadSettings();
     fillProfile();
     renderProfiles(await (await fetch('/api/profiles')).json());
     renderTraktoren();
@@ -2589,6 +2590,8 @@ function renderLines(lines) {
     : '<p class="note">Kein Feld geladen – Spuren gehören zu ihrem Feld (Menü → Felder).</p>';
 }
 
+let jobFelderOffen = null;   // aufgeklappte Felder in der Liste der Arbeiten
+
 function renderJobs(jobs, fields) {
   const host = el('jobList');
   host.innerHTML = '';
@@ -2603,14 +2606,22 @@ function renderJobs(jobs, fields) {
     const ha = liste.reduce((summe, job) => summe + job.area_ha, 0);
     const minuten = liste.reduce((summe, job) =>
       summe + (job.ended_at ? (job.ended_at - job.started_at) / 60 : 0), 0);
-    const kopf = document.createElement('div');
-    kopf.className = 'gruppe';
+    if (!jobFelderOffen) jobFelderOffen = new Set([fieldId]);   // beim ersten Mal: das neueste Feld
+    const offen = jobFelderOffen.has(fieldId);
+    const kopf = document.createElement('button');
+    kopf.type = 'button';
+    kopf.className = 'gruppe klapp';
+    kopf.setAttribute('aria-expanded', String(offen));
     kopf.innerHTML = '<b></b><span></span>';
-    kopf.querySelector('b').textContent = namen[fieldId] || 'Unbekanntes Feld';
+    kopf.querySelector('b').textContent = `${offen ? '▾' : '▸'} ${namen[fieldId] || 'Unbekanntes Feld'}`;
     kopf.querySelector('span').textContent =
       `${liste.length} ${liste.length === 1 ? 'Arbeit' : 'Arbeiten'} · ${ha.toFixed(2)} ha · ${(minuten / 60).toFixed(1)} h`;
+    kopf.onclick = () => {
+      if (offen) jobFelderOffen.delete(fieldId); else jobFelderOffen.add(fieldId);
+      renderJobs(jobs, fields);
+    };
     host.appendChild(kopf);
-    liste.forEach((job) => host.appendChild(jobZeile(job)));
+    if (offen) liste.forEach((job) => host.appendChild(jobZeile(job)));
   });
   if (!jobs.length) host.innerHTML = '<p class="note">Noch keine Arbeiten aufgezeichnet.</p>';
   myterraStand();
@@ -2739,6 +2750,7 @@ function renderSystem() {
   el('einmessBereich').hidden = !(output && output.typ === 'phidget');
   renderAbstimmung();
   el('steerRow').hidden = !(output && output.mitte_gelernt !== undefined);
+  el('lenkWerkzeugeLeer').hidden = !(el('imuRow').hidden && el('motorTestRow').hidden && el('steerRow').hidden);
   if (!el('steerRow').hidden) {
     el('steerInfo').textContent =
       `${output.zaehlwerte_je_grad} Zählwerte je Grad · ` +
@@ -2817,7 +2829,8 @@ function renderSystem() {
    sie nicht davon abdriften kann. Gespeichert wird nur, was wirklich geändert
    wurde - so überschreibt ein Tablet nicht die Eingaben eines anderen. */
 const settings = { geladen: false, werte: {}, gruppen: [] };
-const LENK_GRUPPEN = ['steering', 'phidget', 'teilbreiten'];   // stehen auf der Seite Lenkung
+const LENK_GRUPPEN = ['steering', 'phidget'];   // stehen auf der Seite Lenkung
+const GERAET_GRUPPEN = ['teilbreiten'];         // stehen bei Traktor & Gerät
 
 async function loadSettings() {
   const daten = await (await fetch('/api/settings')).json();
@@ -2826,11 +2839,13 @@ async function loadSettings() {
   settings.geladen = true;
   el('settingsGroups').innerHTML = '';
   el('settingsLenkung').innerHTML = '';
+  el('settingsGeraet').innerHTML = '';
   daten.gruppen.forEach((gruppe) => {
-    const host = el(LENK_GRUPPEN.includes(gruppe.id) ? 'settingsLenkung' : 'settingsGroups');
+    const host = el(LENK_GRUPPEN.includes(gruppe.id) ? 'settingsLenkung'
+      : GERAET_GRUPPEN.includes(gruppe.id) ? 'settingsGeraet' : 'settingsGroups');
     const box = document.createElement('details');
     box.className = 'setting-group';
-    box.open = !host.children.length;
+    box.open = false;
     const kopf = document.createElement('summary');
     kopf.textContent = gruppe.titel;
     box.appendChild(kopf);
@@ -3057,6 +3072,7 @@ async function einstellungenSpeichern() {
 
 el('btnSaveSettings').onclick = einstellungenSpeichern;
 el('btnSaveSettingsLenkung').onclick = einstellungenSpeichern;
+el('btnSaveSettingsGeraet').onclick = einstellungenSpeichern;
 
 /* Lenkung einrichten: sieben Schritte, jeder mit seinem Werkzeug. Was ein
  * Schritt braucht, steht in ihm selbst; spätere bleiben gesperrt, bis die
@@ -3075,6 +3091,8 @@ const lenkWerkstatt = new LenkWerkstatt({el,api});
 let einrichtenStand = null;
 let einrichtenErgebnis = null;
 
+const einrichtenOffen = new Set();   // von Hand aufgeklappte Schritte
+
 async function renderEinrichten() {
   lenkWerkstatt.laden();
   const antwort = await fetch('/api/lenkung/einrichten').then((r) => r.json()).catch(() => null);
@@ -3082,12 +3100,27 @@ async function renderEinrichten() {
   einrichtenStand = antwort.data;
   const liste = el('einrichtenListe');
   liste.innerHTML = '';
+  const anstehend = einrichtenStand.schritte.findIndex((s) => !s.fertig);
   einrichtenStand.schritte.forEach((s, i) => {
     const li = document.createElement('li');
     li.className = s.fertig ? 'fertig' : s.moeglich ? '' : 'gesperrt';
+    const offen = i === anstehend || einrichtenOffen.has(s.id);
+    if (!offen) li.classList.add('zu');
     li.innerHTML = `<div class="kopf"><span class="haken">${s.fertig ? '✓' : i + 1}</span><span></span></div>` +
       '<p class="schritt-text"></p><div class="tasten"></div>';
     li.querySelector('.kopf span:last-child').textContent = s.titel;
+    if (i !== anstehend) {
+      // Erledigte und spätere Schritte aufklappen, um einen zu wiederholen.
+      const kopf = li.querySelector('.kopf');
+      kopf.setAttribute('role', 'button');
+      kopf.tabIndex = 0;
+      kopf.setAttribute('aria-expanded', String(offen));
+      kopf.onclick = () => {
+        if (einrichtenOffen.has(s.id)) einrichtenOffen.delete(s.id); else einrichtenOffen.add(s.id);
+        renderEinrichten();
+      };
+      kopf.onkeydown = (event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); kopf.onclick(); } };
+    }
     li.querySelector('.schritt-text').textContent = EINRICHTEN_TEXT[s.id] || '';
     const tasten = li.querySelector('.tasten');
     const taste = (text, fn, primaer) => {

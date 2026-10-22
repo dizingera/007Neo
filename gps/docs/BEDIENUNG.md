@@ -85,7 +85,7 @@ GPS-Meldung beweist keine tatsächlich korrekte Position.
 
 ## Teilbreiten-Hardware ab 1.5.41
 
-Unter **Lenkung → Teilbreiten-Hardware** stehen Ausgang, Adapteradresse und Port.
+Unter **Traktor & Gerät → Teilbreiten-Hardware** (unten auf der Seite) stehen Ausgang, Adapteradresse und Port.
 Solange keine Hardware gewählt ist, bleibt **Aus – nur Software** eingestellt;
 die bisherige Software-Markierung bleibt damit erhalten.
 
@@ -606,7 +606,7 @@ Radeinschlag (**Drehgeber: Zählwerte je Grad**) einmal ausmessen, nicht schätz
 
 ## Lenkung einrichten (Menü → Lenkung)
 
-Oben auf der Seite Lenkung führt **„Lenkung einrichten“** in acht Schritten von der
+Auf der Seite Lenkung, in der **Lenkwerkstatt**, führt **„Lenkung einrichten“** in acht Schritten von der
 Verbindung bis zur Probefahrt. Jeder Schritt hat seinen Knopf und bekommt einen
 Haken, wenn er erledigt ist; spätere bleiben gesperrt, bis die früheren fertig
 sind (nur der Not-Aus-Schritt steht frei). Am Stand arbeiten: Lenkung aus, Räder
@@ -759,16 +759,30 @@ Lenk-Assistenten abgestimmt werden.
 Links stehen alle Seiten in drei Gruppen:
 
 * **Im Feld:** Felder, Spuren, Arbeiten, Saatplan, Vorgewende & Wende.
-* **Maschine:** Traktor & Gerät (Maße, Lenkschärfe, Regelart) und **Lenkung** –
-  dort steht alles, was zum Lenkmotor gehört: *Lenkung einrichten*, Motortest,
-  Lenk-Assistent, Mitte lernen, Neigungssensor nullen und die Einstellungen
-  Lenkautomatik und Lenkmotor.
+* **Maschine:** Traktor & Gerät (Maße, Lenkschärfe, Regelart, unten die
+  Teilbreiten-Hardware) und **Lenkung**. Auf der Seite Lenkung von oben nach unten:
+  *Lenkung live*, der *Lenk-Assistent*, die *Lenkwerkstatt* als ein Ablauf (Maße des
+  Traktors, dann die Schritte Motor, Richtung, Freigabe, Probefahrt – nur der
+  anstehende Schritt ist offen, erledigte lassen sich zum Wiederholen antippen;
+  ganz unten Sicherung und Prüfbericht), zugeklappt die Werkzeuge am Stand
+  (Motortest, Mitte lernen, Neigungssensor) und die Einstellungen Lenkautomatik
+  und Lenkmotor.
 * **Werkstatt:** Einstellungen (Empfänger, RTK, Netzwerk, Anzeige), Daten & Geräte
   (Geräte suchen, Datenpaket, Sicherung), System (Zustand, Warnton,
   Aktualisierung, Rohdaten) und Einbau (Checkliste).
 
 In den Listen stehen vorn nur **Laden** und der zweite Handgriff; Umbenennen,
-Grenze abfahren und Löschen liegen unter **Mehr**.
+Grenze abfahren und Löschen liegen unter **Mehr**. Unter **Arbeiten** ist nur das
+zuletzt bearbeitete Feld aufgeklappt; die anderen öffnen sich mit einem Tipp auf den
+Feldnamen. Die **Einstellungen** sind zugeklappt – die Überschriften sind die Übersicht.
+
+**Windows Defender:** Am 17.10.2026 hat Defender die installierte `AgriPilot.exe`
+fälschlich als „Trojan:Win32/Bearfoos.B!ml“ entfernt – danach startete nichts mehr.
+Seit 1.5.46 trägt die exe Herstellerangaben, das macht den Fehlalarm seltener. Sicher
+ist: in der Windows-Sicherheit unter *Viren- & Bedrohungsschutz → Einstellungen
+verwalten → Ausschlüsse* den Ordner `C:\AgriPilot` eintragen – auf dem PC und auf
+jedem Tablet. Fehlt die exe, unter *Schutzverlauf* „Wiederherstellen“ wählen oder das
+Setup erneut ausführen; Felder und Einstellungen bleiben erhalten.
 
 ## Abstimmung bei Tempo, Latenz und Teilbreiten (Menü → Maschine)
 
