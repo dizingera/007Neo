@@ -855,6 +855,10 @@ Gebäude wirklich, statt nur das Raster. Nachts ist es gedämpft.
   Gerät. Vor der Fahrt ins Funkloch: **Menü → Felder → Luftbilder aller Felder laden**.
   Ein Tablet fragt zuerst den Master (der hat die Bilder meist schon), dann den Dienst.
 * Nach einer neuen Feldgrenze wird das Bild neu geholt.
+* **Rückfall:** Antwortet der Dienst nicht (am 22.10.2026 war das Landesamt stundenlang
+  nicht erreichbar), kommt das Sentinel-2-Satellitenbild des BKG – bundesweit frei, aber
+  nur 10 m je Bildpunkt: Felder, Wege und Dörfer ja, Gräben nein. Die Quellenangabe
+  unten sagt es dazu. Nach sechs Stunden wird das scharfe Luftbild erneut versucht.
 
 ## Das Menü
 

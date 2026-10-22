@@ -1786,9 +1786,13 @@ def create_app(config=None) -> FastAPI:
         arbeiter_pruefen(request)
         feld = luftbild_feld(field_id)
         try:
-            pfad, _ = await asyncio.to_thread(luftbild_holen, feld)
+            pfad, info = await asyncio.to_thread(luftbild_holen, feld)
         except luftbild_module.LuftbildFehler as exc:
             raise HTTPException(503, str(exc)) from exc
+        if info.get("grob"):
+            # Nur das scharfe Luftbild weitergeben - ein Ersatzbild holt sich der Arbeiter selbst,
+            # sonst hielte er es für das richtige und fragte nie wieder nach.
+            raise HTTPException(503, "Am Master liegt nur das grobe Ersatzbild")
         return FileResponse(pfad, media_type="image/jpeg")
 
     @api.post("/api/luftbild/alle")

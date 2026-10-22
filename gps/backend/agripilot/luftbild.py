@@ -20,6 +20,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import time
 import urllib.parse
 import urllib.request
 from pathlib import Path
@@ -30,6 +31,13 @@ from . import geo
 STANDARD_WMS = "https://owsproxy.lgl-bw.de/owsproxy/ows/WMS_LGL-BW_ATKIS_DOP_20_C"
 STANDARD_EBENE = "IMAGES_DOP_20_RGB"
 STANDARD_QUELLE = "Luftbild © LGL, www.lgl-bw.de (dl-de/by-2-0)"
+# Rückfall, wenn der Dienst nicht antwortet (am 22.10.2026 war das LGL stundenlang
+# nicht erreichbar): das Sentinel-2-Mosaik des BKG - bundesweit, frei, aber 10 m je
+# Bildpunkt. Felder, Wege und Dörfer erkennt man, Gräben nicht. Das scharfe Bild wird
+# nach ERSATZ_NEU_S erneut versucht.
+ERSATZ = ("https://sgx.geodatenzentrum.de/wms_sen2europe", "rgb",
+          "Satellitenbild © BKG, enthält Copernicus Sentinel-2-Daten (10 m) – Luftbild gerade nicht erreichbar")
+ERSATZ_NEU_S = 6 * 3600.0
 RAND_M = 150.0
 M_JE_PIXEL = 0.3
 MAX_PIXEL = 4096
@@ -96,9 +104,15 @@ def beschreibung(feld: dict, box, quelle: str) -> dict:
             "quelle": quelle}
 
 
+def _fehlertext(exc: Exception) -> str:
+    text = str(exc) or type(exc).__name__
+    return "keine Antwort (Zeitüberschreitung)" if "timed out" in text.lower() or "Timeout" in type(exc).__name__ else text
+
+
 def holen(feld: dict, ordner: Path, wms: str = STANDARD_WMS, ebene: str = STANDARD_EBENE,
           quelle: str = STANDARD_QUELLE, master: Optional[tuple[str, dict]] = None,
-          lesen: Callable[[str, dict, float], bytes] = _lesen, timeout: float = 30.0) -> tuple[Path, dict]:
+          lesen: Callable[[str, dict, float], bytes] = _lesen, timeout: float = 20.0,
+          ersatz: Optional[tuple[str, str, str]] = ERSATZ) -> tuple[Path, dict]:
     """Das Bild des Feldes - aus dem Zwischenspeicher, vom Master oder vom Dienst.
 
     ``master``: (Basisadresse, Kopfzeilen) eines Masters, der zuerst gefragt wird.
@@ -112,6 +126,12 @@ def holen(feld: dict, ordner: Path, wms: str = STANDARD_WMS, ebene: str = STANDA
     bild, meta = ordner / f"{kennung}.jpg", ordner / f"{kennung}.json"
     if bild.exists() and meta.exists():
         return bild, json.loads(meta.read_text(encoding="utf-8"))
+    # Ein frisches Ersatzbild nehmen, statt jedes Mal auf den ausgefallenen Dienst zu warten.
+    if ersatz is not None:
+        e_kennung = "ersatz-" + _kennung(feld, ersatz[0], ersatz[1], box)
+        e_bild, e_meta = ordner / f"{e_kennung}.jpg", ordner / f"{e_kennung}.json"
+        if e_bild.exists() and e_meta.exists() and time.time() - e_bild.stat().st_mtime < ERSATZ_NEU_S:
+            return e_bild, json.loads(e_meta.read_text(encoding="utf-8"))
     daten = b""
     fehler = []
     if master is not None:
@@ -119,20 +139,36 @@ def holen(feld: dict, ordner: Path, wms: str = STANDARD_WMS, ebene: str = STANDA
         try:
             daten = lesen(f"{basis.rstrip('/')}/api/sync/luftbild/{feld['id']}", kopf, timeout)
         except Exception as exc:  # noqa: BLE001 - dann eben direkt beim Dienst
-            fehler.append(f"Master: {exc}")
+            fehler.append(f"Master: {_fehlertext(exc)}")
             daten = b""
     if not ist_jpeg(daten):
         breite, hoehe = bildgroesse(feld, box)
         try:
             daten = lesen(getmap_url(wms, ebene, box, breite, hoehe), {}, timeout)
         except Exception as exc:  # noqa: BLE001
-            fehler.append(f"Dienst: {exc}")
+            fehler.append(f"Dienst: {_fehlertext(exc)}")
             daten = b""
+    if not ist_jpeg(daten) and ersatz is not None:
+        breite, hoehe = bildgroesse(feld, box)
+        faktor = min(1.0, 1024 / max(breite, hoehe))       # bei 10 m je Bildpunkt reicht das
+        try:
+            e_daten = lesen(getmap_url(ersatz[0], ersatz[1], box, max(64, int(breite * faktor)),
+                                       max(64, int(hoehe * faktor))), {}, timeout)
+        except Exception as exc:  # noqa: BLE001
+            fehler.append(f"Ersatz: {_fehlertext(exc)}")
+            e_daten = b""
+        if ist_jpeg(e_daten):
+            for alt in ordner.glob(f"ersatz-{feld['id']}-*"):
+                alt.unlink(missing_ok=True)
+            e_bild.write_bytes(e_daten)
+            info = {**beschreibung(feld, box, ersatz[2]), "grob": True}
+            e_meta.write_text(json.dumps(info), encoding="utf-8")
+            return e_bild, info
     if not ist_jpeg(daten):
         raise LuftbildFehler("Luftbild nicht erreichbar" + (f" ({'; '.join(fehler)})" if fehler else
                              " - der Dienst lieferte kein Bild"))
-    for alt in ordner.glob(f"{feld['id']}-*"):
-        alt.unlink(missing_ok=True)          # nach Grenzänderung: altes Bild weg
+    for alt in list(ordner.glob(f"{feld['id']}-*")) + list(ordner.glob(f"ersatz-{feld['id']}-*")):
+        alt.unlink(missing_ok=True)          # nach Grenzänderung oder Ersatzbild: altes Bild weg
     bild.write_bytes(daten)
     info = beschreibung(feld, box, quelle)
     meta.write_text(json.dumps(info), encoding="utf-8")
@@ -144,8 +180,11 @@ def vorhanden(feld: dict, ordner: Path, wms: str = STANDARD_WMS,
     box = ausschnitt(feld)
     if box is None:
         return None
-    kennung = _kennung(feld, wms, ebene, box)
-    bild, meta = Path(ordner) / f"{kennung}.jpg", Path(ordner) / f"{kennung}.json"
-    if bild.exists() and meta.exists():
-        return bild, json.loads(meta.read_text(encoding="utf-8"))
+    kennungen = [_kennung(feld, wms, ebene, box)]
+    if ERSATZ is not None:
+        kennungen.append("ersatz-" + _kennung(feld, ERSATZ[0], ERSATZ[1], box))
+    for kennung in kennungen:
+        bild, meta = Path(ordner) / f"{kennung}.jpg", Path(ordner) / f"{kennung}.json"
+        if bild.exists() and meta.exists():
+            return bild, json.loads(meta.read_text(encoding="utf-8"))
     return None

@@ -643,6 +643,7 @@ function luftbildLaden() {
       bild.src = info.bild;
       el('luftbildQuelle').textContent = info.quelle || '';
       el('luftbildQuelle').hidden = !luftbild.an;
+      if (info.grob) toast('Luftbild gerade nicht erreichbar – grobes Satellitenbild, später wird es nachgeholt');
     })
     .catch((fehler) => toast(`Luftbild: ${fehler.message}`))
     .finally(() => { luftbild.laedt = false; });

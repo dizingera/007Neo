@@ -118,6 +118,35 @@ class LuftbildHolen(unittest.TestCase):
             self.assertIn("Master", str(fehler.exception))
 
 
+class LuftbildErsatz(unittest.TestCase):
+    def test_coarse_fallback_when_the_service_is_down_and_kept_for_a_while(self):
+        aufrufe = []
+
+        def lesen(url, kopf, timeout):
+            aufrufe.append(url)
+            if "ersatz.example" in url:
+                return JPEG
+            raise TimeoutError("timed out")
+
+        with tempfile.TemporaryDirectory() as ordner:
+            ersatz = ("https://ersatz.example/wms", "rgb", "Ersatz")
+            pfad, info = luftbild.holen(FELD, Path(ordner), lesen=lesen, ersatz=ersatz)
+            self.assertTrue(info["grob"])
+            self.assertEqual(info["quelle"], "Ersatz")
+            n = len(aufrufe)
+            luftbild.holen(FELD, Path(ordner), lesen=lesen, ersatz=ersatz)
+            self.assertEqual(len(aufrufe), n)             # Ersatz frisch: Dienst nicht erneut abwarten
+
+    def test_timeout_reads_like_german(self):
+        def lesen(url, kopf, timeout):
+            raise TimeoutError("timed out")
+
+        with tempfile.TemporaryDirectory() as ordner:
+            with self.assertRaises(luftbild.LuftbildFehler) as f:
+                luftbild.holen(FELD, Path(ordner), lesen=lesen, ersatz=None)
+            self.assertIn("Zeitüberschreitung", str(f.exception))
+
+
 class ApiTests(unittest.TestCase):
     def test_diagnose_download_and_job_accuracy(self):
         with tempfile.TemporaryDirectory() as ordner:
