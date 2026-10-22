@@ -603,6 +603,7 @@ function zeichnen() {
   ctx.save();
   applyWorldTransform();
   drawGrid();
+  drawLuftbild();
   drawCoverage();
   drawBoundary();
   drawHeadland();
@@ -620,6 +621,59 @@ function zeichnen() {
 }
 
 /* Ein Raster als Boden: ohne Bezug wirkt eine leere Fläche wie Stillstand. */
+/* Luftbild unter der Karte (luftbild.py): ein Bild je Feld, mit dem Knopf ein- und ausgeblendet. */
+const luftbild = { an: gemerkt('luftbild') === 'an', feld: null, bild: null, rechteck: null, laedt: false };
+
+function luftbildLaden() {
+  const feld = state.live && state.live.field;
+  if (!luftbild.an || !feld || luftbild.laedt || luftbild.feld === feld.id) return;
+  luftbild.laedt = true;
+  luftbild.feld = feld.id;
+  luftbild.bild = null;
+  fetch(`/api/luftbild/${feld.id}`)
+    .then((r) => r.json().then((d) => { if (!r.ok) throw new Error(d.detail || r.status); return d; }))
+    .then((info) => {
+      const bild = new Image();
+      bild.onload = () => {
+        if (luftbild.feld !== info.feld_id) return;
+        luftbild.bild = bild;
+        luftbild.rechteck = info.rechteck;
+        zeichnenAnfordern();
+      };
+      bild.src = info.bild;
+      el('luftbildQuelle').textContent = info.quelle || '';
+      el('luftbildQuelle').hidden = !luftbild.an;
+    })
+    .catch((fehler) => toast(`Luftbild: ${fehler.message}`))
+    .finally(() => { luftbild.laedt = false; });
+}
+
+function luftbildSchalten(an) {
+  luftbild.an = an;
+  merken('luftbild', an ? 'an' : 'aus');
+  if (an) luftbild.feld = null;            // neu versuchen, auch nach einem Fehler
+  el('luftbildKnopf').classList.toggle('an', an);
+  el('luftbildKnopf').setAttribute('aria-pressed', String(an));
+  el('luftbildQuelle').hidden = !an || !el('luftbildQuelle').textContent;
+  zeichnenAnfordern();
+}
+el('luftbildKnopf').onclick = () => luftbildSchalten(!luftbild.an);
+luftbildSchalten(luftbild.an);
+
+function drawLuftbild() {
+  luftbildLaden();
+  const feld = state.live && state.live.field;
+  if (!luftbild.an || !luftbild.bild || !feld || luftbild.feld !== feld.id) return;
+  const [x0, y0, x1, y1] = luftbild.rechteck;
+  ctx.save();
+  // Nachts gedämpft, sonst überstrahlt das Bild Spuren und Fläche.
+  ctx.globalAlpha = document.body.classList.contains('tag') ? 0.95 : 0.55;
+  ctx.translate(x0, y1);
+  ctx.scale((x1 - x0) / luftbild.bild.width, -(y1 - y0) / luftbild.bild.height);
+  ctx.drawImage(luftbild.bild, 0, 0);
+  ctx.restore();
+}
+
 function drawGrid() {
   const [cx, cy] = viewCentre();
   const step = 10, reach = 400;
@@ -1470,7 +1524,19 @@ el('warnton').onchange = () => {
   merken('warnton', el('warnton').checked ? 'an' : 'aus');
   if (window.Warnungen) window.Warnungen.einstellen({ an: el('warnton').checked });
 };
-el('btnWarnProbe').onclick = () => window.Warnungen && window.Warnungen.probe('alarm');
+el('sprache').checked = gemerkt('sprache') !== 'aus';
+if (window.Warnungen) window.Warnungen.einstellen({ sprache: el('sprache').checked });
+el('sprache').onchange = () => {
+  merken('sprache', el('sprache').checked ? 'an' : 'aus');
+  if (window.Warnungen) window.Warnungen.einstellen({ sprache: el('sprache').checked });
+};
+el('btnWarnProbe').onclick = () => {
+  if (!window.Warnungen) return;
+  const gesprochen = window.Warnungen.probe('alarm');
+  el('spracheInfo').textContent = !el('sprache').checked ? 'Sprachansagen sind aus.'
+    : gesprochen ? (window.Warnungen.hatStimme() ? '' : 'Keine deutsche Stimme gefunden – es spricht die Standardstimme.')
+      : 'Dieses Gerät kann nicht sprechen (keine Sprachausgabe im Browser).';
+};
 
 el('btnSteer').onclick = async () => {
   const steering = state.live && state.live.steering;
@@ -2211,6 +2277,30 @@ el('btnGeraeteUebernehmen').onclick = async () => {
   el('geraeteRow').hidden = true;
 };
 
+/* Diagnosepaket: Zip mit allem zum Nachvollziehen - Download und Ablage im Datenordner. */
+el('btnDiagnose').onclick = async () => {
+  el('diagnoseInfo').textContent = 'Wird erstellt …';
+  try {
+    const antwort = await fetch('/api/diagnose', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ notiz: el('diagnoseNotiz').value.trim(), lenklive: lenkAufzeichnung.punkte }),
+    });
+    if (!antwort.ok) throw new Error(`Fehler ${antwort.status}`);
+    const name = (/filename="([^"]+)"/.exec(antwort.headers.get('Content-Disposition') || '') || [])[1]
+      || 'AgriPilot-Diagnose.zip';
+    const abgelegt = antwort.headers.get('X-Abgelegt');
+    const url = URL.createObjectURL(await antwort.blob());
+    const a = document.createElement('a');
+    a.href = url; a.download = name;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 30000);
+    el('diagnoseInfo').textContent = `${name} – im Ordner Downloads` + (abgelegt ? `, außerdem unter ${abgelegt}` : '');
+    el('diagnoseNotiz').value = '';
+  } catch (fehler) {
+    el('diagnoseInfo').textContent = `Nicht erstellt: ${fehler.message}`;
+  }
+};
+
 /* Lenkung live: Kurven, Kennzahlen und Befund - im Menü groß, auf der Karte klein. */
 const lenkAufzeichnung = new LenkLive.Aufzeichnung();
 const LENKLIVE_KARTE = 'agripilot.lenkLiveKarte';
@@ -2255,6 +2345,8 @@ function renderLenkLive() {
       return li;
     }));
     el('lenkLiveZahlen').textContent = lenkLiveZahlen(k);
+    el('lenkLiveArbeit').textContent = state.live && state.live.genauigkeit
+      ? `Laufende Arbeit: ${genauigkeitText(state.live.genauigkeit)}` : '';
   }
   if (aufKarte) {
     LenkLive.zeichnen(el('lenkLiveKlein'), lenkAufzeichnung, { sekunden: 30, schritte, kompakt: true });
@@ -2506,6 +2598,7 @@ async function refreshLists() {
   if (active === 'saatplan') renderSaatplan();
   if (active === 'system') { renderSystem(); renderRohdaten(); renderUpdate(); }
   if (active === 'lenkung') {
+    renderGenauigkeit();
     renderSystem();
     renderEinrichten();
     if (!settings.geladen) loadSettings();
@@ -2514,6 +2607,16 @@ async function refreshLists() {
   if (active === 'setup') renderSetup(await (await fetch('/api/checklist')).json());
   if (active === 'settings' && !settings.geladen) loadSettings();
 }
+
+el('btnLuftbilderAlle').onclick = async () => {
+  el('luftbilderInfo').textContent = 'Lade Luftbilder … (dauert je Feld ein paar Sekunden)';
+  const antwort = await api('POST', '/api/luftbild/alle');
+  if (!antwort) { el('luftbilderInfo').textContent = ''; return; }
+  const d = antwort.data;
+  el('luftbilderInfo').textContent = `${d.geholt} Luftbilder bereit` +
+    (d.fehler_gesamt ? ` · ${d.fehler_gesamt} nicht geholt: ${d.fehler[0]}` : ' – auch ohne Netz');
+  luftbild.feld = null;
+};
 
 el('btnRandspurenAlle').onclick = async () => {
   el('randspurenInfo').textContent = 'Lege an …';
@@ -2865,6 +2968,30 @@ async function myterraDatei(parameter) {
 
 el('btnMyterraExport').onclick = () => myterraDatei(el('myterraAlle').checked ? 'alle=1' : '');
 
+/* Wie genau gelenkt wurde - eine Zeile (genauigkeit.py). */
+function genauigkeitText(g) {
+  if (!g) return '';
+  const z = (x, n = 1) => Number(x).toLocaleString('de-DE', { minimumFractionDigits: n, maximumFractionDigits: n });
+  return `${z(g.effektiv_cm)} cm effektiv · 95 % unter ${z(g.p95_cm)} cm · höchstens ${z(g.max_cm, 0)} cm · ` +
+    `${z(g.lenkanteil * 100, 0)} % gelenkt` + (g.abgaben ? ` · ${g.abgaben}× abgegeben` : '');
+}
+
+async function renderGenauigkeit() {
+  const jobs = await fetch('/api/jobs').then((r) => r.json()).catch(() => []);
+  const host = el('genauigkeitListe');
+  host.innerHTML = '';
+  const mit = jobs.filter((j) => j.genauigkeit && j.ended_at).slice(0, 8);
+  if (!mit.length) {
+    host.innerHTML = '<p class="note">Noch keine Arbeit mit Lenkung aufgezeichnet.</p>';
+    return;
+  }
+  mit.forEach((j) => host.appendChild(item({
+    title: `${new Date(j.started_at * 1000).toLocaleDateString('de-DE')} · ${j.operation || 'Arbeit'} · ${j.area_ha.toFixed(2)} ha`,
+    sub: genauigkeitText(j.genauigkeit),
+    actions: [],
+  })));
+}
+
 function jobZeile(job) {
   const started = new Date(job.started_at * 1000);
   const minutes = job.ended_at ? (job.ended_at - job.started_at) / 60 : null;
@@ -2873,7 +3000,8 @@ function jobZeile(job) {
     sub: `${started.toLocaleString('de-DE')} · ${job.vehicle || 'Traktor'}` +
          (minutes ? ` · ${minutes.toFixed(0)} min` : ' · läuft') +
          ` · ${(job.distance_m / 1000).toFixed(1)} km` +
-         (job.overlap_ha ? ` · ${job.overlap_ha.toFixed(2)} ha doppelt` : ''),
+         (job.overlap_ha ? ` · ${job.overlap_ha.toFixed(2)} ha doppelt` : '') +
+         (job.genauigkeit ? `\nLenkung: ${genauigkeitText(job.genauigkeit)}` : ''),
     actions: [],
   });
   row.dataset.job = job.id;

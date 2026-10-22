@@ -61,6 +61,7 @@ CREATE TABLE IF NOT EXISTS jobs (
     overlap_ha REAL NOT NULL DEFAULT 0,
     working_time_s REAL NOT NULL DEFAULT 0,
     coverage BLOB,
+    genauigkeit TEXT NOT NULL DEFAULT '',  -- JSON aus genauigkeit.py, '' = nicht gelenkt
     updated_at REAL NOT NULL,
     deleted INTEGER NOT NULL DEFAULT 0
 );
@@ -179,6 +180,8 @@ class Storage:
         # Seit 1.5.7: mit welchem Traktor eine Arbeit gefahren wurde (Gerät steht in vehicle).
         if "tractor" not in {c[1] for c in self.db.execute("PRAGMA table_info(jobs)")}:
             self.db.execute("ALTER TABLE jobs ADD COLUMN tractor TEXT NOT NULL DEFAULT ''")
+        if "genauigkeit" not in {c[1] for c in self.db.execute("PRAGMA table_info(jobs)")}:
+            self.db.execute("ALTER TABLE jobs ADD COLUMN genauigkeit TEXT NOT NULL DEFAULT ''")
 
     def close(self) -> None:
         if self.vor_schliessen is not None:
@@ -603,4 +606,8 @@ def _line_row(row: sqlite3.Row) -> dict:
 def _job_row(row: sqlite3.Row) -> dict:
     record = dict(row)
     record.pop("coverage", None)  # blob stays out of JSON responses
+    try:
+        record["genauigkeit"] = json.loads(record.get("genauigkeit") or "null")
+    except ValueError:
+        record["genauigkeit"] = None
     return record

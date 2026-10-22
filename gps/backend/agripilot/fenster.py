@@ -231,6 +231,11 @@ def oeffnen(port: int) -> int:
     bruecke._fenster = fenster
     # False hält das Fenster offen: wer bei der Rückfrage "Nein" sagt, arbeitet weiter.
     fenster.events.closing += lambda: beenden_erlaubt(url)
+    # Downloads (Diagnosepaket, CSV, Prüfbericht) landen im Ordner Downloads -
+    # ohne diese Freigabe verwirft WebView2 jeden Download stillschweigend.
+    einstellungen = getattr(webview, "settings", None)
+    if isinstance(einstellungen, dict):
+        einstellungen["ALLOW_DOWNLOADS"] = True
     try:
         webview.start(private_mode=False, storage_path=speicherort())
     except Exception:  # noqa: BLE001 - etwa WebView2 fehlt: dann wenigstens die Anzeige

@@ -152,6 +152,7 @@ def jobs_summary_csv(store: Storage, field_id: Optional[str] = None) -> str:
     writer.writerow([
         "datum", "feld", "fahrzeug", "arbeit", "dauer_h", "strecke_km",
         "flaeche_ha", "ueberlappung_ha", "geraet",
+        "lenkung_effektiv_cm", "lenkung_95prozent_cm", "gelenkt_prozent", "lenkung_abgaben",
     ])
     fields = {f["id"]: f["name"] for f in store.list_fields()}
     for job in store.list_jobs(field_id=field_id, limit=2000):
@@ -162,8 +163,17 @@ def jobs_summary_csv(store: Storage, field_id: Optional[str] = None) -> str:
             job["vehicle"], job["operation"], f"{duration_h:.2f}",
             f'{job["distance_m"] / 1000:.2f}', f'{job["area_ha"]:.3f}',
             f'{job["overlap_ha"]:.3f}', job["device_id"],
+            *_genauigkeit_spalten(job.get("genauigkeit")),
         ])
     return buffer.getvalue()
+
+
+def _genauigkeit_spalten(g) -> list[str]:
+    """Wie genau gelenkt wurde (genauigkeit.py) - leer, wenn nicht gelenkt wurde."""
+    if not isinstance(g, dict):
+        return ["", "", "", ""]
+    return [f'{g.get("effektiv_cm", 0):.1f}', f'{g.get("p95_cm", 0):.1f}',
+            f'{100 * g.get("lenkanteil", 0):.0f}', str(g.get("abgaben", 0))]
 
 
 def _xml(text: str) -> str:

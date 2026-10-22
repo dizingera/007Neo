@@ -68,3 +68,16 @@ test('an obstacle ahead alarms once per obstacle', () => {
   assert.match(erst.text, /Mast in 18 m/);
   assert.ok(!ereignisse({ hindernis_warnung: hd }, { hindernis_warnung: hd }, true).some((x) => x.id.startsWith('hindernis')));
 });
+
+test('every warning has something to say; lane and RTK return are only spoken', () => {
+  const vorher = { fix: { rank: 3 }, steering: { armed: true, command: { engaged: true } }, fahrgasse_aktiv: false,
+    headland: { alarm: false } };
+  const jetzt = { fix: { rank: 4, fix_label: 'RTK fix' }, steering: { armed: true, command: { engaged: true } },
+    fahrgasse_aktiv: true, headland: { alarm: true, rest_m: 19.6 } };
+  const e = ereignisse(vorher, jetzt, true);
+  const nachId = Object.fromEntries(e.map((x) => [x.id, x]));
+  assert.strictEqual(nachId['fix-zurueck'].stufe, 'still');
+  assert.strictEqual(nachId.fahrgasse.ansage, 'Fahrgasse');
+  assert.strictEqual(nachId.vorgewende.ansage, 'Vorgewende in 20 Metern');
+  e.forEach((x) => assert.ok(x.ansage, x.id));
+});

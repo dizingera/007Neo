@@ -29,6 +29,7 @@
           stufe: grund === 'Fahrer hat eingegriffen' ? 'info'
             : grund === 'Rückwärtsfahrt' ? 'warn' : 'alarm',
           text: `Lenkung aus: ${grund}`,
+          ansage: `Lenkung aus. ${grund}`,
         });
       }
     }
@@ -46,7 +47,18 @@
         text: !fix ? 'Kein GPS mehr' : bruecke
           ? `Kein RTK – überbrückt, noch ${Math.round(jetzt.rtk_bruecke.rest_s)} s`
           : `Kein RTK mehr: ${fix.fix_label}`,
+        ansage: !fix ? 'Kein GPS mehr' : bruecke
+          ? `RTK weg. Überbrückt, noch ${Math.round(jetzt.rtk_bruecke.rest_s)} Sekunden`
+          : 'RTK weg',
       });
+    }
+    // RTK wieder da, während gearbeitet wird: nur angesagt.
+    if (braucht && vorFix && vorFix.rank < 4 && fix && fix.rank >= 4) {
+      liste.push({ id: 'fix-zurueck', stufe: 'still', text: 'RTK wieder da', ansage: 'RTK wieder da' });
+    }
+    // Fahrgasse: beim Einfahren in eine Fahrgassenspur - nur angesagt.
+    if (jetzt.fahrgasse_aktiv && !(vorher && vorher.fahrgasse_aktiv)) {
+      liste.push({ id: 'fahrgasse', stufe: 'still', text: 'Fahrgasse', ansage: 'Fahrgasse' });
     }
 
     // Hindernis voraus: einmal je Hindernis, sobald es in Reichweite kommt.
@@ -54,19 +66,22 @@
     const vorHd = vorher && vorher.hindernis_warnung;
     if (hd && (!vorHd || vorHd.id !== hd.id)) {
       liste.push({ id: 'hindernis-' + hd.id, stufe: 'alarm',
-        text: `Achtung: ${hd.name} in ${Math.round(hd.abstand_m)} m` });
+        text: `Achtung: ${hd.name} in ${Math.round(hd.abstand_m)} m`,
+        ansage: `Achtung. ${hd.name} in ${Math.round(hd.abstand_m)} Metern` });
     }
 
     // Vorgewende kommt näher: einmal, beim Überschreiten der Schwelle.
     const vorAlarm = !!(vorher && vorher.headland && vorher.headland.alarm);
     const jetztAlarm = !!(jetzt.headland && jetzt.headland.alarm);
     if (jetztAlarm && !vorAlarm && jetzt.headland.rest_m > 0) {
-      liste.push({ id: 'vorgewende', stufe: 'warn', text: 'Vorgewende naht' });
+      liste.push({ id: 'vorgewende', stufe: 'warn', text: 'Vorgewende naht',
+        ansage: `Vorgewende in ${Math.round(jetzt.headland.rest_m)} Metern` });
     }
 
     // Verbindung zum Gerät weg, während gelenkt wurde.
     if (verbunden === false && vorSteuer && vorSteuer.command && vorSteuer.command.engaged) {
-      liste.push({ id: 'verbindung', stufe: 'alarm', text: 'Verbindung zum Gerät verloren' });
+      liste.push({ id: 'verbindung', stufe: 'alarm', text: 'Verbindung zum Gerät verloren',
+        ansage: 'Verbindung verloren' });
     }
     return liste;
   }
@@ -80,6 +95,7 @@
 
   let kontext = null;
   let an = true;
+  let sprache = true;
   let laut = 0.5;
   const zuletzt = {};          // id -> Zeit, damit ein flackernder Zustand nicht dauerpiept
   const SPERRE_MS = 8000;
@@ -93,7 +109,34 @@
     } catch (e) { /* ohne Ton weiterarbeiten */ }
   }
 
+  /* Sprachansage über die Stimme des Geräts (Windows: z.B. „Hedda“, Android: Google).
+     Ohne Netz, ohne Zusatzprogramm. Ein Alarm unterbricht, was gerade gesprochen wird. */
+  function stimme() {
+    const s = root.speechSynthesis;
+    if (!s) return null;
+    const stimmen = s.getVoices() || [];
+    return stimmen.find((v) => /^de(-|_|$)/i.test(v.lang) && /hedda|katja|anna|google/i.test(v.name))
+      || stimmen.find((v) => /^de(-|_|$)/i.test(v.lang)) || null;
+  }
+
+  function sprechen(text, dringend) {
+    const s = root.speechSynthesis;
+    if (!sprache || !s || !text || typeof root.SpeechSynthesisUtterance !== 'function') return false;
+    try {
+      if (dringend) s.cancel();
+      const satz = new root.SpeechSynthesisUtterance(text);
+      satz.lang = 'de-DE';
+      const v = stimme();
+      if (v) satz.voice = v;
+      satz.rate = 1.05;
+      satz.volume = Math.max(0.2, laut * 2);
+      s.speak(satz);
+      return true;
+    } catch (e) { return false; }
+  }
+
   function abspielen(stufe) {
+    if (stufe === 'still') return;
     const muster = MUSTER[stufe] || MUSTER.warn;
     try {
       if (root.navigator && root.navigator.vibrate) root.navigator.vibrate(muster.vibration);
@@ -125,6 +168,7 @@
       if (zuletzt[e.id] && nun - zuletzt[e.id] < SPERRE_MS) return;
       zuletzt[e.id] = nun;
       abspielen(e.stufe);
+      sprechen(e.ansage, e.stufe === 'alarm');
       ausgeloest.push(e);
     });
     return ausgeloest;
@@ -134,9 +178,16 @@
     ereignisse, pruefen, freischalten,
     einstellen(neu) {
       if (neu.an != null) an = !!neu.an;
+      if (neu.sprache != null) sprache = !!neu.sprache;
       if (neu.laut != null) laut = Math.max(0, Math.min(1, neu.laut));
     },
-    probe(stufe) { freischalten(); abspielen(stufe || 'alarm'); },
+    probe(stufe) {
+      freischalten();
+      abspielen(stufe || 'alarm');
+      return sprechen('Sprachansage. Vorgewende in 20 Metern', true);
+    },
+    sprechen,
+    hatStimme() { return Boolean(root.speechSynthesis && stimme()); },
   };
   root.Warnungen = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;

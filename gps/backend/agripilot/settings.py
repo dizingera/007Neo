@@ -373,6 +373,12 @@ GRUPPEN: list[Gruppe] = [
                        "Bildschirm-Wachhalten nur so. Papiere erzeugt "
                        "scripts/make_cert.sh auf dem Pi."),
             Feld("server.tls_key", "Schlüssel (HTTPS)"),
+            Feld("server.luftbild_wms", "Luftbild-Dienst (WMS)", sofort=True,
+                 hilfe="Vorgabe: Orthophotos DOP20 des LGL Baden-Württemberg (Open Data). In Bayern: "
+                       "https://geoservices.bayern.de/od/wms/dop/v1/dop40 mit Ebene by_dop40c."),
+            Feld("server.luftbild_ebene", "Luftbild-Ebene", sofort=True),
+            Feld("server.luftbild_quelle", "Luftbild-Quellenangabe", sofort=True,
+                 hilfe="Steht unten auf der Karte, solange das Luftbild an ist - die Lizenz verlangt sie."),
             Feld("server.backup_dir", "Zweiter Sicherungsort", sofort=True,
                  hilfe="Z.B. ein USB-Stick (E:/AgriPilot oder /media/usb/agripilot). "
                        "Der Ordner muss existieren; fehlt der Stick, wird nur lokal "

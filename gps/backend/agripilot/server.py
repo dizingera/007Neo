@@ -40,6 +40,8 @@ from . import update as update_module
 from . import backup as backup_module
 from . import onlineupdate as onlineupdate_module
 from . import exe as exe_module
+from . import diagnose as diagnose_module
+from . import luftbild as luftbild_module
 from . import teilen as teilen_module
 from . import myterra as myterra_module
 from .actuators import SimulatorOutput, build_output
@@ -611,7 +613,8 @@ def create_app(config=None) -> FastAPI:
         Im eigenen Netz fällt die Sperre nicht auf.
         """
         von_aussen = any(k in request.headers for k in ("cf-connecting-ip", "cf-ray", "x-forwarded-for"))
-        if von_aussen and request.url.path not in VON_AUSSEN_ERLAUBT:
+        if (von_aussen and request.url.path not in VON_AUSSEN_ERLAUBT
+                and not request.url.path.startswith("/api/sync/luftbild/")):
             return JSONResponse({"detail": "Von außen ist nur der Abgleich erreichbar"}, status_code=403)
         return await call_next(request)
 
@@ -1735,6 +1738,122 @@ def create_app(config=None) -> FastAPI:
         if eigene and not eigene["simulator"]:
             engine.flotte.melden(config.network.device_id, eigene)
         return {"flotte": engine.flotte.liste(ohne=geraet)}
+
+    # -- Luftbild ---------------------------------------------------------
+
+    def luftbild_ordner() -> Path:
+        return Path(config.server.data_dir) / "luftbild"
+
+    def luftbild_holen(feld: dict):
+        s = config.server
+        master = None
+        if not config.is_master and config.network.master_url:
+            kopf = ({"X-AgriPilot-Token": config.network.sync_token} if config.network.sync_token else {})
+            master = (config.network.master_url, kopf)
+        return luftbild_module.holen(feld, luftbild_ordner(), s.luftbild_wms, s.luftbild_ebene,
+                                     s.luftbild_quelle, master=master)
+
+    def luftbild_feld(field_id: str) -> dict:
+        feld = store.get_field(field_id)
+        if feld is None:
+            raise HTTPException(404, "Feld nicht gefunden")
+        return feld
+
+    @api.get("/api/luftbild/{field_id}")
+    async def luftbild_info(field_id: str):
+        """Wo das Luftbild des Feldes liegt - holt es, wenn es noch fehlt."""
+        feld = luftbild_feld(field_id)
+        try:
+            _, info = await asyncio.to_thread(luftbild_holen, feld)
+        except luftbild_module.LuftbildFehler as exc:
+            raise HTTPException(503, str(exc)) from exc
+        return {**info, "bild": f"/api/luftbild/{field_id}/bild"}
+
+    @api.get("/api/luftbild/{field_id}/bild")
+    async def luftbild_bild(field_id: str):
+        from fastapi.responses import FileResponse
+        feld = luftbild_feld(field_id)
+        s = config.server
+        da = luftbild_module.vorhanden(feld, luftbild_ordner(), s.luftbild_wms, s.luftbild_ebene)
+        if da is None:
+            raise HTTPException(404, "Noch kein Luftbild - erst /api/luftbild/{id} abrufen")
+        return FileResponse(da[0], media_type="image/jpeg", headers={"Cache-Control": "max-age=86400"})
+
+    @api.get("/api/sync/luftbild/{field_id}")
+    async def luftbild_fuer_arbeiter(field_id: str, request: Request):
+        """Der Master gibt sein Luftbild an Arbeiter heraus (mit Arbeitercode)."""
+        from fastapi.responses import FileResponse
+        arbeiter_pruefen(request)
+        feld = luftbild_feld(field_id)
+        try:
+            pfad, _ = await asyncio.to_thread(luftbild_holen, feld)
+        except luftbild_module.LuftbildFehler as exc:
+            raise HTTPException(503, str(exc)) from exc
+        return FileResponse(pfad, media_type="image/jpeg")
+
+    @api.post("/api/luftbild/alle")
+    async def luftbild_alle():
+        """Die Luftbilder aller Felder holen - vor der Fahrt ins Funkloch."""
+        geholt, fehler = 0, []
+        for feld in store.list_fields():
+            if len(feld.get("boundary") or []) < 3:
+                continue
+            try:
+                await asyncio.to_thread(luftbild_holen, feld)
+                geholt += 1
+            except luftbild_module.LuftbildFehler as exc:
+                fehler.append(f"{feld['name']}: {exc}")
+        return ok({"geholt": geholt, "fehler": fehler[:5], "fehler_gesamt": len(fehler)})
+
+    # -- Diagnosepaket ----------------------------------------------------
+
+    @api.post("/api/diagnose")
+    async def diagnosepaket(payload: dict = Body(default={})):
+        """Zip mit allem, was man zum Nachvollziehen eines Fehlers braucht - ohne Geheimnisse."""
+        daten = Path(config.server.data_dir)
+        jetzt = time.strftime("%Y%m%d-%H%M%S")
+        jobs = store.list_jobs(limit=1)
+        spur = ""
+        if jobs:
+            punkte = store.track_points(jobs[0]["id"])[-3000:]
+            if punkte:
+                spalten = list(punkte[0].keys())
+                spur = "\n".join([";".join(spalten)] + [";".join(str(p[k]) for k in spalten) for p in punkte])
+        dateien = {}
+        aufnahmen = recorder_module.liste(application.aufzeichnung.ordner)
+        if aufnahmen and aufnahmen[0]["groesse_b"] <= diagnose_module.ROHDATEN_MAX_B \
+                and time.time() - aufnahmen[0]["geaendert_at"] < diagnose_module.ROHDATEN_MAX_ALTER_S:
+            dateien["rohdaten/" + aufnahmen[0]["datei"]] = Path(application.aufzeichnung.ordner) / aufnahmen[0]["datei"]
+        teile = {
+            "LIESMICH.txt": ("AgriPilot-Diagnosepaket\n"
+                             f"Version {VERSION}, erstellt {time.strftime('%d.%m.%Y %H:%M:%S')}\n"
+                             f"Gerät: {config.network.device_name or config.network.device_id} "
+                             f"({config.network.role})\n\nNotiz des Fahrers:\n{payload.get('notiz') or '-'}\n\n"
+                             "Passwörter, Arbeitercode und Zugangsnamen sind geschwärzt.\n"),
+            "zustand.json": engine.state(),
+            "system.json": application.system_status(),
+            "einstellungen.json": settings_module.werte(config),
+            "letzte_arbeit.json": jobs[0] if jobs else None,
+            "letzte_arbeit_spurpunkte.csv": spur or None,
+            "lenkung_live.json": payload.get("lenklive"),
+            "meldungen.txt": "\n".join(engine.messages),
+            "protokoll.txt": diagnose_module.protokoll_ende(daten / "agripilot.log") or None,
+        }
+        paket = await asyncio.to_thread(diagnose_module.packen, teile, dateien)
+        name = f"AgriPilot-Diagnose-{jetzt}.zip"
+        # Zusätzlich im Datenordner ablegen: falls der Download im Browser nicht ankommt,
+        # liegt das Paket dort (die letzten zehn bleiben).
+        ablage = daten / "diagnose"
+        try:
+            ablage.mkdir(parents=True, exist_ok=True)
+            (ablage / name).write_bytes(paket)
+            for alt in sorted(ablage.glob("AgriPilot-Diagnose-*.zip"))[:-10]:
+                alt.unlink(missing_ok=True)
+        except OSError:
+            pass
+        return Response(paket, media_type="application/zip",
+                        headers={"Content-Disposition": f'attachment; filename="{name}"',
+                                 "X-Abgelegt": str(ablage / name)})
 
     # -- Hindernisse ------------------------------------------------------
 

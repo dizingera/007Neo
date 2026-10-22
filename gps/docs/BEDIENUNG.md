@@ -801,6 +801,61 @@ als blaue Pfeile mit Namen – praktisch, wenn zwei auf demselben Schlag arbeite
 * Ein Gerät im Simulator wird als „Simulator“ gekennzeichnet; der Master meldet sich
   selbst nur mit echtem Empfänger.
 
+## Diagnosepaket (Menü → System, ab 1.5.48)
+
+Passt am Traktor etwas nicht: unter **Menü → System → Diagnosepaket** kurz
+aufschreiben, was passiert ist, dann **Diagnosepaket erstellen**. Es entsteht eine
+Zip-Datei mit Zustand, Einstellungen, Protokoll, den Spurpunkten der letzten Arbeit,
+den Kurven von *Lenkung live* (letzte 3 Minuten) und der jüngsten Rohdaten-Aufzeichnung
+(wenn eine läuft oder lief). Die Datei landet im Ordner **Downloads** und zusätzlich
+unter `C:\ProgramData\AgriPilot\diagnose` (die letzten zehn). Weiterschicken an den,
+der helfen soll. **Passwörter, Arbeitercode und Zugangsnamen sind geschwärzt.**
+
+Tipp: Bei einem Fehler, der sich wiederholt, vorher unter *System → Rohdaten
+aufzeichnen* die Aufzeichnung starten – dann lässt sich die Fahrt am Schreibtisch
+genau nachspielen.
+
+## Genauigkeit je Arbeit (ab 1.5.48)
+
+Zu jeder Arbeit merkt sich AgriPilot, wie genau gelenkt wurde – gemessen nur in
+Fahrt auf der Spur mit eingeschalteter Lenkung, nicht in der Wende:
+
+* **effektiv** (das, was man spürt), **95 % unter** und **höchstens** in cm,
+* **gelenkt**: welcher Teil der Fahrt die Automatik gelenkt hat,
+* **abgegeben**: wie oft die Lenkung von sich aus abgegeben hat (RTK weg, zu weit
+  daneben, Fahrer musste eingreifen) – nicht, wenn der Fahrer ausschaltet oder am
+  Vorgewende langsam wird.
+
+Zu sehen bei jeder Arbeit unter **Menü → Arbeiten**, gesammelt unter **Menü →
+Lenkung → Lenkung live → Genauigkeit der letzten Arbeiten**, während der Arbeit dort
+als „Laufende Arbeit“, und in der CSV-Liste fürs Büro (vier zusätzliche Spalten). So
+sieht man über Wochen, ob die Abstimmung besser wird.
+
+## Sprachansagen (ab 1.5.48)
+
+Zusätzlich zum Ton sagt das Tablet an: „Vorgewende in 20 Metern“, „Fahrgasse“,
+„Achtung. Mast in 15 Metern“, „RTK weg. Überbrückt, noch 60 Sekunden“, „RTK wieder
+da“, „Lenkung aus …“, „Verbindung verloren“. Gesprochen wird mit der Stimme des Geräts,
+ohne Netz. Ein- und ausschalten unter **Menü → System → Sprachansagen**, mit **Probe**
+hören. Fehlt eine deutsche Stimme, sagt *Probe* das; unter Windows unter
+*Einstellungen → Zeit und Sprache → Sprache* „Deutsch“ mit Sprachausgabe hinzufügen.
+
+## Luftbild (Knopf rechts auf der Karte, ab 1.5.48)
+
+Der Knopf mit dem Bild-Symbol (zwischen Ansicht und Tag/Nacht) blendet unter dem
+geladenen Feld ein **Luftbild** ein und wieder aus. Es zeigt Wege, Gräben, Bäume und
+Gebäude wirklich, statt nur das Raster. Nachts ist es gedämpft.
+
+* **Quelle:** die freien Orthophotos (DOP20, 20 cm) des Landesamts für
+  Geoinformation Baden-Württemberg. Unten auf der Karte steht die Quellenangabe, die
+  die Lizenz verlangt. Für Felder in Bayern unter *Einstellungen → Anzeige und Daten*
+  den Dienst `https://geoservices.bayern.de/od/wms/dop/v1/dop40` mit Ebene
+  `by_dop40c` eintragen.
+* **Ohne Netz:** jedes Bild wird beim ersten Einblenden geholt und bleibt auf dem
+  Gerät. Vor der Fahrt ins Funkloch: **Menü → Felder → Luftbilder aller Felder laden**.
+  Ein Tablet fragt zuerst den Master (der hat die Bilder meist schon), dann den Dienst.
+* Nach einer neuen Feldgrenze wird das Bild neu geholt.
+
 ## Das Menü
 
 Links stehen alle Seiten in drei Gruppen:

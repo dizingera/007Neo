@@ -15,7 +15,7 @@ function umgebung({ menue = false, karte = false, tab = 'lenkung', sichtbar = tr
   const elemente = {
     sheet: { hidden: !menue }, lenkLiveFenster: { hidden: !karte }, lenkLiveZeit: { value: '60' },
     lenkLiveGross: {}, lenkLiveKlein: {}, lenkLiveBefund: { dataset: {} },
-    lenkLiveTipps: { replaceChildren() {} }, lenkLiveZahlen: {}, lenkLiveKurz: { dataset: {} },
+    lenkLiveTipps: { replaceChildren() {} }, lenkLiveZahlen: {}, lenkLiveKurz: { dataset: {} }, lenkLiveArbeit: {},
   };
   const kontext = {
     state: { live: { profile: { regelart: 'voraus' }, abstimmung: { schritte: [] } } },

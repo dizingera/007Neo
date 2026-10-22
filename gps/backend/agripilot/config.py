@@ -259,6 +259,10 @@ class ServerConfig:
     # Aktualisierung über das Netz (nur in der .exe-Version). Gesucht wird von
     # allein, eingespielt nur auf Druck des Fahrers.
     update_online: bool = True
+    # Luftbild unter der Karte (luftbild.py): WMS-Dienst, Ebene, Quellenangabe.
+    luftbild_wms: str = "https://owsproxy.lgl-bw.de/owsproxy/ows/WMS_LGL-BW_ATKIS_DOP_20_C"
+    luftbild_ebene: str = "IMAGES_DOP_20_RGB"
+    luftbild_quelle: str = "Luftbild © LGL, www.lgl-bw.de (dl-de/by-2-0)"
     update_repo: str = "dizingera/007Neo"
     update_api: str = "https://api.github.com"
 

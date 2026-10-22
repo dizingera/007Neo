@@ -43,6 +43,8 @@ from .kalman import Positionsfilter
 from . import hindernisse as hindernisse_module
 from .flotte import Flotte
 from .rtkbruecke import RtkBruecke
+from .genauigkeit import Genauigkeit
+import json
 from .writer import HintergrundSchreiber
 
 TRACK_MIN_DISTANCE_M = 1.0
@@ -104,6 +106,7 @@ class Engine:
 
         self.positionsfilter = Positionsfilter()
         self.rtk_bruecke = RtkBruecke()
+        self.genauigkeit = Genauigkeit()     # wie genau bei der laufenden Arbeit gelenkt wird
         # Hindernisse des geladenen Feldes in lokalen Metern (hindernisse.py).
         self._hindernisse: list[dict] = []
         self._hindernisse_feld: Optional[str] = None
@@ -1494,6 +1497,7 @@ class Engine:
             "area_ha": self.coverage.area_ha,
             "overlap_ha": self.coverage.overlap_m2 / 10_000.0,
             "working_time_s": self.working_time_s,
+            "genauigkeit": self._genauigkeit_json(),
         }
 
         def schreiben(store: storage.Storage) -> None:
@@ -1778,6 +1782,7 @@ class Engine:
         self.store.update_job(self.job["id"], reference_spacing_m=self.profile.spacing_m)
         self.distance_m = 0.0
         self.working_time_s = 0.0
+        self.genauigkeit.zuruecksetzen(self.steering.abgaben if self.steering else 0)
         self.note(f"Arbeit gestartet{': ' + operation if operation else ''}")
         self._checkpoint_at = time.time()
         self._remember_session()
@@ -1797,6 +1802,7 @@ class Engine:
             overlap_ha=self.coverage.overlap_m2 / 10_000.0,
             working_time_s=self.working_time_s,
             coverage=self.coverage.pack(),
+            genauigkeit=self._genauigkeit_json(),
         )
         job = self.store.get_job(self.job["id"])
         self.job = None
@@ -2094,6 +2100,13 @@ class Engine:
                                      and not self.heading_filter.bestaetigung_offen)
         command = self.steering.update(self.guidance, fix, context)
         self._abstimmung_beobachten(command.engaged, fix)
+        if self.job is not None:
+            jetzt = fix.received_at or time.time()
+            dt = jetzt - self._genau_at if getattr(self, "_genau_at", None) else 0.0
+            self._genau_at = jetzt
+            self.genauigkeit.messen(
+                self.guidance.cross_track_m, command.engaged,
+                self.guidance.active and self.turn is None and fix.speed_ms > 0.5, dt)
         # On the simulator, close the loop so autosteer can be demonstrated and
         # tuned without a machine.
         #
@@ -2264,6 +2277,8 @@ class Engine:
                 "compensation": self.config.imu.terrain_compensation,
             } if self.imu is not None else None),
             "steering": self.steering.status() if self.steering else None,
+            "genauigkeit": self.genauigkeit.ergebnis(self.steering.abgaben if self.steering else 0)
+                           if self.job else None,
             "rtk_bruecke": self.rtk_bruecke.status(time.time(), self.config.steering.rtk_ueberbrueckung_s),
             "hindernisse": [{k: h[k] for k in ("id", "name", "x", "y", "radius_m")} for h in self._hindernisse],
             "hindernis_warnung": self.hindernis_warnung,
@@ -2272,6 +2287,10 @@ class Engine:
                            else {"modus": "aus"}),
             "messages": self.messages[-6:],
         }
+
+    def _genauigkeit_json(self) -> str:
+        ergebnis = self.genauigkeit.ergebnis(self.steering.abgaben if self.steering else 0)
+        return json.dumps(ergebnis) if ergebnis else ""
 
     # -- Hindernisse ------------------------------------------------------
 

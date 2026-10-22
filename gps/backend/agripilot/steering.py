@@ -45,6 +45,11 @@ class SteerCommand:
         }
 
 
+# Abschalten, das zum Arbeiten gehört und nichts über die Lenkung sagt.
+GEWOLLTE_GRUENDE = frozenset({"vom Fahrer ausgeschaltet", "zu langsam", "keine Spur aktiv",
+                              "Rückwärtsfahrt", "System wird beendet", "nicht scharf", "Aktualisierung"})
+
+
 class SteeringController:
     def __init__(self, config, output: Optional[SteerOutput] = None,
                  simulator: bool = False) -> None:
@@ -55,7 +60,10 @@ class SteeringController:
         self.simulator = simulator
         self.armed = False           # vom Fahrer gesetzt, geht bei jedem Stopp weg
         self.rueckwaerts = False     # setzt die Engine aus dem Kurs; Rückwärts lenkt nichts
-        self.rtk_ueberbrueckt = False  # setzt die Engine: kurzer RTK-Ausfall wird überbrückt
+        self.rtk_ueberbrueckt = False
+        # Wie oft die Lenkung von sich aus abgegeben hat, während sie lenkte (nicht der
+        # Fahrer, nicht das Vorgewende) - für die Genauigkeit je Arbeit (genauigkeit.py).
+        self.abgaben = 0  # setzt die Engine: kurzer RTK-Ausfall wird überbrückt
         self.command = SteerCommand()
         self.last_sent_at = 0.0
         self.max_rate_deg_s = 25.0
@@ -85,6 +93,8 @@ class SteeringController:
     def disarm(self, reason: str = "vom Fahrer ausgeschaltet") -> None:
         if self.armed:
             self.disengage_count += 1
+            if self.command.engaged and reason not in GEWOLLTE_GRUENDE:
+                self.abgaben += 1
         self.armed = False
         self.command = SteerCommand(reason=reason)
         self.output.command(False, 0.0, SteerContext())
@@ -104,6 +114,8 @@ class SteeringController:
         if blocked:
             if self.command.engaged:
                 self.disengage_count += 1
+                if blocked not in GEWOLLTE_GRUENDE:
+                    self.abgaben += 1
             self.command = SteerCommand(
                 engaged=False, angle_deg=0.0, reason=blocked,
                 speed_ms=fix.speed_ms, cross_track_m=guidance.cross_track_m,

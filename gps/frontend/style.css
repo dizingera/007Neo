@@ -694,3 +694,14 @@ label.button { display: inline-flex; align-items: center; cursor: pointer; }
 .flotte-karte { width: 100%; height: 360px; display: block; border-radius: 10px;
   border: 2px solid var(--m-linie, var(--line)); margin-bottom: 14px; }
 .sheet .item.veraltet { opacity: .55; }
+
+/* Luftbild: Quellenangabe klein unten in der Mitte, Knopf zeigt den Zustand. */
+.luftbild-quelle { position: absolute; left: var(--frei-mitte); transform: translateX(-50%); bottom: 4px;
+  z-index: 2; font-size: 11px; color: var(--muted); background: color-mix(in srgb, var(--bg) 70%, transparent);
+  padding: 2px 8px; border-radius: 6px; pointer-events: none; white-space: nowrap; }
+.luftbild-quelle[hidden] { display: none; }
+.rund.an { background: var(--blue-solid); color: #fff; border-color: var(--blue-solid); }
+.diagnose-notiz { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; max-width: 75ch; }
+.diagnose-notiz textarea { width: 100%; padding: 10px 12px; border-radius: 8px; font: inherit; font-size: 15px;
+  background: var(--panel-2); color: var(--text); border: 1px solid var(--m-feld-rand, var(--line)); }
+.sheet .item .sub { white-space: pre-line; }
