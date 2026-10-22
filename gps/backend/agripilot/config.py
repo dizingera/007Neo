@@ -228,6 +228,10 @@ class SteeringConfig:
     # Kurzer RTK-Ausfall (Baumreihe, Funkloch): so lange wird mit der
     # Ersatzlösung weitergelenkt, deren Versatz herausgerechnet wird (rtkbruecke.py).
     rtk_ueberbrueckung_s: float = 60.0
+    # Größte Querbeschleunigung, die die Automatik verlangen darf (m/s², 0 = aus):
+    # begrenzt den Einschlag mit dem Tempo. Bei 1,5 m/s² sind bei 15 km/h höchstens
+    # rund 13° erlaubt, bei Wendetempo (6 km/h) der volle Einschlag.
+    max_querbeschleunigung_ms2: float = 1.5
     watchdog_ms: int = 500       # no fresh command in this window -> board centres
 
 

@@ -233,6 +233,11 @@ GRUPPEN: list[Gruppe] = [
                  hilfe="Darunter wird nicht gelenkt: im Stand ist der Kurs aus GPS wertlos."),
             Feld("steering.max_speed_ms", "Höchstgeschwindigkeit", "zahl", einheit="m/s",
                  minimum=1.0, maximum=15.0, sofort=True),
+            Feld("steering.max_querbeschleunigung_ms2", "Einschlag bei Tempo begrenzen", "zahl",
+                 einheit="m/s²", minimum=0.0, maximum=5.0, sofort=True,
+                 hilfe="Größte Querbeschleunigung, die die Automatik verlangen darf - je schneller, "
+                       "desto kleiner der erlaubte Einschlag. 1,5 m/s²: bei 15 km/h rund 13°, beim "
+                       "Wenden mit 6 km/h der volle Einschlag. 0 = aus."),
             Feld("steering.max_cross_track_m", "Größte Abweichung zur Spur", "zahl",
                  einheit="m", minimum=0.1, maximum=10.0, sofort=True,
                  hilfe="Weiter entfernt gibt die Automatik ab, statt quer aufs Feld zu ziehen."),

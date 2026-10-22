@@ -20,6 +20,7 @@ in einer Maschine, die den Einschlag hält.
 
 from __future__ import annotations
 
+import math
 import time
 from dataclasses import dataclass
 from typing import Optional
@@ -50,6 +51,18 @@ GEWOLLTE_GRUENDE = frozenset({"vom Fahrer ausgeschaltet", "zu langsam", "keine S
                               "Rückwärtsfahrt", "System wird beendet", "nicht scharf", "Aktualisierung"})
 
 
+def tempo_grenze_deg(tempo_ms: float, radstand_m: float, max_quer_ms2: float) -> Optional[float]:
+    """Größter Einschlag (Grad), der bei diesem Tempo höchstens ``max_quer_ms2`` Querbeschleunigung
+    verlangt - oder None, wenn nichts begrenzt (aus, oder im Schritttempo).
+
+    Querbeschleunigung im Einspurmodell: a = v² · tan(δ) / L. Ein GPS-Sprung oder ein
+    Spurwechsel bei 15 km/h darf den Traktor nicht mit vollem Einschlag herumreißen.
+    """
+    if max_quer_ms2 <= 0 or tempo_ms < 0.5:
+        return None
+    return math.degrees(math.atan(max_quer_ms2 * max(0.5, radstand_m) / (tempo_ms * tempo_ms)))
+
+
 class SteeringController:
     def __init__(self, config, output: Optional[SteerOutput] = None,
                  simulator: bool = False) -> None:
@@ -61,6 +74,8 @@ class SteeringController:
         self.armed = False           # vom Fahrer gesetzt, geht bei jedem Stopp weg
         self.rueckwaerts = False     # setzt die Engine aus dem Kurs; Rückwärts lenkt nichts
         self.rtk_ueberbrueckt = False
+        self.tempo_begrenzt = False    # der Einschlag wurde wegen des Tempos gekappt
+        self.tempo_grenze_deg: Optional[float] = None
         # Wie oft die Lenkung von sich aus abgegeben hat, während sie lenkte (nicht der
         # Fahrer, nicht das Vorgewende) - für die Genauigkeit je Arbeit (genauigkeit.py).
         self.abgaben = 0  # setzt die Engine: kurzer RTK-Ausfall wird überbrückt
@@ -122,9 +137,16 @@ class SteeringController:
             )
             self._last_angle, self._last_angle_at = 0.0, now
         else:
+            ziel = guidance.steer_angle_deg
+            grenze = tempo_grenze_deg(fix.speed_ms, context.wheelbase_m,
+                                      getattr(self.config, "max_querbeschleunigung_ms2", 0.0))
+            self.tempo_grenze_deg = grenze
+            self.tempo_begrenzt = grenze is not None and abs(ziel) > grenze
+            if self.tempo_begrenzt:
+                ziel = math.copysign(grenze, ziel)
             self.command = SteerCommand(
                 engaged=True,
-                angle_deg=self._rate_limit(guidance.steer_angle_deg, now),
+                angle_deg=self._rate_limit(ziel, now),
                 reason="lenkt",
                 speed_ms=fix.speed_ms,
                 cross_track_m=guidance.cross_track_m,
@@ -207,4 +229,6 @@ class SteeringController:
             "driver_override": feedback.driver_override and feedback.fresh,
             "duty": feedback.duty,
             "disengagements": self.disengage_count,
+            "tempo_begrenzt": self.tempo_begrenzt and self.command.engaged,
+            "tempo_grenze_deg": round(self.tempo_grenze_deg, 1) if self.tempo_grenze_deg is not None else None,
         }

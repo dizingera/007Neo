@@ -290,6 +290,9 @@ function updateHud(s) {
     hint.push(`Neue Version ${s.system.update_online} verfügbar – Menü → System → Aktualisierung`);
   }
   if (s.positionsfilter?.aktiv && !s.positionsfilter.akzeptiert) hint.push('GNSS-Ausreißer verworfen – Lenkung ausgeschaltet');
+  if (s.steering && s.steering.tempo_begrenzt) {
+    hint.push(`Einschlag wegen Tempo auf ${Math.round(s.steering.tempo_grenze_deg)}° begrenzt – für engere Bögen langsamer fahren`);
+  }
   const teilbreiten = s.teilbreiten_hardware;
   if (teilbreiten?.ausgang === 'udp' && (!teilbreiten.verbunden || teilbreiten.angefordert !== teilbreiten.bestaetigt)) {
     hint.push('Teilbreiten warten auf Hardwarebestätigung – unbestätigte Teilbreiten werden nicht markiert');
