@@ -480,6 +480,15 @@ je Teilbreite ein Knopf.
   die Teilbreite offen bzw. geht auf. **Rot (Ausschalten)**, Vorgabe 0,5 s: Erst wenn hier
   und an der grünen Linie alles bearbeitet ist, schließt sie. Ein Teilstück schaltet also
   nicht hin und her, wenn man aus bearbeitetem Boden herausfährt.
+* **Die Karte markiert, wo das Mittel landet** (ab 1.5.58): ein Teilstück gilt erst die
+  Einschaltzeit nach dem Befehl als an und die Ausschaltzeit danach als aus – so, wie das
+  Ventil reagiert. Der Vorlauf ist genau Tempo × Sekunden (kein fester Zuschlag mehr). Passen
+  die beiden Zeiten zu den Ventilen, bleibt an einer bearbeiteten Bahn weder Lücke noch
+  Überlappung (geprüft bei 4–16 km/h quer über eine Bahn). Sieht man am Acker an jeder Kante
+  eine Lücke oder Überlappung, die Zeiten anpassen: Lücke beim Hineinfahren in Bearbeitetes →
+  Vorlauf Ausschalten kleiner; Überlappung beim Herausfahren → Vorlauf Einschalten kleiner.
+  Schräg über eine Bahn bleibt eine Teilbreite offen, bis „Abschalten ab“ (Anteil) überdeckt
+  ist – kleinere Teilbreiten oder ein kleinerer Anteil sparen dort Mittel.
 * **Feldgrenze und Vorgewende** zählen an der roten Linie: was hinausragt, schließt sofort.
   **Im Vorgewende abschalten** (Gerät) misst den echten Abstand zur Feldgrenze – sinnvoll,
   wenn das Vorgewende am Ende extra gefahren wird.

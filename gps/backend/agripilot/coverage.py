@@ -169,7 +169,8 @@ class CoverageMap:
                              vorlauf_aus_s: float = 0.5,
                              min_speed_ms: float = 0.0,
                              rueckwaerts: bool = False,
-                             vorgewende_m: float = 0.0) -> None:
+                             vorgewende_m: float = 0.0,
+                             mindest_vorlauf_m: Optional[float] = None) -> None:
         """Switch sections off over worked ground and outside the boundary.
 
         The check is done a little ahead of the machine, scaled with speed,
@@ -201,8 +202,19 @@ class CoverageMap:
         forward = (math.sin(h), math.cos(h))
         right = (math.cos(h), -math.sin(h))
         tempo = max(0.0, speed_ms)
-        ahead_aus = look_ahead_m + tempo * max(0.0, vorlauf_aus_s)
-        ahead_an = look_ahead_m + tempo * max(0.0, vorlauf_an_s if vorlauf_an_s is not None else vorlauf_aus_s)
+        t_an = max(0.0, vorlauf_an_s if vorlauf_an_s is not None else vorlauf_aus_s)
+        t_aus = max(0.0, vorlauf_aus_s)
+        if mindest_vorlauf_m is None:
+            ahead_aus = look_ahead_m + tempo * t_aus
+            ahead_an = look_ahead_m + tempo * t_an
+        else:
+            # Genau so weit voraus, wie das Ventil braucht - eine Zelle gilt schon als
+            # bearbeitet, wenn die Bahn sie anschneidet, daher eine halbe Zelle weniger.
+            # Nie weniger als ``mindest_vorlauf_m``: sonst hielte das Gerät die eigene,
+            # eben gemalte Bahn für bearbeiteten Boden.
+            halb = self.cell_size / 2.0
+            ahead_aus = max(mindest_vorlauf_m, look_ahead_m + tempo * t_aus - halb)
+            ahead_an = max(mindest_vorlauf_m, look_ahead_m + tempo * t_an - halb)
         schwelle = max(0.05, min(1.0, pcc))
         langsam = rueckwaerts or tempo < min_speed_ms
         if vorgewende_m > 0.0:

@@ -110,8 +110,69 @@ class HauptschalterUndZustaende(unittest.TestCase):
             engine = self._feld(c)
             self._schritt(engine, tempo=3.0)
             v = engine.teilbreiten_vorlauf()
-            self.assertAlmostEqual(v["an_m"], 1.0 + 3.0 * 1.0)
-            self.assertAlmostEqual(v["aus_m"], 1.0 + 3.0 * 0.5)
+            # Tempo × Vorlauf, eine halbe Kartenzelle (0,25 m) weniger, kein fester Meter mehr.
+            self.assertAlmostEqual(v["an_m"], 3.0 * 1.0 - 0.25)
+            self.assertAlmostEqual(v["aus_m"], 3.0 * 0.5 - 0.25)
+            self._schritt(engine, tempo=0.5)
+            self.assertAlmostEqual(engine.teilbreiten_vorlauf()["aus_m"], 0.75)   # Mindestvorlauf
+
+    def _kreuzen(self, engine, tempo_kmh):
+        """Bahn 1 (6 m, x -3..3) liegt schon; quer darüber nach Osten. Gibt (Lücke, doppelt) in m²."""
+        import math
+        bearbeitet(engine.coverage, -3.0, 3.0, 0.0, 200.0)
+        erste = set(engine.coverage.cells)
+        v, dt, t, x = tempo_kmh / 3.6, 0.1, 1000.0, -30.0
+        engine.job = {"id": "kreuzen", "operation": "Spritzen"}
+        engine.heading = 90.0
+        schatten = CoverageMap(engine.coverage.cell_size)        # nur die zweite Bahn
+        echt = engine.coverage.add_swath
+
+        def mitschreiben(*args):
+            schatten.add_swath(*args)
+            return echt(*args)
+        engine.coverage.add_swath = mitschreiben
+        vorher = None
+        while x < 30.0:
+            x += v * dt
+            t += dt
+            engine.implement_position = (x, 100.0)
+            engine.fix = Fix(lat=50.0, lon=10.0, fix_quality=4, speed_ms=v, course_deg=90.0, received_at=t)
+            engine._update_coverage(vorher)
+            vorher = (x, 100.0)
+        c = engine.coverage.cell_size
+        streifen = {(i, j) for i in range(math.floor(-20 / c), math.ceil(20 / c))
+                    for j in range(math.floor(94.0 / c), math.ceil(106.0 / c))}
+        engine.coverage.add_swath = echt
+        luecke = len(streifen - erste - schatten.cells) * c * c
+        doppelt = len(streifen & erste & schatten.cells) * c * c   # Bahn 1, über die Bahn 2 noch Mittel gab
+        return luecke, doppelt, schatten.cells
+
+    def test_crossing_worked_ground_leaves_at_most_one_cell_each_side(self):
+        with tempfile.TemporaryDirectory() as ordner, geraet(ordner, "client", "tablet") as c:
+            c.post("/api/profile", json={"width_m": 12.0, "sections": 6})
+            engine = self._feld(c)
+            c.post("/api/profile", json={"width_m": 12.0, "sections": 6})
+            luecke, doppelt, _ = self._kreuzen(engine, 8.0)
+            # 12 m breit: eine Kartenzelle (0,5 m) auf jeder Seite wären 6 m².
+            self.assertLessEqual(luecke, 6.0)
+            self.assertLessEqual(doppelt, 6.0 + 1e-6)
+
+    def test_the_map_marks_after_the_valve_delay(self):
+        with tempfile.TemporaryDirectory() as ordner, geraet(ordner, "client", "tablet") as c:
+            engine = self._feld(c)
+            teile = [s for s in engine.sections]
+            engine.fix = Fix(lat=50.0, lon=10.0, fix_quality=4, speed_ms=2.0, course_deg=0.0, received_at=100.0)
+            self.assertTrue(all(s.enabled for s in engine._gemalte_teilbreiten(teile)))
+            teile[0].enabled = False                                          # Befehl: zu
+            engine.fix = Fix(lat=50.0, lon=10.0, fix_quality=4, speed_ms=2.0, course_deg=0.0, received_at=100.3)
+            self.assertTrue(engine._gemalte_teilbreiten(teile)[0].enabled)    # Ventil noch offen
+            engine.fix = Fix(lat=50.0, lon=10.0, fix_quality=4, speed_ms=2.0, course_deg=0.0, received_at=100.81)
+            self.assertFalse(engine._gemalte_teilbreiten(teile)[0].enabled)   # nach 0,5 s zu
+            teile[0].enabled = True                                           # Befehl: auf
+            engine.fix = Fix(lat=50.0, lon=10.0, fix_quality=4, speed_ms=2.0, course_deg=0.0, received_at=101.5)
+            self.assertFalse(engine._gemalte_teilbreiten(teile)[0].enabled)   # 1,0 s Einschaltzeit
+            engine.fix = Fix(lat=50.0, lon=10.0, fix_quality=4, speed_ms=2.0, course_deg=0.0, received_at=102.51)
+            self.assertTrue(engine._gemalte_teilbreiten(teile)[0].enabled)
 
 
 if __name__ == "__main__":

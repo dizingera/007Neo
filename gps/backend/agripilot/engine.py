@@ -74,6 +74,9 @@ GPS_STILLSTAND_S = 1.0
 
 SESSION_KEY = "session"
 CHECKPOINT_S = 30.0
+# Die Teilbreiten-Automatik prüft mindestens so viele Kartenzellen voraus - näher
+# hielte das Gerät die eigene, eben gemalte Bahn für bearbeiteten Boden.
+TB_MINDEST_VORLAUF_ZELLEN = 1.5
 RESUME_MAX_AGE_S = 3 * 3600.0
 
 # Fahrgassen: Spritze und Streuer auf dem Betrieb arbeiten mit 21 m.
@@ -192,6 +195,7 @@ class Engine:
             self.note(f"{verwaist} unterbrochene Arbeit(en) vom letzten Mal abgeschlossen")
         # Hauptschalter der Teilbreiten wie in AgOpenGPS: auto | manuell (alle an) | aus.
         self.teilbreiten_modus = "auto"
+        self._tb_ventil: list[list] = []   # je Teilbreite [markiert, letzter Befehl, seit]
         self.teilbreiten = None
 
         # Fahrspur und Zwischenstand schreibt ein eigener Faden (writer.py).
@@ -1780,6 +1784,7 @@ class Engine:
             raise RuntimeError("Kein Feld ausgewählt")
         if self.job is not None:
             return self.job
+        self._tb_ventil = []              # neue Arbeit: Ventile ab dem jetzigen Befehl
         self.job = self.store.start_job(
             self.field["id"], self.config.network.device_id,
             self.profile.name, operation,
@@ -2134,6 +2139,8 @@ class Engine:
                 rueckwaerts=self.heading_filter.rueckwaerts,
                 vorgewende_m=(self.headland.tiefe_m(p.width_m)
                               if p.section_vorgewende_aus and self.headland.aktiv else 0.0),
+                look_ahead_m=0.0,
+                mindest_vorlauf_m=TB_MINDEST_VORLAUF_ZELLEN * self.coverage.cell_size,
             )
             for section in self.sections:
                 if not section.auto and not section.forced_off:
@@ -2141,7 +2148,7 @@ class Engine:
         if self.teilbreiten is not None:
             maske=sum(1<<s.index for s in self.sections if s.enabled and not s.forced_off)
             self.teilbreiten.wunsch(maske if len(self.sections)<=32 else 0,min(32,len(self.sections)))
-        wirksam=self._wirksame_teilbreiten()
+        wirksam=self._gemalte_teilbreiten(self._wirksame_teilbreiten())
         if previous_implement is not None:
             self.coverage.add_swath(previous_implement,self.implement_position,kurs,wirksam)
 
@@ -2185,8 +2192,35 @@ class Engine:
         """Wie weit vor dem Gerät die Schaltung gerade prüft (Meter) - für die Linien auf der Karte."""
         tempo = max(0.0, self.fix.speed_ms) if self.fix else 0.0
         p = self.profile
-        return {"an_m": round(1.0 + tempo * max(0.0, p.section_vorlauf_an_s), 2),
-                "aus_m": round(1.0 + tempo * max(0.0, p.section_vorlauf_aus_s), 2)}
+        mindest = TB_MINDEST_VORLAUF_ZELLEN * self.coverage.cell_size
+        halb = self.coverage.cell_size / 2.0
+        return {"an_m": round(max(mindest, tempo * max(0.0, p.section_vorlauf_an_s) - halb), 2),
+                "aus_m": round(max(mindest, tempo * max(0.0, p.section_vorlauf_aus_s) - halb), 2)}
+
+    def _gemalte_teilbreiten(self, teile: list) -> list:
+        """Was auf der Karte markiert wird: der Befehl, verzögert wie das Ventil.
+
+        Die Automatik schaltet um den Vorlauf früher (Ventil, Säschar brauchen
+        Zeit). Markierte die Karte den Befehl sofort, stünde dort beim Verlassen
+        bearbeiteten Bodens eine Überlappung und beim Hineinfahren eine Lücke,
+        jeweils Tempo × Vorlauf lang (23.10.2026: bei 8 km/h bis 3 m). Ein
+        Teilstück gilt deshalb erst ``section_vorlauf_an_s`` nach dem Befehl als an
+        und ``section_vorlauf_aus_s`` danach als aus - so, wie das Mittel landet,
+        wenn die Vorlaufzeiten zu den Ventilen passen.
+        """
+        jetzt = getattr(self.fix, "received_at", None) or time.monotonic()
+        p = self.profile
+        if len(self._tb_ventil) != len(teile):
+            self._tb_ventil = [[t.enabled, t.enabled, jetzt] for t in teile]
+        aus = []
+        for zustand, t in zip(self._tb_ventil, teile):
+            if t.enabled != zustand[1]:
+                zustand[1], zustand[2] = t.enabled, jetzt
+            frist = max(0.0, p.section_vorlauf_an_s if t.enabled else p.section_vorlauf_aus_s)
+            if jetzt - zustand[2] >= frist - 1e-6:
+                zustand[0] = t.enabled
+            aus.append(replace(t, enabled=zustand[0]))
+        return aus
 
     def _wirksame_teilbreiten(self):
         if self.config.teilbreiten.output!="udp":return self.sections
