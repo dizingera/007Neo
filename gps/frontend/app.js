@@ -1641,7 +1641,7 @@ reiter.forEach((tab, index) => {
     document.querySelectorAll('.tab-panel').forEach((panel) => {
       panel.hidden = panel.dataset.panel !== tab.dataset.tab;
     });
-    el('sheetTitel').textContent = tab.textContent;
+    el('sheetTitel').textContent = tab.querySelector('.tab-name').textContent;
     // Auf schmalen Geräten scrollt die Leiste: den gewählten Reiter in Sicht holen.
     tab.scrollIntoView({ block: 'nearest', inline: 'nearest' });
     refreshLists();
@@ -1655,6 +1655,81 @@ reiter.forEach((tab, index) => {
     ziel.focus();
     ziel.onclick();
   };
+});
+
+/* Menüsuche (menuesuche.js): ein Treffer öffnet die Seite, klappt den Abschnitt auf
+ * und hebt die Stelle kurz hervor. */
+let menueTreffer = [];
+
+function menueSucheLeeren() {
+  el('menueSuche').value = '';
+  el('menueTreffer').hidden = true;
+  el('menueTreffer').innerHTML = '';
+  menueTreffer = [];
+}
+
+function menueTrefferOeffnen(eintrag) {
+  menueSucheLeeren();
+  document.querySelector(`.tab[data-tab="${eintrag.panel}"]`).onclick();
+  const ziel = eintrag.element;
+  if (!ziel || !ziel.isConnected) return;
+  for (let k = ziel; k; k = k.parentElement) if (k.tagName === 'DETAILS') k.open = true;
+  ziel.scrollIntoView({ block: 'center' });
+  ziel.classList.add('such-treffer');
+  setTimeout(() => ziel.classList.remove('such-treffer'), 2500);
+  const feld = ziel.tagName === 'LABEL' && ziel.control ? ziel.control : ziel;
+  if (typeof feld.focus === 'function') feld.focus({ preventScroll: true });
+}
+
+function menueTrefferZeigen() {
+  const host = el('menueTreffer');
+  const frage = el('menueSuche').value;
+  host.innerHTML = '';
+  if (!frage.trim()) { host.hidden = true; menueTreffer = []; return; }
+  menueTreffer = MenueSucheModul.suchen(
+    MenueSucheModul.sammeln([...document.querySelectorAll('.tab-panel')], reiter), frage);
+  host.hidden = false;
+  if (!menueTreffer.length) {
+    host.innerHTML = '<p class="note">Nichts gefunden. Ein anderes Wort probieren, z.B. „Spur“ oder „Update“.</p>';
+    return;
+  }
+  menueTreffer.forEach((eintrag) => {
+    const knopf = document.createElement('button');
+    knopf.type = 'button';
+    knopf.setAttribute('role', 'listitem');
+    knopf.innerHTML = '<b></b><small></small>';
+    knopf.querySelector('b').textContent = eintrag.text;
+    knopf.querySelector('small').textContent = eintrag.element
+      ? [eintrag.seite, eintrag.abschnitt].filter(Boolean).join(' › ') : `Seite · ${eintrag.abschnitt}`;
+    knopf.onclick = () => menueTrefferOeffnen(eintrag);
+    host.appendChild(knopf);
+  });
+}
+
+// Die Einstellungen entstehen erst beim Laden - vorher fände die Suche sie nicht.
+let menueEinstellungenLaden = null;
+function menueSucheEingabe() {
+  menueTrefferZeigen();
+  if (settings.geladen || menueEinstellungenLaden) return;
+  menueEinstellungenLaden = loadSettings().then(menueTrefferZeigen, () => {}).finally(() => { menueEinstellungenLaden = null; });
+}
+el('menueSuche').onfocus = () => { if (el('menueSuche').value) menueTrefferZeigen(); };
+el('menueSuche').oninput = menueSucheEingabe;
+el('menueSuche').onkeydown = (event) => {
+  if (event.key === 'Enter' && menueTreffer.length) { event.preventDefault(); menueTrefferOeffnen(menueTreffer[0]); }
+  if (event.key === 'ArrowDown' && menueTreffer.length) { event.preventDefault(); el('menueTreffer').querySelector('button').focus(); }
+  // Escape leert erst die Suche; erst das zweite schließt das Menü.
+  if (event.key === 'Escape' && el('menueSuche').value) { event.stopPropagation(); menueSucheLeeren(); }
+};
+el('menueTreffer').onkeydown = (event) => {
+  const knoepfe = [...el('menueTreffer').querySelectorAll('button')];
+  const i = knoepfe.indexOf(document.activeElement);
+  if (event.key === 'ArrowDown' && i < knoepfe.length - 1) { event.preventDefault(); knoepfe[i + 1].focus(); }
+  if (event.key === 'ArrowUp') { event.preventDefault(); (i > 0 ? knoepfe[i - 1] : el('menueSuche')).focus(); }
+  if (event.key === 'Escape') { event.stopPropagation(); menueSucheLeeren(); el('menueSuche').focus(); }
+};
+document.addEventListener('pointerdown', (event) => {
+  if (!event.target.closest('.menue-suche')) { el('menueTreffer').hidden = true; }
 });
 
 el('btnNewField').onclick = async () => {
@@ -2954,11 +3029,49 @@ function renderJobs(jobs, fields) {
       renderJobs(jobs, fields);
     };
     host.appendChild(kopf);
-    if (offen) liste.forEach((job) => host.appendChild(jobZeile(job)));
+    if (!offen) return;
+    liste.forEach((job) => host.appendChild(jobZeile(job)));
+    const fertige = liste.filter((job) => job.ended_at).length;
+    if (fertige > 1) {
+      const zeile = document.createElement('div');
+      zeile.className = 'row feld-loeschen';
+      const knopf = document.createElement('button');
+      knopf.className = 'danger';
+      knopf.textContent = `Alle ${fertige} Arbeiten von „${namen[fieldId] || 'Unbekanntes Feld'}“ löschen`;
+      knopf.onclick = () => arbeitenLoeschen(`/api/jobs?field_id=${encodeURIComponent(fieldId)}`,
+        `Alle ${fertige} Arbeiten auf „${namen[fieldId] || 'Unbekanntes Feld'}“ löschen?`);
+      zeile.appendChild(knopf);
+      host.appendChild(zeile);
+    }
   });
   if (!jobs.length) host.innerHTML = '<p class="note">Noch keine Arbeiten aufgezeichnet.</p>';
+  el('btnJobsAlleLoeschen').hidden = !jobs.some((job) => job.ended_at);
   myterraStand();
 }
+
+/* Arbeiten löschen: die Fläche geht mit aus der Karte, das Löschen per Abgleich an alle Geräte. */
+async function arbeitenLoeschen(url, frage) {
+  if (!confirm(`${frage}\n\nDie bearbeitete Fläche verschwindet auch aus der Karte. ` +
+               'Das lässt sich nicht rückgängig machen.')) return;
+  const antwort = await api('DELETE', url);
+  if (!antwort) return;
+  const d = antwort.data || antwort;
+  toast(`${d.geloescht} ${d.geloescht === 1 ? 'Arbeit' : 'Arbeiten'} gelöscht` +
+        (d.laufend_uebersprungen ? ' – die laufende bleibt' : ''));
+  if (d.karte_neu && state.live && state.live.field) {
+    const karte = await fetch(`/api/fields/${state.live.field.id}/coverage?hours=24`)
+      .then((r) => r.json()).catch(() => null);
+    if (karte) {
+      flaeche.leeren();
+      flaeche.zellenMalen(karte.cells || [], karte.cell_size || state.cellSize);
+      zeichnenAnfordern();
+    }
+  }
+  refreshLists();
+}
+
+el('btnJobsAlleLoeschen').onclick = () => arbeitenLoeschen('/api/jobs?alle=true',
+  'Wirklich ALLE Arbeiten auf allen Feldern löschen?');
 
 /* MyTerra: fertige Arbeiten als Datei für den Prüfeingang. Gebucht wird erst dort, nach Freigabe. */
 const MYTERRA_TAETIGKEIT = { boden: 'Bodenbearbeitung', saat: 'Saat', walzen: 'Walzen', duengung: 'Düngung',
@@ -3057,6 +3170,14 @@ function jobZeile(job) {
     link.textContent = format.toUpperCase();
     actions.appendChild(link);
   });
+  if (job.ended_at) {
+    const weg = document.createElement('button');
+    weg.className = 'danger abgesetzt';
+    weg.textContent = 'Löschen';
+    weg.onclick = () => arbeitenLoeschen(`/api/jobs/${job.id}`,
+      `Arbeit „${job.operation || 'Arbeit'}“ vom ${started.toLocaleString('de-DE')} löschen?`);
+    actions.appendChild(weg);
+  }
   return row;
 }
 

@@ -181,6 +181,13 @@
   <div class="sheet-head">
     <div class="sheet-brand"><img src="icon-192.png" width="32" height="32" alt=""><span>AgriPilot</span></div>
     <h2 class="sheet-titel" id="sheetTitel">Felder</h2>
+    <!-- Suche über alle Seiten: Überschriften, Knöpfe, Einstellungen. Ein Treffer
+         öffnet die Seite, klappt den Abschnitt auf und hebt die Stelle hervor. -->
+    <div class="menue-suche">
+      <input type="search" id="menueSuche" placeholder="Suchen, z.B. Teilbreiten" aria-label="Im Menü suchen"
+             autocomplete="off" enterkeyhint="search" aria-controls="menueTreffer">
+      <div class="menue-treffer" id="menueTreffer" role="list" aria-label="Treffer" hidden></div>
+    </div>
     <button class="close" id="sheetClose" aria-label="Menü schließen"><span aria-hidden="true">✕</span> Schließen</button>
   </div>
   <div class="sheet-body">
@@ -188,20 +195,20 @@
          Maschine, und die Werkstatt. Auf schmalen Geräten wird daraus eine Zeile. -->
     <nav class="tabs" role="tablist" aria-label="Menü-Seiten" aria-orientation="vertical">
       <span class="tab-gruppe" aria-hidden="true">Im Feld</span>
-      <button data-tab="fields" class="tab active" role="tab" aria-selected="true">Felder</button>
-      <button data-tab="lines" class="tab" role="tab" aria-selected="false" tabindex="-1">Spuren</button>
-      <button data-tab="jobs" class="tab" role="tab" aria-selected="false" tabindex="-1">Arbeiten</button>
-      <button data-tab="maschinen" class="tab" role="tab" aria-selected="false" tabindex="-1">Maschinen</button>
-      <button data-tab="saatplan" class="tab" role="tab" aria-selected="false" tabindex="-1">Saatplan</button>
-      <button data-tab="headland" class="tab" role="tab" aria-selected="false" tabindex="-1">Vorgewende &amp; Wende</button>
+      <button data-tab="fields" class="tab active" role="tab" aria-selected="true"><span class="tab-name">Felder</span><small>Grenze, Shapefile, Luftbild</small></button>
+      <button data-tab="lines" class="tab" role="tab" aria-selected="false" tabindex="-1"><span class="tab-name">Spuren</span><small>AB, Kontur, Fahrgassen</small></button>
+      <button data-tab="jobs" class="tab" role="tab" aria-selected="false" tabindex="-1"><span class="tab-name">Arbeiten</span><small>Liste, Export, Löschen</small></button>
+      <button data-tab="maschinen" class="tab" role="tab" aria-selected="false" tabindex="-1"><span class="tab-name">Fernansicht</span><small>Wo die anderen fahren</small></button>
+      <button data-tab="saatplan" class="tab" role="tab" aria-selected="false" tabindex="-1"><span class="tab-name">Saatplan</span><small>Säspuren und Fahrgassen</small></button>
+      <button data-tab="headland" class="tab" role="tab" aria-selected="false" tabindex="-1"><span class="tab-name">Vorgewende &amp; Wende</span><small>Breite, Wendeart</small></button>
       <span class="tab-gruppe" aria-hidden="true">Maschine</span>
-      <button data-tab="machine" class="tab" role="tab" aria-selected="false" tabindex="-1">Traktor &amp; Gerät</button>
-      <button data-tab="lenkung" class="tab" role="tab" aria-selected="false" tabindex="-1">Lenkung</button>
+      <button data-tab="machine" class="tab" role="tab" aria-selected="false" tabindex="-1"><span class="tab-name">Traktor &amp; Gerät</span><small>Maße, Antenne, Teilbreiten</small></button>
+      <button data-tab="lenkung" class="tab" role="tab" aria-selected="false" tabindex="-1"><span class="tab-name">Lenkung</span><small>Live, Motortest, Mitte</small></button>
       <span class="tab-gruppe" aria-hidden="true">Werkstatt</span>
-      <button data-tab="settings" class="tab werkstatt" role="tab" aria-selected="false" tabindex="-1">Einstellungen</button>
-      <button data-tab="daten" class="tab werkstatt" role="tab" aria-selected="false" tabindex="-1">Daten &amp; Geräte</button>
-      <button data-tab="system" class="tab werkstatt" role="tab" aria-selected="false" tabindex="-1">System</button>
-      <button data-tab="setup" class="tab werkstatt" role="tab" aria-selected="false" tabindex="-1">Einbau</button>
+      <button data-tab="settings" class="tab werkstatt" role="tab" aria-selected="false" tabindex="-1"><span class="tab-name">Einstellungen</span><small>Alle Werte, Kartenfarben</small></button>
+      <button data-tab="daten" class="tab werkstatt" role="tab" aria-selected="false" tabindex="-1"><span class="tab-name">Daten &amp; Geräte</span><small>Abgleich, Paket, Sicherung</small></button>
+      <button data-tab="system" class="tab werkstatt" role="tab" aria-selected="false" tabindex="-1"><span class="tab-name">System</span><small>Zustand, Update, Diagnose</small></button>
+      <button data-tab="setup" class="tab werkstatt" role="tab" aria-selected="false" tabindex="-1"><span class="tab-name">Einbau</span><small>Schritt für Schritt abhaken</small></button>
     </nav>
     <div class="panels">
 
@@ -287,8 +294,14 @@
         bis eine andere eingetragen wird. Gestartet wird die Arbeit mit <b>Markieren</b>
         rechts in der Kabine. Traktor und Gerät kommen aus <b>Traktor &amp; Gerät</b> und
         gehen mit nach MyTerra.</p>
+      <p><b>Löschen</b>: einzeln hinter jeder Arbeit, je Feld am Ende der Feldgruppe oder alle
+        unten. Die Fläche verschwindet dann auch aus der Karte, und das Löschen geht beim
+        Abgleich an alle Geräte. Eine laufende Arbeit wird nie gelöscht.</p>
     </details>
     <div class="list" id="jobList"></div>
+    <div class="row">
+      <button id="btnJobsAlleLoeschen" class="danger abgesetzt" hidden>Alle Arbeiten löschen</button>
+    </div>
   </section>
 
   <section class="tab-panel" data-panel="maschinen" hidden>
@@ -927,6 +940,7 @@
 <script src="spuren.js"></script>
 <script src="kalibrierung.js"></script>
 <script src="kartenfarben.js"></script>
+<script src="menuesuche.js"></script>
 <dialog id="feldWerkzeug" class="sheet feldwerkzeug" aria-labelledby="fwTitel">
   <div class="fw-kopf"><div><p class="fw-kicker">AGRIPILOT · FELDWERKZEUGE</p><h2 id="fwTitel"></h2></div><button type="button" id="fwSchliessen" aria-label="Feldwerkzeug schließen">Schließen</button></div>
   <p id="fwBeschreibung" class="note"></p>

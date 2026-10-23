@@ -994,10 +994,42 @@ def create_app(config=None) -> FastAPI:
     async def list_jobs(field_id: Optional[str] = None) -> list[dict]:
         return store.list_jobs(field_id=field_id)
 
+    def flaeche_neu_aufbauen() -> bool:
+        """Nach dem Löschen: die Fläche des geladenen Feldes ohne die gelöschten Arbeiten.
+
+        Nur ohne laufende Arbeit - deren eigene Spur steckt in der Karte und wäre sonst weg.
+        Wie beim Laden des Feldes: was in den letzten 24 Stunden dort gearbeitet wurde.
+        """
+        if engine.field is None or engine.job is not None:
+            return False
+        neu = CoverageMap(cell_size=engine.coverage.cell_size)
+        neu.merge(sync.merge_field_coverage(store, engine.field["id"], max_age_s=86_400))
+        engine.coverage = neu
+        return True
+
+    def arbeiten_loeschen(kennungen: list[str]) -> dict:
+        laufend = engine.job["id"] if engine.job else None
+        geloescht = [k for k in kennungen if k != laufend]
+        for kennung in geloescht:
+            store.delete_job(kennung)          # Löschvermerk: geht beim Abgleich an alle Geräte
+        if geloescht:
+            engine.note(f"{len(geloescht)} {'Arbeit' if len(geloescht) == 1 else 'Arbeiten'} gelöscht")
+        return {"geloescht": len(geloescht), "laufend_uebersprungen": laufend in kennungen,
+                "karte_neu": flaeche_neu_aufbauen() if geloescht else False}
+
     @api.delete("/api/jobs/{job_id}")
     async def delete_job(job_id: str):
-        store.delete_job(job_id)
-        return ok()
+        if engine.job is not None and engine.job["id"] == job_id:
+            raise HTTPException(409, "Diese Arbeit läuft gerade - erst beenden, dann löschen")
+        return ok(arbeiten_loeschen([job_id]))
+
+    @api.delete("/api/jobs")
+    async def delete_jobs(field_id: Optional[str] = None, alle: bool = False):
+        """Alle Arbeiten eines Feldes oder (mit alle=true) alle. Eine laufende bleibt."""
+        if not field_id and not alle:
+            raise HTTPException(400, "Feld angeben oder alle=true")
+        kennungen = [j["id"] for j in store.list_jobs(field_id=field_id or None, limit=1_000_000)]
+        return ok(arbeiten_loeschen(kennungen))
 
     @api.get("/api/jobs/{job_id}/referenz")
     async def arbeitslinien_vorschau(job_id: str):

@@ -445,6 +445,13 @@ Datum, Dauer, Strecke, Fläche und doppelt bearbeiteter Fläche – als GPX,
 GeoJSON oder CSV herunterladbar. *Alle Arbeiten als CSV* gibt die Liste für das
 Büro.
 
+**Arbeiten löschen (ab 1.5.59):** hinten in jeder Zeile **Löschen** für eine
+einzelne Arbeit, am Ende einer aufgeklappten Feldgruppe *Alle … Arbeiten von „Feld“
+löschen*, und ganz unten **Alle Arbeiten löschen**. Jedes Mal kommt vorher eine
+Rückfrage. Die bearbeitete Fläche verschwindet mit aus der Karte, und das Löschen geht
+beim nächsten Abgleich an den Master und alle Tablets – die Arbeit kommt nicht zurück.
+Eine Arbeit, die gerade läuft, wird nie gelöscht; erst **Markieren** beenden.
+
 ## Spurversatz (Nudge)
 
 **Rechts heißt rechts vom Sitz aus** – auch auf einer Spur, die gerade
@@ -826,10 +833,10 @@ Mast, Stein, Schacht, Baum: **Spur → Hindernis** öffnet ein kleines Fenster.
   freigegeben („Hindernis „Mast“ liegt auf der Wenderoute“).
 * Liste und Löschen: **Menü → Spuren**, unten „Hindernisse im geladenen Feld“.
 
-## Fernansicht: alle Maschinen (Menü → Maschinen, ab 1.5.47)
+## Fernansicht: alle Maschinen (Menü → Fernansicht, ab 1.5.47)
 
 Jedes Tablet meldet alle **5 s** seine Lage an den Master (Büro-PC) und bekommt die
-der anderen zurück. **Menü → Maschinen** zeigt eine Übersichtskarte mit den Feldern
+der anderen zurück. **Menü → Fernansicht** zeigt eine Übersichtskarte mit den Feldern
 und allen Maschinen, darunter je Maschine: Feld, Arbeit und Hektar, Tempo, ob sie
 lenkt, Fix und wie alt die Meldung ist. Auf der **Fahrkarte** erscheinen die anderen
 als blaue Pfeile mit Namen – praktisch, wenn zwei auf demselben Schlag arbeiten.
@@ -972,9 +979,17 @@ regelt der Motor nicht nach.
 
 ## Das Menü
 
-Links stehen alle Seiten in drei Gruppen:
+**Suchen (ab 1.5.59):** oben im Menü steht ein Suchfeld. Ein Wort genügt –
+*Teilbreiten*, *NTRIP*, *Mitte*, *Update*, *löschen*. Die Treffer zeigen, auf welcher
+Seite und in welchem Abschnitt etwas steht; ein Tipp öffnet die Seite, klappt den
+Abschnitt auf und rahmt die Stelle kurz gelb ein. Groß/klein und Umlaute sind egal
+(*geraet* findet *Gerät*). Gesucht wird auch in den Hilfetexten der Einstellungen.
+**Enter** nimmt den ersten Treffer, **Esc** leert die Suche.
 
-* **Im Feld:** Felder, Spuren, Arbeiten, Maschinen (Fernansicht), Saatplan, Vorgewende & Wende.
+Links stehen alle Seiten in drei Gruppen, unter jedem Namen in einer Zeile, was dort
+drin ist:
+
+* **Im Feld:** Felder, Spuren, Arbeiten, Fernansicht (früher „Maschinen“), Saatplan, Vorgewende & Wende.
 * **Maschine:** Traktor & Gerät (Maße, Lenkschärfe, Regelart, unten die
   Teilbreiten-Hardware) und **Lenkung**. Auf der Seite Lenkung von oben nach unten:
   *Lenkung live*, der *Lenk-Assistent*, die *Lenkwerkstatt* als ein Ablauf (Maße des
