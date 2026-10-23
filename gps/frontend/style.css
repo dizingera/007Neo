@@ -237,8 +237,17 @@ body.tag .vignette { background: radial-gradient(120% 90% at 50% 70%, transparen
 .taste.mark small, .taste.lenk small { font-family: "IBM Plex Sans", sans-serif; font-weight: 600; font-size: max(12px, calc(1 * var(--u)));
   letter-spacing: 0; text-transform: none; margin-top: 3px; opacity: .9; white-space: normal; line-height: 1.15; }
 .taste.mark i, .taste.lenk i { flex: none; border-radius: 50%; background: var(--muted); }
-/* In der schmalen Leiste trägt der Leuchtpunkt den Zustand; das Symbol würde dem Wort den Platz nehmen. */
-.taste.mark svg, .taste.lenk svg { display: none; }
+/* Symbol statt Wort (wie Cerea): oben in der Mitte, der Zustand darunter über die ganze
+   Breite - neben dem Symbol wäre er abgeschnitten. Der Leuchtpunkt sitzt in der Ecke. */
+.taste.mark, .taste.lenk { flex-direction: column; justify-content: center; align-items: center;
+  gap: 3px; padding: 4px 6px; text-align: center; }
+.taste.mark i, .taste.lenk i { position: absolute; left: 9px; top: 9px; }
+.taste.mark span, .taste.lenk span { align-items: center; max-width: 100%; }
+.taste.mark small, .taste.lenk small { margin-top: 0; }
+.taste.mark svg.symbol, .taste.lenk svg.symbol { flex: none; display: block; stroke-width: 1.9; }
+.taste.mark svg.symbol { width: max(30px, calc(3 * var(--u))); height: max(30px, calc(3 * var(--u))); }
+.taste.mark svg.symbol .flaeche { fill: currentColor; fill-opacity: .3; stroke: none; }
+.taste.mark.an svg.symbol .flaeche { fill-opacity: .75; }
 .taste.mark { height: max(60px, calc(5.6 * var(--u))); font-size: max(15px, calc(1.5 * var(--u))); }
 .taste.mark i { width: 10px; height: 10px; }
 .taste.mark.an { color: var(--leucht); border: 2px solid color-mix(in srgb, var(--leucht) 60%, transparent); }
@@ -247,7 +256,7 @@ body.tag .vignette { background: radial-gradient(120% 90% at 50% 70%, transparen
 .taste.lenk i { width: 12px; height: 12px; }
 /* Der Grund kann lang sein ("zu weit von der Spur …") - zwei Zeilen, dann Schluss. */
 .taste.lenk small { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-.taste.lenk svg { width: max(28px, calc(2.8 * var(--u))); height: max(28px, calc(2.8 * var(--u))); stroke-width: 1.8; }
+.taste.lenk svg.symbol { width: max(40px, calc(4 * var(--u))); height: max(40px, calc(4 * var(--u))); }
 .taste.lenk.an { color: var(--leucht-tinte); background: var(--leucht); border-color: transparent;
   box-shadow: 0 0 calc(2.4 * var(--u)) color-mix(in srgb, var(--leucht) 45%, transparent); }
 .taste.lenk.an i { background: var(--leucht-tinte); animation: puls 1.6s ease-in-out infinite; }
@@ -265,6 +274,10 @@ body.tag .vignette { background: radial-gradient(120% 90% at 50% 70%, transparen
   font-size: 24px; font-weight: 600; cursor: pointer; }
 .rund svg { width: 22px; height: 22px; stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 .rund.an { color: var(--leucht); border-color: color-mix(in srgb, var(--leucht) 40%, transparent); }
+/* Sprachknopf: Wellen, solange gesprochen wird; durchgestrichen heißt nur Piepton. */
+#spracheKnopf .stumm { display: none; }
+#spracheKnopf.stumm .stumm { display: inline; }
+#spracheKnopf.stumm .wellen { display: none; }
 .chips.r { right: calc(var(--leiste-breite) + 2 * var(--rand)); }
 /* Mitte der freien Fläche links der Leiste - dort steht auch der Traktor. */
 .stage { --frei-mitte: calc((100% - var(--leiste-breite) - var(--rand)) / 2); }

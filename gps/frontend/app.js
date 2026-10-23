@@ -328,9 +328,10 @@ function updateHud(s) {
   const job = el('btnJob');
   job.classList.toggle('an', !!s.job);
   job.setAttribute('aria-checked', String(!!s.job));
-  el('jobText').textContent = s.job
-    ? `an · ${s.job.operation || 'Arbeit'} · ${(s.job.area_ha || 0).toFixed(2).replace('.', ',')} ha`
-    : 'aus · Fläche wird nicht gemalt';
+  // Neben dem Symbol ist wenig Platz: dort nur der Zustand, der ganze Satz im Tooltip.
+  const ha = s.job ? (s.job.area_ha || 0).toFixed(2).replace('.', ',') : '';
+  el('jobText').textContent = s.job ? `an · ${ha} ha` : 'aus';
+  job.title = s.job ? `Markieren an · ${s.job.operation || 'Arbeit'} · ${ha} ha` : 'Markieren aus · Fläche wird nicht gemalt';
 
   const steering = s.steering;
   // Nimmt die Anlage gerade Rückwärtsfahrt an, soll man das sehen - stimmt es
@@ -359,18 +360,19 @@ function updateHud(s) {
   plakette.hidden = !(lenkt || scharf);
   plakette.className = 'lenkstatus' + (lenkt ? ' lenkt' : scharf ? ' scharf' : '');
   plakette.textContent = lenkt ? 'Lenkt' : scharf ? 'Scharf' : '';
+  const lenkText = (kurz, lang) => { el('steerText').textContent = kurz; steer.title = `Lenkung ${lang}`; };
   if (!steering || !steering.configured) {
     steer.setAttribute('aria-checked', 'false');
-    el('steerText').textContent = 'Lenkhilfe · kein Motor freigegeben';
+    lenkText('kein Motor', 'Lenkhilfe · kein Motor freigegeben');
   } else if (steering.command.engaged) {
     steer.classList.add('an'); steer.setAttribute('aria-checked', 'true');
-    el('steerText').textContent = 'aktiv · tippen schaltet ab';
+    lenkText('aktiv', 'aktiv · tippen schaltet ab');
   } else if (steering.armed) {
     steer.classList.add('scharf'); steer.setAttribute('aria-checked', 'true');
-    el('steerText').textContent = `scharf · ${steering.command.reason}`;
+    lenkText(`scharf · ${steering.command.reason}`, `scharf · ${steering.command.reason}`);
   } else {
     steer.setAttribute('aria-checked', 'false');
-    el('steerText').textContent = 'aus · tippen schaltet scharf';
+    lenkText('aus', 'aus · tippen schaltet scharf');
   }
 
   // A/B ist ein Knopf mit zwei Schritten: erst A, dann B.
@@ -1553,9 +1555,23 @@ el('warnton').onchange = () => {
 };
 el('sprache').checked = gemerkt('sprache') !== 'aus';
 if (window.Warnungen) window.Warnungen.einstellen({ sprache: el('sprache').checked });
-el('sprache').onchange = () => {
-  merken('sprache', el('sprache').checked ? 'an' : 'aus');
-  if (window.Warnungen) window.Warnungen.einstellen({ sprache: el('sprache').checked });
+
+/* Sprachknopf auf der Karte und Häkchen im Menü sind dieselbe Einstellung. Aus heißt:
+ * keine Ansagen mehr, der Piepton (Warnton) bleibt. */
+function spracheSetzen(an) {
+  el('sprache').checked = an;
+  merken('sprache', an ? 'an' : 'aus');
+  if (window.Warnungen) window.Warnungen.einstellen({ sprache: an });
+  el('spracheKnopf').classList.toggle('stumm', !an);
+  el('spracheKnopf').setAttribute('aria-pressed', String(an));
+  el('spracheKnopf').title = an ? 'Sprachansagen an – tippen: nur noch Piepton'
+    : 'Nur Piepton – tippen: Sprachansagen wieder an';
+}
+spracheSetzen(el('sprache').checked);
+el('sprache').onchange = () => spracheSetzen(el('sprache').checked);
+el('spracheKnopf').onclick = () => {
+  spracheSetzen(!el('sprache').checked);
+  toast(el('sprache').checked ? 'Sprachansagen an' : 'Sprachansagen aus – nur noch Piepton');
 };
 el('btnWarnProbe').onclick = () => {
   if (!window.Warnungen) return;

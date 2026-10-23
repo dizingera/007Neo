@@ -184,6 +184,13 @@ gesammelten Messwerte zur Verfügung. Im Hochformat sitzt das kleine Livefenster
 
 ## Der Bildschirm
 
+**Ab 1.5.65** stehen auf den zwei großen Knöpfen unten rechts Symbole statt Wörter, wie
+bei Cerea: oben das **Gerät mit gemalter Fläche = Markieren**, unten das **Lenkrad =
+Lenkung**. Der Punkt in der Ecke und die Zeile darunter sagen den Zustand (aus, an ·
+0,12 ha, scharf · zu langsam, aktiv). Die runden Knöpfe an der Karte (Zoom, Ansicht,
+Luftbild, Sprache, Tag/Nacht) haben einen kräftigeren Rand; eingeschaltet sind sie blau
+gefüllt – auch in der hellen Tagansicht gut zu erkennen.
+
 ![Die Kabine](bilder/kabine.png)
 
 Die Anzeige ist der Blick über die Haube: das Feld liegt in Perspektive vor dem
@@ -918,8 +925,9 @@ sieht man über Wochen, ob die Abstimmung besser wird.
 Zusätzlich zum Ton sagt das Tablet an: „Vorgewende in 20 Metern“, „Fahrgasse“,
 „Achtung. Mast in 15 Metern“, „RTK weg. Überbrückt, noch 60 Sekunden“, „RTK wieder
 da“, „Lenkung aus …“, „Verbindung verloren“. Gesprochen wird mit der Stimme des Geräts,
-ohne Netz. Ein- und ausschalten unter **Menü → System → Sprachansagen**, mit **Probe**
-hören. Fehlt eine deutsche Stimme, sagt *Probe* das; unter Windows unter
+ohne Netz. Ein- und ausschalten mit dem **Lautsprecher-Knopf rechts auf der Karte**
+(ab 1.5.65; durchgestrichen = nur noch Piepton, der Warnton bleibt) oder unter
+**Menü → System → Sprachansagen**, mit **Probe** hören. Fehlt eine deutsche Stimme, sagt *Probe* das; unter Windows unter
 *Einstellungen → Zeit und Sprache → Sprache* „Deutsch“ mit Sprachausgabe hinzufügen.
 
 ## Luftbild (Knopf rechts auf der Karte, ab 1.5.48)

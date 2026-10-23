@@ -60,6 +60,10 @@
     <button class="rund" id="luftbildKnopf" title="Luftbild ein/aus" aria-label="Luftbild ein oder aus" aria-pressed="false">
       <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 16l5-5 4 4 3-3 6 6"/><circle cx="16" cy="9" r="1.6"/></svg>
     </button>
+    <!-- Sprachansagen aus: es bleibt nur der Piepton (Warnton). -->
+    <button class="rund" id="spracheKnopf" title="Sprachansagen ein/aus – aus: nur Piepton" aria-label="Sprachansagen" aria-pressed="true">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9h4l5-4v14l-5-4H4z"/><path class="wellen" d="M16 9a4 4 0 010 6M18.5 6.5a7.5 7.5 0 010 11"/><path class="stumm" d="M16 9l5 6M21 9l-5 6"/></svg>
+    </button>
     <button class="rund" id="tagNacht" title="Tag / Nacht" aria-label="Tag oder Nacht">
       <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1"/></svg>
     </button>
@@ -172,8 +176,10 @@
       </div>
     </div>
     <div class="unten-rechts">
-      <button class="taste mark" id="btnJob" role="switch" aria-checked="false"><i></i><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h16M6 20V9l6-5 6 5v11M10 20v-6h4v6"/></svg><span>Markieren<small id="jobText">aus</small></span></button>
-      <button class="taste lenk" id="btnSteer" role="switch" aria-checked="false"><i></i><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3"/><path d="M3 12h6M15 12h6M12 15v6"/></svg><span>Lenkung<small id="steerText">aus</small></span></button>
+      <!-- Symbole statt Wörter, wie bei Cerea: das Gerät, das Fläche malt, und das Lenkrad.
+           Der Name bleibt für Vorlesehilfen (aria-label), die Zeile darunter sagt den Zustand. -->
+      <button class="taste mark" id="btnJob" role="switch" aria-checked="false" aria-label="Markieren" title="Markieren"><i></i><svg class="symbol" viewBox="0 0 24 24" aria-hidden="true"><path d="M2 7h20"/><path d="M5 7v3M9.7 7v3M14.3 7v3M19 7v3"/><rect class="flaeche" x="4" y="12" width="16" height="8" rx="1"/></svg><span><small id="jobText">aus</small></span></button>
+      <button class="taste lenk" id="btnSteer" role="switch" aria-checked="false" aria-label="Lenkung" title="Lenkung"><i></i><svg class="symbol" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="2.6"/><path d="M12 14.6V21M9.5 11.3L3.2 10.2M14.5 11.3l6.3-1.1"/></svg><span><small id="steerText">aus</small></span></button>
     </div>
   </nav>
 </main>
