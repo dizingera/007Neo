@@ -1,0 +1,342 @@
+/* AgriPilot: klare Instrumente, ruhige Arbeitsflächen. Die bestehende
+   Fahrgeometrie und alle Zustandsklassen bleiben im ursprünglichen Stylesheet. */
+:root {
+  --text: #f0f4f1;
+  --muted: #a5b6ad;
+  --bg: #101815;
+  --panel: #18231e;
+  --panel-2: #202e27;
+  --line: #35483c;
+  --blue-solid: #285ed4;
+  --glas: rgba(13, 23, 18, .95);
+  --haar: #465c4d;
+  --led-aus: #293d30;
+  --ui-nav: #0c1410;
+  --ui-hover: #2a3b30;
+  --ui-focus: #a8c8ff;
+  --ui-schatten: 0 12px 32px rgba(0, 0, 0, .22);
+}
+body.tag {
+  --text: #17271d;
+  --muted: #526459;
+  --bg: #f0f3ee;
+  --panel: #ffffff;
+  --panel-2: #f4f6f1;
+  --line: #c3cec1;
+  --blue-solid: #2459cb;
+  --glas: rgba(252, 254, 248, .97);
+  --haar: #8b9e8d;
+  --led-aus: #b6c5b3;
+  --ui-nav: #e7ede3;
+  --ui-hover: #dde6d8;
+  --ui-focus: #174db9;
+  --ui-schatten: 0 12px 32px rgba(24, 42, 29, .12);
+}
+html { color-scheme: dark; }
+html:has(body.tag) { color-scheme: light; }
+::selection { color: #fff; background: #285ed4; }
+input, select { caret-color: var(--text); }
+a { text-underline-offset: 4px; }
+
+/* Messwerte bleiben visuell von den Bedientexten getrennt. */
+.stage .glas, .stage .chip, .stage .leiste, .stage .werkzeuge,
+.stage .wendefenster { backdrop-filter: none; -webkit-backdrop-filter: none; }
+.stage .glas { border-radius: 14px; }
+.stage .chips { gap: 8px; }
+.stage .status-gruppen { display: contents; }
+.stage .chips.l { max-width: 20%; }
+.stage .chip { border-radius: 8px; padding: 9px 12px; font-size: 14px; line-height: 1.3; }
+.stage .chip.titel { font-family: "IBM Plex Sans", sans-serif; font-size: 17px;
+  font-weight: 600; letter-spacing: -.015em; text-transform: none; }
+.stage .chips.l .chip { max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+.stage .chips.l .titel { white-space: normal; overflow-wrap: anywhere; }
+.stage .chip i, .stage .chip.good i { width: 8px; height: 8px; box-shadow: none; }
+.stage .hint { padding: 12px; border-radius: 8px; font-size: 14px; line-height: 1.45; }
+.stage .balken { top: 22px; width: min(36vw, calc(100% - 2 * var(--leiste-breite) - 8 * var(--rand))); }
+.stage .leds { padding: 7px; height: auto; min-height: 28px;
+  background: var(--glas); border: 1px solid var(--haar); border-radius: 8px; }
+.stage .leds .led { min-height: 12px; border-radius: 2px; transform: none; }
+.stage .leds .on-green, .stage .leds .on-amber, .stage .leds .on-red { box-shadow: none; }
+.stage .mitte { top: 3px; height: 24px; width: 2px; }
+.stage .abw { margin-top: 14px; text-shadow: none; }
+.stage .abw small { color: var(--text); letter-spacing: .06em; }
+.stage .lenkstatus { border-radius: 6px; font-family: "IBM Plex Sans", sans-serif;
+  font-size: 15px; letter-spacing: .02em; padding: 7px 12px; }
+.stage .leiste { background: var(--glas); border-color: var(--haar); border-radius: 16px; }
+.stage .taste { border-radius: 10px; font-size: 14px; font-weight: 500; }
+.stage .taste:not(.an):not(.aktiv):not(.scharf):not(.recording):not(.bestaetigen) { background: var(--panel-2); }
+.stage .taste.turn.aktiv { background: var(--blue-solid); border-color: var(--blue-solid); color: #fff; }
+.stage .taste svg { stroke-width: 1.7; }
+.stage .taste.mark, .stage .taste.lenk { font-family: "IBM Plex Sans", sans-serif;
+  letter-spacing: 0; text-transform: none; font-size: 17px; font-weight: 600; }
+.stage .taste.mark small, .stage .taste.lenk small { font-size: 12px; line-height: 1.35; font-weight: 400; }
+.stage .taste.mark.an i, .stage .taste.lenk.scharf i { box-shadow: none; }
+.stage .taste.lenk.an { box-shadow: none; }
+.stage .taste.lenk.an i, .stage .taste.lenk.scharf i { animation: none; }
+.stage .rund { border-radius: 10px; background: var(--glas); border-color: var(--haar); }
+.stage .cluster { padding: 16px; gap: 12px 16px; }
+.stage .cluster .kmh { padding-bottom: 12px; border-bottom: 1px solid var(--haar); }
+.stage .cluster .kmh b { font-size: max(40px, calc(3.6 * var(--u))); }
+.stage .cluster div span { font-size: 12px; letter-spacing: .06em; }
+.stage .vg { padding: 14px 16px; }
+.stage .vg .zeile { font-family: "IBM Plex Sans", sans-serif; font-size: 12px;
+  letter-spacing: .025em; text-transform: none; line-height: 1.45; }
+.stage .vg .zeile b { font-size: 28px; }
+.stage .vg .bar { height: 5px; margin-top: 12px; }
+.stage .ruf { text-shadow: none; background: var(--glas); border: 1px solid var(--amber);
+  border-radius: 8px; padding: 8px 14px; font-family: "IBM Plex Sans", sans-serif;
+  font-size: 16px; letter-spacing: 0; text-transform: none; }
+.stage .wendefenster { border-radius: 14px; box-shadow: var(--ui-schatten); }
+.stage :focus-visible { outline: 3px solid var(--ui-focus); outline-offset: 3px; }
+
+/* Menü: dieselbe Struktur, präzisere Typografie und weniger konkurrierende Ränder. */
+.sheet { --m-linie: #526958; --m-feld-rand: #718876;
+  --m-gruen: #82e99f; --m-amber: #ffd07c; --m-rot: #ffaaa3;
+  font-size: 16px; line-height: 1.5; }
+body.tag .sheet { --m-linie: #a0b09d; --m-feld-rand: #788e78;
+  --m-gruen: #186c37; --m-amber: #824700; --m-rot: #ad2822; }
+.sheet .sheet-head { min-height: 80px; gap: 24px; padding: 12px 24px;
+  border-bottom: 1px solid var(--line); background: var(--ui-nav); }
+.sheet .sheet-brand { width: 176px; flex: none; display: flex; gap: 10px;
+  align-items: center; color: var(--text); font-size: 20px; font-weight: 600; letter-spacing: -.025em; }
+.sheet .sheet-brand img { border-radius: 8px; flex: none; }
+.sheet .sheet-titel { font-size: 24px; font-weight: 600; letter-spacing: -.025em; line-height: 1.25; }
+.sheet .close { min-height: 48px; border: 1px solid var(--m-feld-rand); border-radius: 8px;
+  background: transparent; font-size: 14px; font-weight: 500; padding: 0 16px; }
+/* Alle elf Seiten müssen auf das Tablet passen (1280 × 800), ohne die Leiste zu rollen. */
+.sheet .tabs { width: 224px; background: var(--ui-nav); padding: 12px 12px;
+  gap: 2px; border-right: 1px solid var(--line); }
+.sheet .tab-gruppe { color: var(--muted); font-size: 11px; letter-spacing: .09em;
+  margin: 12px 12px 4px; }
+.sheet .tab-gruppe:first-child { margin-top: 0; }
+.sheet .tab { font-size: 15px; padding: 10px 12px; min-height: 48px;
+  border: 1px solid transparent; border-radius: 8px; font-weight: 500; }
+.sheet .tab.active { color: #fff; background: var(--blue-solid); border-color: transparent; font-weight: 600; }
+.sheet .tab-panel { padding: 28px; }
+.sheet .tab-panel > * { max-width: 1180px; }
+.sheet .row { gap: 12px; margin-bottom: 20px; }
+.sheet .row input:not([type]), .sheet .row input[type=text] { min-width: min(220px, 100%); }
+.sheet button, .sheet .button { border-radius: 8px; border-width: 1px;
+  font-size: 15px; font-weight: 500; line-height: 1.35; padding: 12px 18px; }
+.sheet button:not(.primary):not(.tab):not(.danger):not(.an), .sheet .button:not(.primary) {
+  border-color: var(--m-feld-rand); }
+.sheet button:disabled { opacity: .45; cursor: not-allowed; }
+.sheet input:not([type=checkbox]):not([type=range]), .sheet select {
+  border: 1px solid var(--m-feld-rand); border-radius: 8px; padding: 12px 14px;
+  background: var(--panel-2); font-variant-numeric: tabular-nums; }
+.sheet input::placeholder { color: var(--muted); opacity: 1; }
+.sheet input.geaendert:not([type=checkbox]):not([type=range]), .sheet select.geaendert {
+  border-color: var(--blue); background: color-mix(in srgb, var(--blue) 14%, var(--panel)); }
+.sheet :focus-visible { outline: 3px solid var(--ui-focus); outline-offset: 3px; }
+.sheet .note, .sheet .setting-field .help, .sheet .setting-group .group-note {
+  color: var(--muted); font-size: 14px; line-height: 1.6; }
+.sheet .note { margin: 8px 0 18px; }
+.sheet .karten { gap: 24px; margin-bottom: 24px; }
+.sheet .karte { border: 1px solid var(--line); border-radius: 14px; padding: 24px;
+  background: var(--panel); gap: 18px; }
+.sheet .karte > h3 { font-size: 20px; font-weight: 600; letter-spacing: -.015em; }
+.sheet .karte .row { margin-bottom: 0; }
+.sheet .formular, .sheet .grid { gap: 20px 16px; }
+.sheet .formular > label, .sheet .formular fieldset label, .sheet .grid label,
+.sheet .setting-field > label { font-size: 14px; font-weight: 500; color: var(--text); gap: 8px; }
+.sheet .formular fieldset { border: 0; border-top: 1px solid var(--line); border-radius: 0;
+  margin-top: 8px; padding: 16px 0 0; gap: 20px 16px; }
+.sheet .formular legend { padding: 0 8px 0 0; font-size: 14px; font-weight: 600; }
+.sheet .item { padding: 18px 20px; border: 1px solid var(--line); border-radius: 12px; gap: 16px; }
+.sheet .item.active { border-color: var(--m-gruen); }
+.sheet .item .title { font-size: 17px; font-weight: 600; line-height: 1.4; overflow-wrap: anywhere; }
+.sheet .item .sub { font-size: 14px; margin-top: 4px; line-height: 1.5; overflow-wrap: anywhere; }
+.sheet .item .actions { gap: 8px; }
+.sheet .item .actions button, .sheet .item .actions a { font-size: 14px; padding: 10px 14px; }
+.sheet .list { gap: 12px; }
+.sheet .unterliste { margin-left: 16px; border-left-width: 1px; }
+.sheet .abschnitt { margin: 32px 0 16px; padding-top: 24px;
+  font-size: 18px; font-weight: 600; color: var(--text); border-top: 1px solid var(--line); }
+.sheet .erklaerung { margin: 0 0 24px; font-size: 14px; }
+.sheet .erklaerung > summary { font-size: 14px; color: var(--blue); }
+.sheet .chip { border-width: 1px; border-radius: 6px; font-size: 14px; }
+.sheet .setting-group { border: 1px solid var(--line); border-radius: 12px; margin-bottom: 16px; }
+.sheet .setting-group > summary { min-height: 64px; padding: 18px 20px; font-size: 17px; font-weight: 600; }
+.sheet .setting-group .group-note { padding: 0 20px 18px; max-width: 75ch; }
+.sheet .setting-field { padding: 18px 20px; }
+.sheet .setting-field .help { max-width: 75ch; margin-top: 8px; }
+.sheet .sticky-save { margin: -28px -28px 24px; padding: 16px 28px; background: var(--bg); }
+.sheet .einrichten { gap: 0; }
+.sheet .einrichten li { border: 0; border-bottom: 1px solid var(--line); border-radius: 0; padding: 20px 0; }
+.sheet .einrichten .schritt-text { font-size: 15px; line-height: 1.6; max-width: 75ch; margin: 10px 0 16px; }
+.sheet .einrichten li.gesperrt { opacity: .7; }
+.sheet .werkstatt-kopf h3 { font-size: 24px; font-weight: 600; }
+.sheet .lenkwerkstatt { gap: 12px; }
+.sheet .lenkwerkstatt > p { margin: 0; }
+.sheet .werkstatt-kopf p { margin: 8px 0 0; }
+.sheet .werkstatt-befund { border-radius: 6px; font-size: 14px; line-height: 1.35; }
+.sheet .lenkwerkstatt fieldset { border: 0; border-top: 1px solid var(--line);
+  border-radius: 0; padding: 20px 0 0; margin: 24px 0 0; }
+.sheet .lenkwerkstatt legend { padding: 0 10px 0 0; }
+.sheet .werkstatt-masse { gap: 20px; }
+.sheet .saat-konflikt, .sheet .saat-ok, .sheet .saat-fuell { border: 1px solid var(--m-linie); border-radius: 8px; padding: 14px 16px; }
+.sheet.aussaat-dialog { box-shadow: var(--ui-schatten); }
+
+@media (hover: hover) {
+  .stage .taste:not(:disabled):not(.an):not(.aktiv):not(.scharf):not(.recording):not(.bestaetigen):hover,
+  .stage .rund:hover { background: var(--ui-hover); }
+  .sheet button:not(:disabled):not(.primary):not(.tab):hover, .sheet .button:hover,
+  .sheet .tab:not(.active):hover { background: var(--ui-hover); }
+  .sheet button.primary:not(:disabled):hover { filter: brightness(1.12); }
+}
+@media (min-width: 761px) {
+  .sheet:not(.aussaat-dialog):not([hidden]) { animation: menue-zeigen 160ms ease-out; }
+}
+@keyframes menue-zeigen { from { opacity: .8; transform: translateY(5px); } to { opacity: 1; transform: none; } }
+@media (orientation: landscape) and (max-height: 600px) {
+  .stage .cluster { padding: 10px 14px; gap: 8px 12px; }
+  .stage .cluster .kmh { padding-bottom: 8px; }
+  .stage .cluster .spark { display: none; }
+  .stage .vg { padding: 10px 14px; }
+  .stage .chip { padding: 6px 10px; }
+  .stage .balken { top: 16px; }
+}
+@media (orientation: portrait) {
+  .stage .balken { top: var(--rand); width: calc(100% - 2 * var(--rand)); max-width: 640px; }
+  .stage .chips { top: max(116px, calc(14.5 * var(--u))); }
+  .stage .chips.l { max-width: 55%; }
+  .stage .chips.r { max-width: 40%; }
+  .stage .chips.r .chip { white-space: normal; text-align: right; }
+  .stage .cluster { gap: 10px 18px; padding: 12px 16px; }
+  .stage .cluster .kmh { border-bottom: 0; padding-bottom: 0; }
+}
+@media (max-width: 760px) {
+  .sheet .sheet-head { min-height: 68px; padding: 12px 16px; gap: 14px; }
+  .sheet .sheet-brand { width: auto; }
+  .sheet .sheet-brand span { display: none; }
+  .sheet .sheet-titel { font-size: 21px; }
+  .sheet .close { min-width: 48px; font-size: 0; padding: 0 14px; }
+  .sheet .close span { font-size: 18px; }
+  .sheet .tabs { width: auto; padding: 10px 16px; gap: 8px; border-bottom: 1px solid var(--line); }
+  .sheet .tab { padding: 10px 16px; border-color: var(--m-feld-rand); }
+  .sheet .tab-panel { padding: 20px 16px; }
+  .sheet .karte { padding: 20px; }
+  .sheet .karten { gap: 16px; }
+  .sheet .sticky-save { margin: -20px -16px 20px; padding: 12px 16px; }
+  .sheet .item { padding: 16px; }
+  .sheet .item .actions { width: 100%; }
+  .sheet .item .actions .abgesetzt { margin-left: 0; }
+  .sheet .setting-field, .sheet .setting-group > summary { padding: 16px; }
+}
+@media (orientation: portrait) and (max-width: 600px) {
+  .stage .status-gruppen { position: absolute; left: var(--rand); right: var(--rand);
+    top: max(108px, calc(14.5 * var(--u))); display: grid; gap: 6px; z-index: 3; pointer-events: none; }
+  .stage .chips.l, .stage .chips.r { position: static; max-width: none; gap: 6px;
+    flex-direction: row; flex-wrap: wrap; align-items: center; }
+  .stage .chips.l .chip { width: 100%; }
+  .stage .chips.l .titel { font-size: 15px; display: -webkit-box; -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical; }
+  .stage .chips.l .chip:not(.titel) { display: block; }
+  .stage .chips.r .chip { white-space: nowrap; font-size: 12px; padding: 8px 10px; }
+  .stage .hint { margin-top: 0; max-width: 100%; }
+  .stage .ansicht { top: max(270px, calc(var(--status-unterkante, 0px) + 12px));
+    flex-direction: row; right: var(--rand); gap: 6px; }
+  .stage .unten { flex-direction: column; align-items: stretch; }
+  .stage .cluster { grid-template-columns: 1.3fr .65fr .85fr 1fr; gap: 8px 10px; padding: 12px; }
+  .stage .cluster #tiltBox { grid-column: auto; }
+  .stage .cluster div span { font-size: 10px; }
+  .stage .cluster .kmh b { font-size: 34px; }
+  .stage .vg { padding: 10px 12px; }
+  .stage .vg .zeile span { max-width: 65%; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .sheet:not(.aussaat-dialog):not([hidden]) { animation: none; }
+  .stage .feld, .stage .himmel, .stage .led, .stage .ruf, .stage .bar i { transition: none; }
+}
+
+/* Flächenmarkierung: ruhig gefüllt, Überlappung deutlich in Bernstein. */
+:root { --f-flaeche: rgba(72, 204, 119, .40); --f-doppelt: rgba(255, 174, 48, .72); }
+body.tag { --f-flaeche: rgba(23, 140, 70, .38); --f-doppelt: rgba(200, 104, 12, .64); }
+.stage .cluster .mark-legende { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 6px 12px;
+  padding-top: 8px; border-top: 1px solid var(--haar); }
+.stage .cluster .mark-legende span { display: flex; align-items: center; gap: 6px;
+  font-size: 11px; font-weight: 400; letter-spacing: 0; text-transform: none; color: var(--text); }
+.stage .mark-legende i { width: 9px; height: 9px; border-radius: 2px; background: #48cc77; }
+.stage .mark-legende span:last-child i { background: #ffae30; }
+.stage .taste.mark.an { background: color-mix(in srgb, var(--leucht) 16%, var(--panel)); border-color: var(--leucht); }
+/* Lange Arbeitsnamen bleiben in der Taste, der Schaltzustand steht darüber. */
+.stage .taste.mark small { display: -webkit-box; -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical; overflow: hidden; }
+
+/* Kartenfarben: große Farbziele und ein eindeutiger lokaler Speicherweg. */
+.sheet .kartenfarben {padding: 16px;}
+.sheet .kartenfarben summary {font-weight: 600; font-size: 18px; cursor: pointer;}
+.sheet .kartenfarben-ansicht {display: flex; align-items: center; gap: 16px; margin: 16px 0;}
+.sheet .kartenfarben-ansicht select {min-width: 130px;}
+.sheet .kartenfarben-felder {display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 24px; margin-bottom: 20px;}
+.sheet .kartenfarbe {display: grid; gap: 12px; min-width: 0;}
+.sheet .kartenfarbe label {font-weight: 600;}
+.sheet .kartenfarbe input[type="color"] {width: 100%; height: 54px; padding: 5px; cursor: pointer;}
+.sheet .farbpalette {display: flex; flex-wrap: wrap; gap: 8px;}
+.sheet .farbpunkt {width: 44px; min-width: 44px; height: 44px; padding: 8px; border-radius: 10px;}
+.sheet .farbpunkt::after {content: ''; display: block; width: 22px; height: 22px; margin: auto; background: var(--muster); border-radius: 50%; border: 1px solid #627066;}
+@media (max-width: 600px) {.sheet .kartenfarben-felder {grid-template-columns: 1fr; gap: 20px;}}
+
+/* Feldwerkzeuge: große Bedienelemente, feste Nordansicht, Entwurf vor Übernahme. */
+.sheet.feldwerkzeug{display:block;position:fixed;inset:0;margin:auto;width:min(960px,96vw);max-width:96vw;height:auto;max-height:94dvh;padding:24px;overflow:auto;border:1px solid var(--line,#496054);border-radius:18px;background:var(--panel,#13251e);color:var(--text,#ecf3ec);z-index:1000;box-sizing:border-box}
+.sheet.feldwerkzeug::backdrop{background:rgba(0,0,0,.65)}
+.sheet.feldwerkzeug:not([open]){display:none}
+.sheet .fw-kopf{display:flex;justify-content:space-between;align-items:center;gap:16px}
+.sheet .fw-kopf h2{font-size:24px;margin:0}
+.sheet .fw-kicker{font-size:12px;letter-spacing:.1em;opacity:.65;margin:0 0 6px}
+.sheet #fwKarte{display:block;flex-shrink:0;min-height:220px;width:100%;height:clamp(220px,35vh,380px);background:var(--bg,#0b1913);border:1px solid var(--line,#496054);border-radius:12px;margin:12px 0}
+.sheet #fwKarte .fw-original{fill:none;stroke:var(--f-grenze,#ffb020);stroke-width:2;stroke-dasharray:6 5}
+.sheet #fwKarte .fw-entwurf{fill:rgba(72,204,119,.10);stroke:var(--accent,#4b9dff);stroke-width:2.5}
+.sheet #fwKarte .fw-punkt{fill:var(--panel,#13251e);stroke:var(--accent,#4b9dff);stroke-width:2;cursor:pointer}
+.sheet #fwKarte .fw-punkt.an{fill:#4b9dff;stroke:white}
+.sheet #fwKarte .fw-spur{fill:none;stroke:#4b9dff;stroke-width:4}
+.sheet #fwKarte .fw-spur-andere{fill:none;stroke:var(--text,#ecf3ec);stroke-width:1;opacity:.25}
+.sheet #fwKarte .fw-nord{fill:var(--text,#ecf3ec);font:16px sans-serif}
+.sheet .fw-richtungen button{flex:1;min-width:100px}
+.sheet.feldwerkzeug .formular{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.sheet.feldwerkzeug input:not([type="checkbox"]),.sheet.feldwerkzeug select{width:100%;box-sizing:border-box}
+.sheet.feldwerkzeug .row{display:flex;flex-wrap:wrap;gap:12px;margin:16px 0}
+.sheet .farben-vorschau{display:flex;position:relative;gap:0;min-height:88px;border:3px solid var(--v-grenze,#ffb020);border-radius:10px;margin:16px 0;overflow:hidden}
+.sheet .farben-vorschau span{display:flex;align-items:center;justify-content:center;flex:1;padding:12px;background:var(--v-flaeche,rgba(72,204,119,.4));color:var(--text,#ecf3ec)}
+.sheet .farben-vorschau span+span{background:var(--v-doppelt,rgba(255,174,48,.72));border-left:4px dashed var(--v-fahrgasse,#ff5c5c)}
+@media(max-width:600px){.sheet.feldwerkzeug{padding:16px}.sheet.feldwerkzeug .formular{grid-template-columns:1fr}.sheet .fw-kopf{align-items:flex-start}.sheet .fw-kopf h2{font-size:21px}}
+
+/* Lenkung einrichten: ein Ablauf, nur der anstehende Schritt ist offen. */
+.sheet .werkstatt-klapp { border-top: 1px solid var(--line); padding-top: 12px; }
+.sheet .werkstatt-klapp > summary { cursor: pointer; font-weight: 600; min-height: 44px;
+  display: flex; align-items: center; gap: 8px; }
+.sheet .werkstatt-klapp > summary::before { content: "▸"; color: var(--blau); }
+.sheet .werkstatt-klapp[open] > summary::before { content: "▾"; }
+.sheet .werkstatt-unter { margin: 8px 0 0; font-size: 16px; font-weight: 600; }
+.sheet .einrichten li.zu { padding: 12px 0; }
+.sheet .einrichten li.zu .schritt-text, .sheet .einrichten li.zu .tasten { display: none; }
+.sheet .einrichten li .kopf[role=button] { cursor: pointer; }
+.sheet .einrichten li.zu .kopf::after { content: "▸"; margin-left: auto; color: var(--muted); }
+/* Arbeiten: Feldköpfe klappen ihre Arbeiten auf und zu. */
+.sheet .gruppe.klapp { width: 100%; background: transparent; border: 0; border-bottom: 1px solid var(--line);
+  border-radius: 0; padding: 12px 4px; text-align: left; cursor: pointer; min-height: 52px; }
+/* Menü: jede Seite sagt in einer Zeile, was drin ist; die Suche oben findet den Rest. */
+.sheet .tab { flex-direction: column; align-items: flex-start; justify-content: center;
+  gap: 1px; padding: 5px 12px; white-space: normal; }
+.sheet .tab small { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: 12px; font-weight: 400; line-height: 1.25; color: var(--muted); }
+.sheet .tab.active small { color: rgba(255, 255, 255, .86); }
+.sheet .menue-suche { position: relative; flex: 0 1 380px; min-width: 0; }
+.sheet .menue-suche input { width: 100%; min-height: 48px; }
+.sheet .menue-treffer { position: absolute; top: calc(100% + 6px); left: 0; right: 0; z-index: 30;
+  display: flex; flex-direction: column; gap: 2px; padding: 6px; max-height: min(64vh, 560px);
+  overflow-y: auto; background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+  box-shadow: var(--ui-schatten, 0 12px 32px rgba(0, 0, 0, .35)); }
+.sheet .menue-treffer button { display: flex; flex-direction: column; align-items: flex-start; gap: 2px;
+  width: 100%; min-height: 52px; padding: 8px 12px; text-align: left; border: 0; background: transparent; }
+.sheet .menue-treffer button:hover, .sheet .menue-treffer button:focus-visible { background: var(--ui-hover); }
+.sheet .menue-treffer small { color: var(--muted); font-size: 13px; }
+.sheet .menue-treffer .note { margin: 8px 12px; }
+.sheet .such-treffer { outline: 3px solid var(--amber); outline-offset: 3px; border-radius: 6px;
+  transition: outline-color .4s; }
+.sheet .feld-loeschen { margin: 4px 0 18px; }
+@media (max-width: 760px) {
+  .sheet .sheet-head { flex-wrap: wrap; }
+  .sheet .menue-suche { order: 3; flex: 1 1 100%; }
+  .sheet .tab small { display: none; }
+}

@@ -1,0 +1,317 @@
+"""Coverage map: which ground has already been worked.
+
+The map is a grid of small square cells.  A grid rather than a pile of polygons
+is what makes this cheap enough for a Raspberry Pi: marking ground worked is a
+set insert, the worked area is a count times the cell area, and asking "has this
+section already been over here?" - the question section control lives on - is a
+single lookup instead of a polygon intersection test.
+
+Cell size trades memory for precision.  At 0.5 m a 100 ha field needs about two
+million cells, which is a few tens of megabytes as a Python set: fine for a day's
+work, and the map is thinned to disk between jobs.
+"""
+
+from __future__ import annotations
+
+import math
+from dataclasses import dataclass
+from typing import Optional, Sequence
+
+from .geo import Point, point_in_polygon
+
+
+@dataclass
+class Section:
+    """One switchable part of the implement, measured from the tool centre."""
+
+    index: int
+    left_m: float   # + = right of centre, so left_m < right_m always
+    right_m: float
+    enabled: bool = True
+    auto: bool = True      # may be switched off automatically on worked ground
+    forced_off: bool = False
+
+    @property
+    def width(self) -> float:
+        return self.right_m - self.left_m
+
+    @property
+    def centre(self) -> float:
+        return (self.left_m + self.right_m) / 2.0
+
+
+def build_sections(width_m: float, count: int) -> list[Section]:
+    """Split a working width into equal sections, numbered left to right."""
+    count = max(1, int(count))
+    step = width_m / count
+    start = -width_m / 2.0
+    return [
+        Section(index=i, left_m=start + i * step, right_m=start + (i + 1) * step)
+        for i in range(count)
+    ]
+
+
+class CoverageMap:
+    """Worked ground as a set of grid cells."""
+
+    def __init__(self, cell_size: float = 0.5) -> None:
+        self.cell_size = cell_size
+        self.cells: set[tuple[int, int]] = set()
+        self.applied_area_m2 = 0.0  # includes overlap: what the machine actually put out
+        self._new_cells: list[tuple[int, int]] = []
+        # Was nicht diese Maschine eben gefahren hat (anderer Traktor, früherer
+        # Stand). Getrennt, weil die Anzeige die eigene Fahrt selbst als glatten
+        # Streifen zeichnet und nur das Fremde aus Zellen malen muss.
+        self._fremde_neu: list[tuple[int, int]] = []
+
+    # -- queries ----------------------------------------------------------
+
+    @property
+    def area_m2(self) -> float:
+        return len(self.cells) * self.cell_size * self.cell_size
+
+    @property
+    def area_ha(self) -> float:
+        return self.area_m2 / 10_000.0
+
+    @property
+    def overlap_m2(self) -> float:
+        """Ground gone over more than once - the number that costs money."""
+        return max(0.0, self.applied_area_m2 - self.area_m2)
+
+    @property
+    def overlap_percent(self) -> float:
+        if self.applied_area_m2 <= 0:
+            return 0.0
+        return 100.0 * self.overlap_m2 / self.applied_area_m2
+
+    def is_covered(self, point: Point) -> bool:
+        return self._cell(point) in self.cells
+
+    def _cell(self, point: Point) -> tuple[int, int]:
+        return (
+            int(math.floor(point[0] / self.cell_size)),
+            int(math.floor(point[1] / self.cell_size)),
+        )
+
+    # -- recording --------------------------------------------------------
+
+    def add_swath(self, previous: Point, current: Point, heading: float,
+                  sections: Sequence[Section]) -> float:
+        """Mark the ground swept between two positions.
+
+        Returns the applied area of this step in m².  Steps longer than a few
+        metres (a GPS dropout, or simply driving fast between updates) are split
+        so the swath stays a chain of small quads instead of one long one that
+        cuts corners.
+        """
+        travel = math.dist(previous, current)
+        if travel <= 0.001:
+            return 0.0
+        max_step = max(1.0, self.cell_size * 4)
+        steps = max(1, int(math.ceil(travel / max_step)))
+        applied = 0.0
+        for s in range(steps):
+            t0, t1 = s / steps, (s + 1) / steps
+            p0 = (previous[0] + (current[0] - previous[0]) * t0,
+                  previous[1] + (current[1] - previous[1]) * t0)
+            p1 = (previous[0] + (current[0] - previous[0]) * t1,
+                  previous[1] + (current[1] - previous[1]) * t1)
+            applied += self._add_quad(p0, p1, heading, sections)
+        self.applied_area_m2 += applied
+        return applied
+
+    def _add_quad(self, p0: Point, p1: Point, heading: float,
+                  sections: Sequence[Section]) -> float:
+        h = math.radians(heading)
+        right = (math.cos(h), -math.sin(h))
+        applied = 0.0
+        for section in sections:
+            if not section.enabled or section.forced_off:
+                continue
+            corners = [
+                (p0[0] + right[0] * section.left_m, p0[1] + right[1] * section.left_m),
+                (p0[0] + right[0] * section.right_m, p0[1] + right[1] * section.right_m),
+                (p1[0] + right[0] * section.right_m, p1[1] + right[1] * section.right_m),
+                (p1[0] + right[0] * section.left_m, p1[1] + right[1] * section.left_m),
+            ]
+            self._rasterise(corners)
+            applied += math.dist(p0, p1) * section.width
+        return applied
+
+    def _rasterise(self, polygon: Sequence[Point]) -> None:
+        """Mark every cell whose centre falls inside the quad."""
+        xs = [p[0] for p in polygon]
+        ys = [p[1] for p in polygon]
+        cs = self.cell_size
+        ix0, ix1 = int(math.floor(min(xs) / cs)), int(math.ceil(max(xs) / cs))
+        iy0, iy1 = int(math.floor(min(ys) / cs)), int(math.ceil(max(ys) / cs))
+        for ix in range(ix0, ix1 + 1):
+            cx = (ix + 0.5) * cs
+            for iy in range(iy0, iy1 + 1):
+                cell = (ix, iy)
+                if cell in self.cells:
+                    continue
+                cy = (iy + 0.5) * cs
+                if point_in_polygon((cx, cy), polygon):
+                    self.cells.add(cell)
+                    self._new_cells.append(cell)
+
+    # -- section control --------------------------------------------------
+
+    def update_auto_sections(self, tool_centre: Point, heading: float,
+                             sections: Sequence[Section],
+                             look_ahead_m: float = 1.0,
+                             speed_ms: float = 0.0,
+                             boundary: Optional[Sequence[Point]] = None,
+                             pcc: float = 0.9,
+                             vorlauf_an_s: Optional[float] = None,
+                             vorlauf_aus_s: float = 0.5,
+                             min_speed_ms: float = 0.0,
+                             rueckwaerts: bool = False,
+                             vorgewende_m: float = 0.0,
+                             mindest_vorlauf_m: Optional[float] = None) -> None:
+        """Switch sections off over worked ground and outside the boundary.
+
+        The check is done a little ahead of the machine, scaled with speed,
+        because a sprayer valve needs time to close.  Only sections flagged
+        `auto` are touched, so the driver can always override.
+
+        Abgetastet wird die **Breite** des Teilstücks, nicht ein einzelner Punkt
+        in seiner Mitte. Ein Punkt kennt nur an oder aus und lässt die Teilbreite
+        am Rand einer Fahrspur flackern, sobald der Traktor ein paar Zentimeter
+        pendelt. ``pcc`` ist die Schwelle aus dem Cerea-Handbuch: ein offenes
+        Teilstück schließt erst, wenn dieser Anteil überdeckt ist (Standard 0,9);
+        auf neuem Boden geht es sofort wieder auf.
+
+        Die Feldgrenze bleibt davon unberührt: was hinausragt, schaltet ab,
+        unabhängig von der Überdeckung. Draußen zu arbeiten wäre kein
+        Schönheitsfehler.
+
+        Zwei Vorlauflinien wie in AgOpenGPS (``vorlauf_an_s`` / ``vorlauf_aus_s``
+        Sekunden Fahrt voraus): offen ist ein Teilstück, sobald an **einer** der
+        beiden noch freier Boden liegt, zu erst, wenn **beide** überdeckt sind. Hinge
+        es am eigenen Zustand (offen → kurze Linie, zu → lange), ginge es beim
+        Verlassen bearbeiteten Bodens bei jedem Schritt auf und zu. Grenze und
+        Vorgewende zählen an der kurzen Linie: sonst schlösse es zu früh vor dem Rand.
+        ``vorgewende_m`` > 0: näher als so viel an der Grenze ist Vorgewende und bleibt zu -
+        gemessen am echten Abstand, nicht am gezeichneten Ring (der verliert an Stufen Ecken).
+        Unter ``min_speed_ms`` und rückwärts schließt alles Automatische.
+        """
+        h = math.radians(heading)
+        forward = (math.sin(h), math.cos(h))
+        right = (math.cos(h), -math.sin(h))
+        tempo = max(0.0, speed_ms)
+        t_an = max(0.0, vorlauf_an_s if vorlauf_an_s is not None else vorlauf_aus_s)
+        t_aus = max(0.0, vorlauf_aus_s)
+        if mindest_vorlauf_m is None:
+            ahead_aus = look_ahead_m + tempo * t_aus
+            ahead_an = look_ahead_m + tempo * t_an
+        else:
+            # Genau so weit voraus, wie das Ventil braucht - eine Zelle gilt schon als
+            # bearbeitet, wenn die Bahn sie anschneidet, daher eine halbe Zelle weniger.
+            # Nie weniger als ``mindest_vorlauf_m``: sonst hielte das Gerät die eigene,
+            # eben gemalte Bahn für bearbeiteten Boden.
+            halb = self.cell_size / 2.0
+            ahead_aus = max(mindest_vorlauf_m, look_ahead_m + tempo * t_aus - halb)
+            ahead_an = max(mindest_vorlauf_m, look_ahead_m + tempo * t_an - halb)
+        schwelle = max(0.05, min(1.0, pcc))
+        langsam = rueckwaerts or tempo < min_speed_ms
+        if vorgewende_m > 0.0:
+            from .headland import distance_to_boundary   # spät: headland braucht guidance
+        for section in sections:
+            if not section.auto or section.forced_off:
+                continue
+            if langsam:
+                section.enabled = False
+                continue
+            kurz = self._section_proben(tool_centre, forward, right, section, ahead_aus)
+            if boundary is not None and any(
+                    not point_in_polygon(punkt, boundary) for punkt in kurz):
+                section.enabled = False
+                continue
+            if vorgewende_m > 0.0 and boundary is not None and any(
+                    (distance_to_boundary(punkt, boundary) or 0.0) < vorgewende_m for punkt in kurz):
+                section.enabled = False
+                continue
+            frei = False
+            for proben in ((kurz,) if ahead_an == ahead_aus else
+                           (kurz, self._section_proben(tool_centre, forward, right, section, ahead_an))):
+                anteil = sum(1 for punkt in proben if self.is_covered(punkt)) / len(proben)
+                frei = frei or anteil < schwelle
+            section.enabled = frei
+
+    @staticmethod
+    def _section_proben(tool_centre: Point, forward: Point, right: Point,
+                        section: Section, ahead: float,
+                        anzahl: int = 5) -> list[Point]:
+        """Punkte quer über die Breite eines Teilstücks, ein Stück voraus."""
+        punkte = []
+        for i in range(anzahl):
+            # Ränder mitnehmen, aber nicht genau auf der Kante: dort entscheidet
+            # ein Zentimeter über das Ergebnis.
+            anteil = (i + 0.5) / anzahl
+            quer = section.left_m + section.width * anteil
+            punkte.append((
+                tool_centre[0] + forward[0] * ahead + right[0] * quer,
+                tool_centre[1] + forward[1] * ahead + right[1] * quer,
+            ))
+        return punkte
+
+    # -- transfer ---------------------------------------------------------
+
+    def drain_new_cells(self) -> list[tuple[int, int]]:
+        """Cells marked since the last call - the display only needs the delta."""
+        new, self._new_cells = self._new_cells, []
+        return new
+
+    def drain_fremde_zellen(self) -> list[tuple[int, int]]:
+        """Zellen, die seit dem letzten Aufruf von außen dazukamen (merge)."""
+        neu, self._fremde_neu = self._fremde_neu, []
+        return neu
+
+    def pack(self) -> bytes:
+        """Compact binary form for storage and for syncing to the master."""
+        import struct
+        from array import array
+        import sys
+        # Als Feld aus Ganzzahlen statt Zelle für Zelle: bei 25 ha sind es 100 000
+        # Zellen, und das Sichern läuft auf dem Rechner, der auch lenkt.
+        werte = array("i")
+        for ix, iy in self.cells:
+            werte.append(ix)
+            werte.append(iy)
+        if sys.byteorder == "big":
+            werte.byteswap()
+        return struct.pack("<f", self.cell_size) + werte.tobytes()
+
+    @classmethod
+    def unpack(cls, blob: bytes) -> "CoverageMap":
+        import struct
+        if len(blob) < 4:
+            return cls()
+        (cell_size,) = struct.unpack_from("<f", blob, 0)
+        cov = cls(cell_size=cell_size)
+        for offset in range(4, len(blob) - 7, 8):
+            cov.cells.add(struct.unpack_from("<ii", blob, offset))
+        cov.applied_area_m2 = cov.area_m2
+        return cov
+
+    def merge(self, other: "CoverageMap") -> None:
+        """Combine two machines' work on the same field.
+
+        Cell sizes must match; grids are anchored to the same field datum, so
+        identical ground lands on identical cells and the union is exact.
+        """
+        if abs(other.cell_size - self.cell_size) > 1e-6:
+            raise ValueError("Rastergrößen unterschiedlich - Karten nicht kombinierbar")
+        added = other.cells - self.cells
+        self.cells |= added
+        self.applied_area_m2 += other.applied_area_m2
+        self._fremde_neu.extend(sorted(added))
+
+    def cells_for_display(self, limit: int = 200_000) -> list[list[int]]:
+        cells = sorted(self.cells)
+        if len(cells) > limit:
+            cells = cells[:limit]
+        return [[ix, iy] for ix, iy in cells]
