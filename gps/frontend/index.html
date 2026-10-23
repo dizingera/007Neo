@@ -249,6 +249,23 @@
         automatisch aktiv – bis zur nächsten Aussaat – die Fahrgassen liegen dann bei jedem Gerät an derselben
         Stelle.</p>
     </details>
+    <!-- Wie bei Cerea: den Schlag auf der Karte antippen statt in der Liste suchen. -->
+    <div class="row feld-ansicht" role="group" aria-label="Felder zeigen als">
+      <button id="btnFelderListe" class="an" aria-pressed="true">Liste</button>
+      <button id="btnFelderKarte" aria-pressed="false">Karte</button>
+    </div>
+    <div class="feldkarte" id="feldkarteBox" hidden>
+      <canvas id="feldkarte" aria-label="Karte aller Felder – ein Feld antippen wählt es aus"></canvas>
+      <div class="feldkarte-knoepfe">
+        <button id="btnFeldkarteAlle" title="Alle Felder zeigen">Alle Felder</button>
+        <button id="btnFeldkarteHier" title="Auf den Traktor zentrieren">Traktor</button>
+      </div>
+      <p class="note feldkarte-hinweis" id="feldkarteHinweis" role="status" aria-atomic="true"></p>
+      <div class="feldkarte-wahl" id="feldkarteWahl" hidden>
+        <div class="feldkarte-text"><b id="feldkarteName"></b><span id="feldkarteInfo"></span></div>
+        <button id="btnFeldkarteLaden" class="primary">Laden</button>
+      </div>
+    </div>
     <div class="list" id="fieldList"></div>
   </section>
 
@@ -943,6 +960,7 @@
 <script src="kalibrierung.js"></script>
 <script src="kartenfarben.js"></script>
 <script src="menuesuche.js"></script>
+<script src="feldkarte.js"></script>
 <dialog id="feldWerkzeug" class="sheet feldwerkzeug" aria-labelledby="fwTitel">
   <div class="fw-kopf"><div><p class="fw-kicker">AGRIPILOT · FELDWERKZEUGE</p><h2 id="fwTitel"></h2></div><button type="button" id="fwSchliessen" aria-label="Feldwerkzeug schließen">Schließen</button></div>
   <p id="fwBeschreibung" class="note"></p>

@@ -3041,6 +3041,256 @@ function flotteKarte(maschinen, felder) {
   });
 }
 
+/* Feldkarte: den Schlag auf der Karte wählen, wie bei Cerea (Menü → Felder → Karte).
+ * Rechnung und Treffer in feldkarte.js, die Projektion aus fernansicht.js. */
+const FELDKARTE_PUNKT_PX = 14;   // schmaler als das auf dem Bildschirm: als Punkt zeichnen
+const feldkarte = { felder: [], proj: null, ansicht: null, wahl: null, geladen: null, position: null,
+                    bilder: {}, zeiger: new Map(), bewegt: false, start: null };
+
+const feldkarteAn = () => !el('feldkarteBox').hidden;
+
+function feldkarteZeigen(an) {
+  merken('felderAnsicht', an ? 'karte' : 'liste');
+  el('feldkarteBox').hidden = !an;
+  el('fieldList').hidden = an;
+  [['btnFelderKarte', an], ['btnFelderListe', !an]].forEach(([id, ja]) => {
+    el(id).classList.toggle('an', ja);
+    el(id).setAttribute('aria-pressed', String(ja));
+  });
+  if (an) feldkarteLaden();
+}
+el('btnFelderListe').onclick = () => feldkarteZeigen(false);
+el('btnFelderKarte').onclick = () => feldkarteZeigen(true);
+if (gemerkt('felderAnsicht') === 'karte') {
+  el('feldkarteBox').hidden = false;
+  el('fieldList').hidden = true;
+  el('btnFelderKarte').classList.add('an'); el('btnFelderKarte').setAttribute('aria-pressed', 'true');
+  el('btnFelderListe').classList.remove('an'); el('btnFelderListe').setAttribute('aria-pressed', 'false');
+}
+
+async function feldkarteLaden() {
+  const daten = await fetch('/api/feldkarte').then((r) => r.json()).catch(() => null);
+  if (!daten || !feldkarteAn()) return;
+  if (!feldkarte.proj) {
+    // Die Projektion bleibt, sonst spränge die Ansicht bei jedem Nachladen.
+    const punkte = [];
+    daten.felder.forEach((f) => f.grenze.forEach((p) => punkte.push(p)));
+    if (daten.position) punkte.push([daten.position.lat, daten.position.lon]);
+    feldkarte.proj = window.Fernansicht.projektion(punkte);
+  }
+  const proj = feldkarte.proj;
+  if (!proj) { el('feldkarteHinweis').textContent = 'Noch kein Feld mit Grenze.'; return; }
+  feldkarte.felder = daten.felder.map((f) => ({ ...f, xy: f.grenze.map(proj.nachMetern) }));
+  feldkarte.geladen = daten.geladen;
+  feldkarte.position = daten.position;
+  if (feldkarte.wahl === null && daten.geladen) feldkarte.wahl = daten.geladen;
+  daten.felder.forEach((f) => {
+    if (!f.luftbild || feldkarte.bilder[f.id]) return;
+    const bild = new Image();
+    bild.onload = () => feldkarteZeichnen();
+    bild.src = f.luftbild.bild;
+    feldkarte.bilder[f.id] = { bild, box: f.luftbild.box };
+  });
+  const mitBild = daten.felder.filter((f) => f.luftbild).length;
+  el('feldkarteHinweis').textContent = mitBild < daten.felder.length
+    ? `${daten.felder.length} Felder · ${mitBild ? `Luftbild bei ${mitBild}` : 'ohne Luftbild'} – oben „Luftbilder aller Felder laden“`
+    : '';
+  if (!feldkarte.ansicht) feldkarteAlle();
+  feldkarteZeichnen();
+  feldkarteWahlZeigen();
+}
+
+function feldkarteGroesse() {
+  const leinwand = el('feldkarte');
+  return [leinwand.clientWidth || 1, leinwand.clientHeight || 1];
+}
+
+function feldkarteAlle() {
+  if (!feldkarte.felder.length) return;
+  const xs = feldkarte.felder.flatMap((f) => f.xy.map((p) => p[0]));
+  const ys = feldkarte.felder.flatMap((f) => f.xy.map((p) => p[1]));
+  const [b, h] = feldkarteGroesse();
+  feldkarte.ansicht = window.Feldkarte.einpassen([Math.min(...xs), Math.min(...ys)], [Math.max(...xs), Math.max(...ys)], b, h);
+  feldkarteZeichnen();
+}
+
+function feldkarteZeichnen() {
+  if (!feldkarteAn() || !feldkarte.ansicht || !feldkarte.proj) return;
+  const leinwand = el('feldkarte');
+  const k = window.devicePixelRatio || 1;
+  const [breite, hoehe] = feldkarteGroesse();
+  leinwand.width = breite * k; leinwand.height = hoehe * k;
+  const c = leinwand.getContext('2d');
+  c.setTransform(k, 0, 0, k, 0, 0);
+  c.fillStyle = F.boden; c.fillRect(0, 0, breite, hoehe);
+  const K = window.Feldkarte, a = feldkarte.ansicht, proj = feldkarte.proj;
+  const px = (p) => K.nachBild(a, breite, hoehe, p);
+  Object.values(feldkarte.bilder).forEach(({ bild, box }) => {
+    if (!bild.complete || !bild.naturalWidth) return;
+    const [x0, y0] = px(proj.nachMetern([box[2], box[1]]));    // Nordwest
+    const [x1, y1] = px(proj.nachMetern([box[0], box[3]]));    // Südost
+    c.drawImage(bild, x0, y0, x1 - x0, y1 - y0);
+  });
+  c.lineJoin = 'round';
+  feldkarte.felder.forEach((f) => {
+    c.beginPath();
+    f.xy.forEach((p, i) => { const [x, y] = px(p); i ? c.lineTo(x, y) : c.moveTo(x, y); });
+    c.closePath();
+    const gewaehlt = f.id === feldkarte.wahl, geladen = f.id === feldkarte.geladen;
+    c.fillStyle = gewaehlt ? 'rgba(255, 216, 74, 0.30)' : 'rgba(0, 0, 0, 0.12)';
+    c.fill();
+    c.strokeStyle = gewaehlt ? '#ffd84a' : geladen ? '#48cc77' : F.grenze;
+    c.lineWidth = gewaehlt || geladen ? 3 : 1.6;
+    c.stroke();
+  });
+  // Namen nur, wo das Feld groß genug für die Schrift ist. Zu klein für die Hand
+  // (weit herausgezoomt): ein Punkt zum Antippen, wie eine Stecknadel.
+  c.font = '600 13px system-ui, sans-serif'; c.textAlign = 'center'; c.textBaseline = 'middle';
+  // Namen, die sich überdecken würden, bleiben weg - das gewählte Feld zuerst, dann die großen.
+  const belegt = [];
+  const beschriften = (text, x, y, farbe) => {
+    const w = c.measureText(text).width + 6, h = 16;
+    const kasten = [x - w / 2, y - h / 2, x + w / 2, y + h / 2];
+    if (belegt.some((b) => kasten[0] < b[2] && kasten[2] > b[0] && kasten[1] < b[3] && kasten[3] > b[1])) return;
+    belegt.push(kasten);
+    c.lineWidth = 4; c.strokeStyle = 'rgba(0,0,0,0.75)'; c.strokeText(text, x, y);
+    c.fillStyle = farbe; c.fillText(text, x, y);
+  };
+  const reihe = [...feldkarte.felder].sort((a, b) =>
+    (b.id === feldkarte.wahl) - (a.id === feldkarte.wahl) || K.flaeche(b.xy) - K.flaeche(a.xy));
+  reihe.forEach((f) => {
+    const xs = f.xy.map((p) => px(p)[0]);
+    const name = f.name.replace(/\s*\/\s*Nr\.\s*\d+$/, '');
+    const [x, y] = px(K.schwerpunkt(f.xy));
+    if (Math.max(...xs) - Math.min(...xs) < FELDKARTE_PUNKT_PX) {
+      c.beginPath(); c.arc(x, y, 7, 0, Math.PI * 2);
+      c.fillStyle = f.id === feldkarte.wahl ? '#ffd84a' : f.id === feldkarte.geladen ? '#48cc77' : F.grenze;
+      c.fill(); c.lineWidth = 2; c.strokeStyle = 'rgba(0,0,0,0.7)'; c.stroke();
+      beschriften(name, x, y - 16, f.id === feldkarte.wahl ? '#ffd84a' : '#fff');
+      return;
+    }
+    if (Math.max(...xs) - Math.min(...xs) < c.measureText(name).width + 8) return;
+    beschriften(name, x, y, f.id === feldkarte.wahl ? '#ffd84a' : '#fff');
+  });
+  const pos = feldkarte.position;
+  if (pos) {
+    const [x, y] = px(proj.nachMetern([pos.lat, pos.lon]));
+    c.save(); c.translate(x, y); c.rotate(((pos.kurs || 0) * Math.PI) / 180);
+    c.beginPath(); c.moveTo(0, -14); c.lineTo(9, 10); c.lineTo(0, 5); c.lineTo(-9, 10); c.closePath();
+    c.fillStyle = '#4b9dff'; c.fill(); c.lineWidth = 2; c.strokeStyle = '#fff'; c.stroke();
+    c.restore();
+  }
+}
+
+function feldkarteWahlZeigen() {
+  const f = feldkarte.felder.find((x) => x.id === feldkarte.wahl);
+  el('feldkarteWahl').hidden = !f;
+  if (!f) return;
+  el('feldkarteName').textContent = f.name;
+  const teile = [`${Number(f.area_ha || 0).toLocaleString('de-DE', { maximumFractionDigits: 2 })} ha`];
+  const pos = feldkarte.position;
+  if (pos && feldkarte.proj) {
+    const p = feldkarte.proj.nachMetern([pos.lat, pos.lon]);
+    if (window.Feldkarte.imPolygon(p, f.xy)) teile.push('der Traktor steht darauf');
+    else {
+      let d = Infinity;
+      f.xy.forEach((q) => { d = Math.min(d, Math.hypot(q[0] - p[0], q[1] - p[1])); });
+      teile.push(d < 1000 ? `${Math.round(d)} m vom Traktor` : `${(d / 1000).toLocaleString('de-DE', { maximumFractionDigits: 1 })} km vom Traktor`);
+    }
+  }
+  const geladen = f.id === feldkarte.geladen;
+  if (geladen) teile.push('geladen');
+  el('feldkarteInfo').textContent = teile.join(' · ');
+  el('btnFeldkarteLaden').textContent = geladen ? 'Geladen' : 'Laden';
+  el('btnFeldkarteLaden').disabled = geladen;
+}
+
+el('btnFeldkarteLaden').onclick = async () => {
+  const f = feldkarte.felder.find((x) => x.id === feldkarte.wahl);
+  if (!f) return;
+  if (await api('POST', `/api/fields/${f.id}/load`)) {
+    toast(`${f.name} geladen`); el('sheet').hidden = true;
+    feldkarte.geladen = f.id;
+  }
+};
+el('btnFeldkarteAlle').onclick = feldkarteAlle;
+el('btnFeldkarteHier').onclick = () => {
+  const pos = feldkarte.position;
+  if (!pos || !feldkarte.proj || !feldkarte.ansicht) { toast('Keine Position – auf GPS warten', true); return; }
+  feldkarte.ansicht = { mitte: feldkarte.proj.nachMetern([pos.lat, pos.lon]), massstab: Math.max(feldkarte.ansicht.massstab, 0.6) };
+  feldkarteZeichnen();
+};
+
+/* Bedienen: ziehen verschiebt, zwei Finger oder das Rad zoomen, Antippen wählt ein Feld. */
+(function feldkarteBedienung() {
+  const leinwand = el('feldkarte');
+  const ort = (e) => { const r = leinwand.getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top]; };
+  leinwand.addEventListener('pointerdown', (e) => {
+    leinwand.setPointerCapture(e.pointerId);
+    feldkarte.zeiger.set(e.pointerId, ort(e));
+    if (feldkarte.zeiger.size === 1) { feldkarte.bewegt = false; feldkarte.start = ort(e); }
+  });
+  leinwand.addEventListener('pointermove', (e) => {
+    if (!feldkarte.zeiger.has(e.pointerId) || !feldkarte.ansicht) return;
+    const [b, h] = feldkarteGroesse();
+    const vorher = [...feldkarte.zeiger.values()];
+    feldkarte.zeiger.set(e.pointerId, ort(e));
+    const jetzt = [...feldkarte.zeiger.values()];
+    if (jetzt.length === 1) {
+      const [x, y] = jetzt[0];
+      if (Math.hypot(x - feldkarte.start[0], y - feldkarte.start[1]) > 6) feldkarte.bewegt = true;
+      if (feldkarte.bewegt) feldkarte.ansicht = window.Feldkarte.verschieben(feldkarte.ansicht, x - vorher[0][0], y - vorher[0][1]);
+    } else if (jetzt.length === 2 && vorher.length === 2) {
+      feldkarte.bewegt = true;
+      const mitte = (p) => [(p[0][0] + p[1][0]) / 2, (p[0][1] + p[1][1]) / 2];
+      const weite = (p) => Math.hypot(p[0][0] - p[1][0], p[0][1] - p[1][1]) || 1;
+      const m0 = mitte(vorher), m1 = mitte(jetzt);
+      feldkarte.ansicht = window.Feldkarte.verschieben(feldkarte.ansicht, m1[0] - m0[0], m1[1] - m0[1]);
+      feldkarte.ansicht = window.Feldkarte.zoomen(feldkarte.ansicht, weite(jetzt) / weite(vorher), m1, b, h);
+    }
+    feldkarteZeichnen();
+  });
+  const los = (e) => {
+    if (!feldkarte.zeiger.has(e.pointerId)) return;
+    const einzeln = feldkarte.zeiger.size === 1;
+    feldkarte.zeiger.delete(e.pointerId);
+    if (e.type !== 'pointerup' || !einzeln || feldkarte.bewegt || !feldkarte.ansicht) return;
+    const [b, h] = feldkarteGroesse();
+    const p = window.Feldkarte.nachMetern(feldkarte.ansicht, b, h, ort(e));
+    // 12 Bildpunkte Fang: mit dem Handschuh trifft man die Grenze nicht genau.
+    // Weit herausgezoomt sind die Felder Punkte: dann zählt der nächste Punkt.
+    const fang = 12 / feldkarte.ansicht.massstab;
+    let wahl = window.Feldkarte.feldUnter(feldkarte.felder, p, fang);
+    if (wahl === null) {
+      let beste = (FELDKARTE_PUNKT_PX + 10) / feldkarte.ansicht.massstab;
+      feldkarte.felder.forEach((f) => {
+        const s = window.Feldkarte.schwerpunkt(f.xy);
+        const d = Math.hypot(s[0] - p[0], s[1] - p[1]);
+        if (d < beste) { beste = d; wahl = f.id; }
+      });
+    }
+    feldkarte.wahl = wahl;
+    feldkarteZeichnen();
+    feldkarteWahlZeigen();
+  };
+  leinwand.addEventListener('pointerup', los);
+  leinwand.addEventListener('pointercancel', los);
+  leinwand.addEventListener('wheel', (e) => {
+    if (!feldkarte.ansicht) return;
+    e.preventDefault();
+    const [b, h] = feldkarteGroesse();
+    feldkarte.ansicht = window.Feldkarte.zoomen(feldkarte.ansicht, Math.exp(-e.deltaY * 0.0015), ort(e), b, h);
+    feldkarteZeichnen();
+  }, { passive: false });
+  leinwand.addEventListener('dblclick', (e) => {
+    if (!feldkarte.ansicht) return;
+    const [b, h] = feldkarteGroesse();
+    feldkarte.ansicht = window.Feldkarte.zoomen(feldkarte.ansicht, 2, ort(e), b, h);
+    feldkarteZeichnen();
+  });
+  window.addEventListener('resize', () => feldkarteZeichnen());
+})();
+
 let jobFelderOffen = null;   // aufgeklappte Felder in der Liste der Arbeiten
 
 function renderJobs(jobs, fields) {

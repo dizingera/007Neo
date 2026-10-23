@@ -915,12 +915,13 @@ class Engine:
         rand = int(round((verhaeltnis - 1) / 2)) if abs(verhaeltnis - round(verhaeltnis)) < 0.01 \
             and round(verhaeltnis) % 2 == 1 else 3
         gespeichert = self.store.get_setting(f"saatplan:{field_id}") or {}
+        optionen = saatplan_module.startkanten(grenze)
         return {
             "feld": feld["name"],
-            "optionen": [{k: o[k] for k in ("id", "text", "kante")}
-                         for o in saatplan_module.startkanten(grenze)],
+            "optionen": [{k: o[k] for k in ("id", "text", "kante", "laenge_m")} for o in optionen],
+            # Ohne eigene Vorgabe: an der längsten geraden Kante anfangen, wie beim Säen üblich.
             "vorgabe": gespeichert.get("vorgabe") or {"breite_m": breite, "fahrgasse_m": weite,
-                                                       "randspuren": rand},
+                                                       "randspuren": rand, "start": (optionen[0]["id"] if optionen else None)},
             "plan": gespeichert.get("plan"),
         }
 

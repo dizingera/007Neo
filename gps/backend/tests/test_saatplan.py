@@ -144,7 +144,11 @@ class PlanTests(unittest.TestCase):
     def test_start_options_offer_both_corners_of_each_edge(self):
         optionen = saatplan.startkanten(rechteck(168.0))
         self.assertEqual(len(optionen), 8)
-        self.assertTrue(any(o["text"] == "Ecke Südwest → entlang Süd 300 m nach Osten" for o in optionen))
+        self.assertTrue(any(o["text"] == "Ecke Südwest → entlang Süd 300 m nach Osten · längste Kante" for o in optionen))
+        # Die längste gerade Kante zuerst: dort fängt man beim Säen an, sie ist vorgewählt.
+        self.assertEqual([o["laenge_m"] for o in optionen], sorted((o["laenge_m"] for o in optionen), reverse=True))
+        self.assertTrue(optionen[0]["laengste"] and optionen[0]["laenge_m"] == 300.0)
+        self.assertFalse(any(o.get("laengste") for o in optionen if o["laenge_m"] < 300.0))
 
 
 class EngineTests(unittest.TestCase):
@@ -161,6 +165,8 @@ class EngineTests(unittest.TestCase):
         stand = self.motor.saatplan(self.feld["id"])
         self.assertIsNone(stand["plan"])
         self.assertEqual(stand["vorgabe"]["fahrgasse_m"], 21.0)
+        self.assertEqual(stand["vorgabe"]["start"], stand["optionen"][0]["id"])   # die längste Kante
+        self.assertEqual(stand["optionen"][0]["laenge_m"], 300.0)
         start = next(o["id"] for o in stand["optionen"] if o["text"].startswith("Ecke Südwest")
                      and "Süd" in o["kante"])
         plan = self.motor.saatplan_planen(self.feld["id"], {"start": start, "breite_m": 3,

@@ -310,6 +310,8 @@ def ring(boundary: Sequence[Point], inset_m: float) -> list[Point]:
     return max(alle, key=lambda r: abs(_flaeche(r)))
 
 
+SPITZE_HOECHSTENS = 3.0   # weiter als so viele Rundenabstände von der Ecke: abschrägen
+MIN_PUNKTABSTAND_M = 1e-6  # näher beieinander: ein Punkt
 ZACKEN_M = 5.0       # Haken unter dieser Länge mit scharfem Knick sind Rechenreste, keine Ecken
 
 
@@ -350,10 +352,16 @@ def ringe(boundary: Sequence[Point], inset_m: float) -> list[list[Point]]:
         return (fuss[0] + (p[0] - fuss[0]) * inset_m / d, fuss[1] + (p[1] - fuss[1]) * inset_m / d)
 
     geschlossen, offen = _zu_ringen(stuecke)
-    geschlossen += _offene_verbinden(offen, len(stuecke), 10.0 * inset_m + 30.0, abruecken, gueltig)
+    def auf_abstand(p: Point) -> bool:
+        # Gültig und nicht weiter drinnen als die Runde: eine Verbindung quer durchs Feld
+        # (zu einem anderen Teil des Schlags) wäre sonst auch "gültig".
+        return gueltig(p) and (distance_to_boundary(p, punkte) or 0.0) <= inset_m + 1.0
+
+    geschlossen += _offene_verbinden(offen, len(stuecke), 10.0 * inset_m + 30.0, abruecken, auf_abstand)
     ergebnis = []
     for schleife in geschlossen:
         schleife = _ohne_zacken(_ohne_doppelte(schleife), ZACKEN_M, abruecken, gueltig)
+        schleife = _ohne_kreuzungen(schleife)
         if len(schleife) >= 3 and abs(_flaeche(schleife)) > inset_m * inset_m:
             ergebnis.append(schleife)
     return ergebnis
@@ -377,19 +385,39 @@ def _versatz_roh(punkte: list[Point], inset_m: float) -> list[Point]:
             continue
         ex, ey = (b[0] - a[0]) / laenge, (b[1] - a[1]) / laenge
         nx, ny = -ey * vorzeichen, ex * vorzeichen
-        kanten.append(((a[0] + nx * inset_m, a[1] + ny * inset_m), (ex, ey)))
+        kanten.append(((a[0] + nx * inset_m, a[1] + ny * inset_m), (ex, ey), b, (nx, ny)))
     if len(kanten) < 3:
         return []
     roh: list[Point] = []
     for i in range(len(kanten)):
-        (px, py), (ex, ey) = kanten[i]
-        (qx, qy), (fx, fy) = kanten[(i + 1) % len(kanten)]
+        (px, py), (ex, ey), ecke, (nx, ny) = kanten[i]
+        (qx, qy), (fx, fy), _, (mx, my) = kanten[(i + 1) % len(kanten)]
+        # Am Ende von Kante i: wo sie, versetzt, aufhört - und wo Kante i+1 anfängt.
+        ende_i = (ecke[0] + nx * inset_m, ecke[1] + ny * inset_m)
         nenner = ex * fy - ey * fx
         if abs(nenner) < 1e-9:
             roh.append((qx, qy))      # fast parallel: der Versatzpunkt genügt
             continue
+        if (ex * fy - ey * fx) * vorzeichen < 0:
+            # Einspringende Ecke: hier ist die Runde ein Bogen um die Ecke, überall genau
+            # inset_m von ihr. Der Schnittpunkt der verlängerten Kanten läge tiefer im
+            # Feld (rechtwinklig: 1,4-mal so tief) - die Hauptfeldspuren kreuzten die Runde.
+            a0, a1 = math.atan2(ny, nx), math.atan2(my, mx)
+            schwenk = (a1 - a0 + math.pi) % (2 * math.pi) - math.pi
+            schritte = max(1, int(abs(schwenk) / math.radians(10.0)))
+            roh.extend((ecke[0] + math.cos(a0 + schwenk * k / schritte) * inset_m,
+                        ecke[1] + math.sin(a0 + schwenk * k / schritte) * inset_m)
+                       for k in range(schritte + 1))
+            continue
         t = ((qx - px) * fy - (qy - py) * fx) / nenner
-        roh.append((px + ex * t, py + ey * t))
+        spitze = (px + ex * t, py + ey * t)
+        if distance(spitze, ecke) > SPITZE_HOECHSTENS * inset_m:
+            # Sehr spitze Ecke (oder eine kurze Kante fast zurück): der Schnittpunkt
+            # läge weit draußen. Abgeschrägt statt spitz - die Schleife, die dabei
+            # entsteht, schneidet ringe() heraus.
+            roh.extend([ende_i, (qx, qy)])
+            continue
+        roh.append(spitze)
     return roh
 
 
@@ -544,9 +572,14 @@ def _bruecke(a: Point, b: Point, abruecken, davor: Optional[Point] = None,
             s_ = (qx * sy - qy * sx) / nenner        # vor a hinaus
             t_ = (qx * ry - qy * rx) / nenner        # vor b zurück
             spitze = (a[0] + rx * s_, a[1] + ry * s_)
-            if s_ > 0 and t_ > 0 and distance(a, spitze) + distance(spitze, b) < 4.0 * distance(a, b) + 1.0                     and all(gueltig((a[0] + (spitze[0] - a[0]) * k / 4.0, a[1] + (spitze[1] - a[1]) * k / 4.0))
-                            for k in range(1, 5))                     and all(gueltig((spitze[0] + (b[0] - spitze[0]) * k / 4.0, spitze[1] + (b[1] - spitze[1]) * k / 4.0))
-                            for k in range(0, 4)):
+
+            def strecke_gueltig(von: Point, bis: Point) -> bool:
+                return all(gueltig((von[0] + (bis[0] - von[0]) * k / 4.0, von[1] + (bis[1] - von[1]) * k / 4.0))
+                           for k in range(1, 4))
+
+            nicht_zu_weit = distance(a, spitze) + distance(spitze, b) < 4.0 * distance(a, b) + 1.0
+            if s_ > 0 and t_ > 0 and nicht_zu_weit and gueltig(spitze) \
+                    and strecke_gueltig(a, spitze) and strecke_gueltig(spitze, b):
                 return [spitze]
     schritte = max(1, int(distance(a, b) / 0.5))
     return [abruecken((a[0] + (b[0] - a[0]) * k / schritte, a[1] + (b[1] - a[1]) * k / schritte))
@@ -569,7 +602,7 @@ def _ohne_zacken(punkte: list[Point], kurz_m: float, abruecken=None, gueltig=Non
             if da < 1e-9 or db < 1e-9:
                 continue
             cos = ((p[0] - a[0]) * (b[0] - p[0]) + (p[1] - a[1]) * (b[1] - p[1])) / (da * db)
-            if cos < -0.26 and min(da, db) < kurz_m:
+            if cos < -0.26 and max(da, db) < kurz_m:       # beide Schenkel kurz: ein Haken
                 # Die Abkürzung a-b darf der Grenze nicht näher kommen als die Runde:
                 # sonst ihre Punkte auf Rundenabstand rücken.
                 ersatz: list[Point] = []
@@ -637,13 +670,38 @@ def _offene_verbinden(offen: list[tuple[int, int, list[Point]]], anzahl: int, re
     return fertig
 
 
+def _ohne_kreuzungen(ring: list[Point]) -> list[Point]:
+    """Kreuzt sich der fertige Ring noch irgendwo (kleine Schleife an einer Verbindung),
+    zerfällt er dort in zwei Schleifen - die kleinere fällt weg."""
+    for _ in range(50):
+        n = len(ring)
+        treffer = None
+        for i in range(n):
+            for j in range(i + 2, n):
+                if i == 0 and j == n - 1:
+                    continue
+                schnitt = _schnitt(ring[i], ring[(i + 1) % n], ring[j], ring[(j + 1) % n])
+                if schnitt is not None:
+                    treffer = (i, j, schnitt[2])
+                    break
+            if treffer:
+                break
+        if treffer is None:
+            return ring
+        i, j, x = treffer
+        innen = [x] + ring[i + 1:j + 1]
+        aussen = ring[:i + 1] + [x] + ring[j + 1:]
+        ring = max((innen, aussen), key=lambda r: abs(_flaeche(r)) if len(r) >= 3 else -1.0)
+    return ring
+
+
 def _ohne_doppelte(punkte: list[Point]) -> list[Point]:
     """Doppelte und gerade durchlaufene Punkte heraus - der Ring bleibt derselbe."""
     sauber: list[Point] = []
     for p in punkte:
-        if not sauber or distance(p, sauber[-1]) > 1e-6:
+        if not sauber or distance(p, sauber[-1]) > MIN_PUNKTABSTAND_M:
             sauber.append(p)
-    if len(sauber) > 1 and distance(sauber[0], sauber[-1]) <= 1e-6:
+    if len(sauber) > 1 and distance(sauber[0], sauber[-1]) <= MIN_PUNKTABSTAND_M:
         sauber.pop()
     ergebnis: list[Point] = []
     n = len(sauber)

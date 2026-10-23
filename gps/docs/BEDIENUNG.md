@@ -248,6 +248,18 @@ Antennenhöhe sind 6° Hang 31 cm, um die die Spur sonst wandern würde. Der Wer
 färbt sich, sobald der Ausgleich mehr als 15 cm ausmacht – dann arbeitet er
 gerade spürbar.
 
+## Schlag auf der Karte auswählen (Menü → Felder → Karte, ab 1.5.64)
+
+Wie bei Cerea: über der Feldliste schaltet **Liste | Karte** um. Die Karte zeigt alle
+Schläge mit Umriss und Namen, das geladene Feld grün, den Traktor als blauen Pfeil.
+Darunter liegen die Luftbilder, die schon geholt sind (sonst oben „Luftbilder aller
+Felder laden“ – danach geht es auch ohne Netz). Mit einem Finger verschieben, mit zwei
+Fingern oder dem Mausrad zoomen, doppelt tippen zoomt hinein. **Einen Schlag antippen**
+wählt ihn: er wird gelb, darunter stehen Name, Hektar und wie weit der Traktor weg ist,
+daneben **Laden**. Weit herausgezoomt sind kleine Schläge Punkte mit Namen – auch die
+lassen sich antippen. **Alle Felder** zeigt wieder alles, **Traktor** springt zum
+Traktor. Welche Ansicht zuletzt offen war, merkt sich das Tablet.
+
 ## Ein Feld anlegen und vermessen
 
 1. Auf das Feld fahren, **Menü → Felder**, Namen eingeben, *Feld hier anlegen*.
@@ -381,7 +393,9 @@ die Drille aufs Feld fährt.
 **Auf dem Acker:** an die Ecke fahren, an der es losgeht, in Richtung der ersten
 Spur ausrichten, **Spur → Saatplan** drücken (oder im Menü **Ab hier planen**).
 AgriPilot nimmt die nächste Ecke (höchstens 40 m weg) und die Kante, die dort in
-Fahrtrichtung zeigt. Am Schreibtisch geht es auch mit einer gewählten Ecke.
+Fahrtrichtung zeigt. Am Schreibtisch geht es auch mit einer gewählten Ecke: **die
+längste gerade Kante steht in der Auswahl oben und ist vorgewählt** (ab 1.5.64, „längste
+Kante“) – an ihr fängt man beim Säen an.
 Weitere Eingaben: **Sämaschine** (z. B. 3 m), **Fahrgassenweite** (21 m) und
 **Säspuren am Rand vor der Fahrgasse** (3) – sie bleiben beim Feld gespeichert.
 

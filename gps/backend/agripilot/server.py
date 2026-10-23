@@ -1977,6 +1977,37 @@ def create_app(config=None) -> FastAPI:
         engine.hindernis_loeschen(hindernis_id)
         return ok()
 
+    # -- Feldkarte: Schlagauswahl auf der Karte ----------------------------
+
+    @api.get("/api/feldkarte")
+    async def feldkarte() -> dict:
+        """Alle Felder in WGS84 für die Kartenauswahl, dazu wo der Traktor steht.
+
+        Luftbilder kommen nur mit, wenn sie schon da sind (ohne Netz nutzbar):
+        für 30 Felder auf einmal holen wäre ein Abruf, den niemand bestellt hat.
+        Dafür gibt es "Luftbilder aller Felder laden".
+        """
+        s = config.server
+        felder = []
+        for feld in store.list_fields():
+            if len(feld.get("boundary") or []) < 3:
+                continue
+            ebene = geo.LocalPlane(feld["datum_lat"], feld["datum_lon"])
+            eintrag = {"id": feld["id"], "name": feld["name"], "area_ha": feld.get("area_ha", 0.0),
+                       "grenze": [[round(v, 7) for v in ebene.to_wgs(*p)] for p in feld["boundary"]],
+                       "luftbild": None}
+            box = luftbild_module.ausschnitt(feld)
+            if box is not None and luftbild_module.vorhanden(feld, luftbild_ordner(), s.luftbild_wms,
+                                                             s.luftbild_ebene) is not None:
+                eintrag["luftbild"] = {"bild": f"/api/luftbild/{feld['id']}/bild",
+                                       "box": [round(v, 7) for v in box]}
+            felder.append(eintrag)
+        position = None
+        if engine.fix is not None and engine.fix.valid:
+            position = {"lat": engine.fix.lat, "lon": engine.fix.lon, "kurs": engine.heading}
+        return {"felder": felder, "position": position,
+                "geladen": engine.field["id"] if engine.field else None}
+
     # -- Fernansicht ------------------------------------------------------
 
     @api.get("/api/flotte")

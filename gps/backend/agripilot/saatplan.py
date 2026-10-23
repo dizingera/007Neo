@@ -44,7 +44,8 @@ def startkanten(grenze: Sequence[Point]) -> list[dict]:
     """Die Kanten, an denen ein Plan beginnen kann - je zwei Startecken.
 
     Gerade Kanten ab 20 m (wie bei den Randspuren). Hat ein Schlag gar keine,
-    gehen auch Bögen, ihre Sehne gibt dann die Richtung vor.
+    gehen auch Bögen, ihre Sehne gibt dann die Richtung vor. Die längste gerade
+    Kante steht vorn: an ihr fängt man beim Säen an, sie ist vorgewählt.
     """
     ring = [tuple(map(float, p)) for p in grenze]
     if len(ring) < 3:
@@ -65,7 +66,15 @@ def startkanten(grenze: Sequence[Point]) -> list[dict]:
                          f"{name[len(randspuren.NAMENS_PRAEFIX):]} nach "
                          f"{_richtung_name(heading_deg(von, nach))}"),
                 "von": list(von), "nach": list(nach),
+                "laenge_m": _r(distance(a, b)),
             })
+    ergebnis.sort(key=lambda o: -o["laenge_m"])           # stabil: je Kante bleibt a vor b
+    if ergebnis:
+        laengste = ergebnis[0]["laenge_m"]
+        for o in ergebnis:
+            if o["laenge_m"] == laengste:
+                o["text"] += " · längste Kante"
+                o["laengste"] = True
     return ergebnis
 
 
@@ -238,8 +247,11 @@ def planen(grenze: Sequence[Point], von: Point, nach: Point, breite_m: float,
         if not teile:
             break
         for punkte in teile:
+            # Auf Zentimeter gerundet können Millimeter-Stummel über ihr Nachbarstück
+            # kippen: danach die Kreuzungen noch einmal herausschneiden.
+            gerundet = headland._ohne_kreuzungen([(_r(x), _r(y)) for x, y in punkte])
             ringe.append({"runde": i + 1, "einzug_m": _r(einzug), "fahrgasse": ist_fahrgasse(einzug),
-                          "punkte": [[_r(x), _r(y)] for x, y in punkte]})
+                          "punkte": [[x, y] for x, y in gerundet]})
     anzahl_runden = len({x["runde"] for x in ringe})
 
     # -- Hauptfeld ---------------------------------------------------------
