@@ -797,6 +797,7 @@ class Engine:
         self.line = GuidanceLine(
             record["mode"], [tuple(p) for p in record["points"]],
             self.profile.spacing_m, record["name"], record["id"],
+            spuren=record.get("spuren") or None,
         )
         self.line.nudge_m = record.get("nudge_m", 0.0)
         self.line.fahrgasse_m = float(record.get("fahrgasse_m") or 0.0)
@@ -807,6 +808,8 @@ class Engine:
             self._saison_stand = self._saison_kennung(self.store.season_line(self.field["id"]))
             self.saisonspur_neu = None
         zusatz =f" · Fahrgassen alle {self.line.fahrgasse_m:g} m" if self.line.fahrgasse_m else ""
+        if self.line.mode == "plan":
+            zusatz = f" · alle {len(self.line.spuren)} Spuren des Saatplans"
         self.note(f"Spur aktiv: {record['name']}{zusatz}")
         self._remember_session()
         return record
@@ -1003,7 +1006,7 @@ class Engine:
                 "fahrgassen": plan.get("saisonspur_b_fahrgassen") or [],
             })
             time.sleep(0.01)                       # A sicher die neuere
-        record = self.store.save_line({
+        a_spur = self.store.save_line({
             "field_id": field_id,
             "name": f"{SAATPLAN_PRAEFIX}{kante} · " + ("A" if plan.get("saisonspur_b") else
                                                        f"{plan['fahrgasse_m']:g} m"),
@@ -1014,6 +1017,20 @@ class Engine:
             "fahrgasse_m": plan["fahrgasse_m"],
             "fahrgassen": plan.get("saisonspur_fahrgassen") or [],
         })
+        # Und alle Spuren des Plans in einer: Hauptfeld, Gegenseite, Vorgewende -
+        # jede sichtbar und jede mit der Lenkung fahrbar, ohne umzuschalten. Sie
+        # wird geladen; A und B bleiben für Spritze und Streuer (Raster in Fahrgassen).
+        record = a_spur
+        spuren = saatplan_module.alle_spuren(plan)
+        if spuren:
+            time.sleep(0.01)
+            record = self.store.save_line({
+                "field_id": field_id,
+                "name": f"{SAATPLAN_PRAEFIX}{kante} · alle Spuren",
+                "mode": "plan", "points": plan["saisonspur"], "spacing_m": plan["breite_m"],
+                "saison": jahr, "fahrgasse_m": plan["fahrgasse_m"], "rand_innen": 0.0,
+                "fahrgassen": plan.get("saisonspur_fahrgassen") or [], "spuren": spuren,
+            })
         if self.field is None or self.field["id"] != field_id:
             self.load_field(field_id)
         self.load_line(record["id"])

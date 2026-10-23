@@ -798,6 +798,14 @@ def create_app(config=None) -> FastAPI:
     async def list_lines(field_id: Optional[str] = None) -> list[dict]:
         return store.list_lines(field_id)
 
+    @api.get("/api/line/spuren")
+    async def line_spuren() -> dict:
+        # Saatplan mit allen Spuren: einmal holen statt zehnmal je Sekunde mitschicken.
+        linie = engine.line
+        if linie is None or linie.mode != "plan":
+            return {"schluessel": "", "spuren": []}
+        return {"schluessel": linie.spuren_schluessel(), "spuren": linie.spuren_liste()}
+
     @api.post("/api/lines/{line_id}/load")
     async def load_line(line_id: str):
         return guard(engine.load_line, line_id)

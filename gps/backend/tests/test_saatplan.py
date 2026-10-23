@@ -168,10 +168,14 @@ class EngineTests(unittest.TestCase):
         self.assertEqual(plan["anzahl_fahrgassen"], 6)
         self.assertEqual(self.motor.saatplan(self.feld["id"])["plan"]["anzahl_spuren"], plan["anzahl_spuren"])
 
-        spur = self.motor.saatplan_uebernehmen(self.feld["id"])
-        self.assertTrue(spur["name"].startswith("Saatplan "))
+        alle = self.motor.saatplan_uebernehmen(self.feld["id"])
+        self.assertEqual(alle["name"], "Saatplan Süd 300 m · alle Spuren")
+        self.assertEqual(self.motor.line.id, alle["id"])
+        self.assertEqual(self.motor.line.mode, "plan")
+        # A bleibt daneben bestehen - für Spritze und Streuer im Raster der Fahrgassen.
+        spur = next(l for l in self.store.list_lines(self.feld["id"]) if l["name"].endswith("· A"))
         self.assertEqual((spur["saison"], spur["fahrgasse_m"]), (time.localtime().tm_year, 21.0))
-        self.assertEqual(self.motor.line.id, spur["id"])
+        self.motor.load_line(spur["id"])
         # Die Führung trifft dieselben Fahrgassen: 10,5 m und 31,5 m von der Südkante.
         # Nach Osten gefahren liegt das Feld links: Spurnummern negativ.
         self.motor.line.spacing = 3.0
@@ -182,10 +186,11 @@ class EngineTests(unittest.TestCase):
         self.motor.saatplan_uebernehmen(self.feld["id"])
         namen = [l["name"] for l in self.store.list_lines(self.feld["id"])]
         self.assertEqual(sorted(n for n in namen if n.startswith("Saatplan ")),
-                         ["Saatplan Süd 300 m · A", "Saatplan Süd 300 m · B"])
-        # A ist die Saisonspur, die beim Laden des Feldes kommt.
+                         ["Saatplan Süd 300 m · A", "Saatplan Süd 300 m · B",
+                          "Saatplan Süd 300 m · alle Spuren"])
+        # Die Spur mit allen Spuren ist die Saisonspur, die beim Laden des Feldes kommt.
         self.assertEqual(self.store.season_line(self.feld["id"], time.localtime().tm_year)["name"],
-                         "Saatplan Süd 300 m · A")
+                         "Saatplan Süd 300 m · alle Spuren")
 
     def test_the_season_line_knows_the_tramlines_from_a_and_from_b(self):
         feld = self.store.save_field({"name": "Schmal", "datum_lat": 48.0, "datum_lon": 9.6,
@@ -194,8 +199,10 @@ class EngineTests(unittest.TestCase):
                      if o["text"].startswith("Ecke Südwest") and "Süd" in o["kante"])
         self.motor.saatplan_planen(feld["id"], {"start": start, "breite_m": 3, "fahrgasse_m": 21,
                                                 "randspuren": 3})
-        spur = self.motor.saatplan_uebernehmen(feld["id"])
-        self.assertEqual(self.store.get_line(spur["id"])["fahrgassen"][:2], [-136.0, -126.0])
+        self.motor.saatplan_uebernehmen(feld["id"])
+        spur = next(l for l in self.store.list_lines(feld["id"]) if l["name"].endswith("· A"))
+        self.assertEqual(spur["fahrgassen"][:2], [-136.0, -126.0])
+        self.motor.load_line(spur["id"])
         linie = self.motor.line
         linie.spacing = 3.0
         self.assertTrue(linie.ist_fahrgasse(-35))       # 105 m neben der Spur: Fahrgasse von A

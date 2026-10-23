@@ -420,9 +420,21 @@ Vorschlag. Läuft ein Rand schräg zur Fahrtrichtung (Keil), passen 21 m dort
 nicht durchgehend: Konflikt, Vorschlag Teilbreitenschaltung oder an diesem Rand
 beginnen. Ein zu schmaler Schlag (unter 2 × 21 m) hat kein Hauptfeld.
 
-**Als Aussaat übernehmen** legt zwei AB-Spuren an: „Saatplan … A“ durch die
-erste Fahrgasse (10,5 m von der Startkante) – sie ist die Saisonspur und kommt
-beim Laden des Feldes – und „Saatplan … B“ durch die Fahrgasse von B. Die
+**Als Aussaat übernehmen** legt drei Spuren an. Geladen wird **„Saatplan … · alle
+Spuren“ (ab 1.5.61)**: darin steckt jede geplante Spur einzeln – das Hauptfeld von A,
+die Spuren von der Gegenseite B und alle Vorgewende-Runden rundum. Alle sind auf der
+Karte zu sehen (Fahrgassen rot gestrichelt, die aktive leuchtet), und auf jeder lenkt
+die Automatik, ohne dass man umschaltet: Sie nimmt die nächste Spur, die zur
+Fahrtrichtung passt. Quer liegende Spuren zählen nicht – wer am Ende einer Spur ins
+Vorgewende fährt, bleibt auf seiner Spur, bis er auf die Runde einschwenkt. Die
+aktuelle Spur bleibt, bis man eine dreiviertel Arbeitsbreite daneben ist. Unten links
+steht, welche es ist: „A 12“, „B 3“ oder „Runde 4“. Ein Gerät so breit wie die
+Fahrgassenweite (Spritze, Streuer mit 21 m) fährt auf dieser Spur nur die Fahrgassen –
+auch die Vorgewende-Fahrgasse und die von B. Schmalere Geräte (Walze, Striegel)
+nehmen jede passende Spur.
+
+Daneben bleiben die zwei AB-Spuren: „Saatplan … A“ durch die
+erste Fahrgasse (10,5 m von der Startkante) und „Saatplan … B“ durch die Fahrgasse von B. Die
 B-Spur beim Säen von B her laden: dort liegt das Raster um den Rest versetzt. Sie kennt genau
 die geplanten Fahrgassen – die von A und die von B, sonst keine – und
 nimmt sie beim Abgleich mit aufs Tablet. Sie gilt das ganze Jahr: beim Säen zeigt das Band „Fahrgasse“, wann die

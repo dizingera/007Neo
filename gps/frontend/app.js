@@ -192,7 +192,9 @@ function updateHud(s) {
   }
   el('speed').textContent = fix ? fix.speed_kmh.toFixed(1).replace('.', ',') : '--';
   const kontur = s.line && s.line.mode === 'contour';
-  el('pass').textContent = guidance.active ? String(guidance.pass_number) : '--';
+  // Saatplan: die Spur mit ihrem Namen (A 12, B 3, Runde 4) statt der Listennummer.
+  const spurName = s.line && s.line.spur_name;
+  el('pass').textContent = guidance.active ? (spurName || String(guidance.pass_number)) : '--';
   el('passLabel').textContent = kontur ? 'Ring' : 'Spur';
   el('markLegende').hidden = !(s.job || (s.coverage && s.coverage.area_ha > 0));
   el('area').textContent = (s.job ? s.job.area_ha : (s.coverage ? s.coverage.area_ha : 0)).toFixed(2).replace('.', ',');
@@ -340,7 +342,7 @@ function updateHud(s) {
     el('hindernisRuf').textContent = `⚠ ${hd.name} in ${Math.round(hd.abstand_m)} m` +
       (hd.seite === 'mitte' ? '' : ` · ${hd.seite}`);
   }
-  if (s.fahrgasse_aktiv) el('fahrgasseSpur').textContent = s.guidance.pass_number;
+  if (s.fahrgasse_aktiv) el('fahrgasseSpur').textContent = (s.line && s.line.spur_name) || s.guidance.pass_number;
 
   const steer = el('btnSteer');
   steer.classList.remove('an', 'scharf');
@@ -942,18 +944,48 @@ function istFahrgasse(line, spur) {
 
 const spurPuffer = new window.SpurenModul.SpurPuffer();
 
+/* Saatplan mit allen Spuren: die Spuren selbst kommen einmal über /api/line/spuren,
+ * nicht zehnmal je Sekunde mit dem Zustand. Der Schlüssel sagt, wann es neue gibt. */
+const planSpuren = { schluessel: '', spuren: [], laedt: false, zuletzt: 0 };
+
+function planSpurenHolen(line) {
+  if (planSpuren.laedt || planSpuren.schluessel === line.spuren_schluessel) return;
+  if (Date.now() - planSpuren.zuletzt < 2000) return;   // nicht bei jedem Bild neu fragen
+  planSpuren.laedt = true;
+  planSpuren.zuletzt = Date.now();
+  fetch('/api/line/spuren').then((r) => r.json()).then((d) => {
+    planSpuren.schluessel = d.schluessel || '';
+    planSpuren.spuren = d.spuren || [];
+    zeichnenAnfordern();
+  }).catch(() => {}).finally(() => { planSpuren.laedt = false; });
+}
+
+function planSpurenMuster(line) {
+  planSpurenHolen(line);
+  if (planSpuren.schluessel !== line.spuren_schluessel) return [];
+  const nudge = line.nudge_m || 0;
+  return planSpuren.spuren.map((spur, nummer) => ({
+    nummer,
+    ring: spur.geschlossen,
+    gasse: spur.fahrgasse,
+    punkte: nudge ? window.SpurenModul.versetzen({ mode: 'curve', points: spur.punkte }, nudge) : spur.punkte,
+  }));
+}
+
 function drawPasses() {
   const s = state.live;
   if (!s || !s.line) { spurPuffer.spuren(null, 0); return; }
   const line = s.line;
   const current = s.guidance.active ? s.guidance.pass_number : 0;
-  const ring = line.mode === 'contour';
-  for (const { nummer: offset, punkte: points } of spurPuffer.spuren(line, current)) {
+  // Saatplan: alle Spuren einzeln (Hauptfeld, Gegenseite, Vorgewende-Runden).
+  const plan = line.mode === 'plan';
+  const muster = plan ? planSpurenMuster(line) : spurPuffer.spuren(line, current);
+  for (const { nummer: offset, punkte: points, ring, gasse } of muster) {
     if (!points.length) continue;
-    polyline(points, ring);
+    polyline(points, plan ? ring : line.mode === 'contour');
     const active = offset === current;
     // Fahrgassen rot – dort wird nicht gesät, dort fährt man später.
-    const fahrgasse = istFahrgasse(line, offset);
+    const fahrgasse = plan ? gasse : istFahrgasse(line, offset);
     if (active) {
       // Die aktive Spur leuchtet: ein breiter, blasser Schein und die Linie darin.
       ctx.strokeStyle = fahrgasse ? F.fahrgasse : F.aktiv;
@@ -2852,7 +2884,8 @@ function spurZeile(fieldId, line, aussaatId) {
   const row = item({
     active: line.id === currentId,
     title: line.name,
-    sub: `${line.mode === 'ab' ? 'AB-Linie' : 'Kurve'} · Abstand ${line.spacing_m.toFixed(2)} m` +
+    sub: `${line.mode === 'ab' ? 'AB-Linie' : line.mode === 'plan'
+      ? `Saatplan, ${(line.spuren || []).length} Spuren` : 'Kurve'} · Abstand ${line.spacing_m.toFixed(2)} m` +
          (line.fahrgasse_m > 0 ? ` · Fahrgassen alle ${line.fahrgasse_m.toFixed(0)} m` +
            (line.saison ? ` (Erntejahr ${line.saison})` : '') : '') +
          (saison ? ' · Aktuelle Aussaat' : ''),

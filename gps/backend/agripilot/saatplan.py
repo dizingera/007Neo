@@ -529,6 +529,26 @@ def planen(grenze: Sequence[Point], von: Point, nach: Point, breite_m: float,
     }
 
 
+def alle_spuren(plan: dict) -> list[dict]:
+    """Jede Spur des Plans einzeln zum Lenken: Hauptfeld (A), Spuren von der
+    Gegenseite (B) und die Vorgewende-Runden.
+
+    Ein Hauptfeldstreifen, den eine Stufe der Grenze teilt, wird zu mehreren
+    Spuren - jede ein gerades Stück. Die Runden sind geschlossene Ringe.
+    """
+    spuren = []
+    for s in plan.get("spuren", []):
+        art = "B" if s.get("von_b") else "A"
+        for a, b in s.get("stuecke", []):
+            spuren.append({"art": art, "nummer": s["nummer"], "punkte": [list(a), list(b)],
+                           "geschlossen": False, "fahrgasse": bool(s.get("fahrgasse"))})
+    for ring in plan.get("ringe", []):
+        if len(ring.get("punkte", [])) >= 3:
+            spuren.append({"art": "V", "nummer": ring["runde"], "punkte": [list(p) for p in ring["punkte"]],
+                           "geschlossen": True, "fahrgasse": bool(ring.get("fahrgasse"))})
+    return spuren
+
+
 def _gekuerzt(stuecke, um_m: float):
     """Jedes Stück an beiden Enden um ``um_m`` kürzen (das Vorgewende an den Enden)."""
     ergebnis = []

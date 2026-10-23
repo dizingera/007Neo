@@ -36,7 +36,10 @@ from .geo import (
 
 # "turn" ist kein Muster, das man anlegt - es ist der Zustand während einer
 # geplanten Wende (siehe headland.py) und erscheint nur in der Ausgabe.
-Mode = Literal["ab", "curve", "contour", "turn"]
+Mode = Literal["ab", "curve", "contour", "turn", "plan"]
+
+PLAN_KURS_DEG = 50.0      # Saatplan: so weit darf eine Spur von der Fahrtrichtung abweichen
+PLAN_HALTEN = 0.75        # ... und die aktuelle bleibt, bis man so viele Spurbreiten daneben ist
 
 
 def _forward_vector(heading: float) -> Point:
@@ -281,7 +284,13 @@ class GuidanceLine:
     """A reference pattern plus the passes derived from it."""
 
     def __init__(self, mode: Mode, points: Sequence[Point], spacing: float,
-                 name: str = "", line_id: str = "", derived: bool = False) -> None:
+                 name: str = "", line_id: str = "", derived: bool = False,
+                 spuren: Optional[Sequence[dict]] = None) -> None:
+        # Saatplan: jede geplante Spur einzeln (Hauptfeld A, Spuren von B,
+        # Vorgewende-Runden). Ohne Liste - ein Gerät, das sie beim Abgleich
+        # nicht mitbekam - bleibt die Bezugslinie als AB-Linie fahrbar.
+        if mode == "plan" and not spuren:
+            mode = "ab"
         if len(points) < 2:
             raise ValueError("Eine Führungslinie braucht mindestens zwei Punkte")
         if mode == "contour" and len(points) < 3:
@@ -309,7 +318,23 @@ class GuidanceLine:
         # Saatplan: wo genau die Fahrgassen liegen, in Metern neben der Spur
         # (rechts der Richtung positiv). Leer = alle fahrgasse_m.
         self.fahrgassen_liste: list[float] = []
-        if mode == "ab":
+        self.spuren: list[dict] = []
+        self._plan_spur: Optional[int] = None   # die Saatplan-Spur, auf der gerade gefahren wird
+        if mode == "plan":
+            for nr, spur in enumerate(spuren or []):
+                punkte = [tuple(map(float, p)) for p in spur.get("punkte", [])]
+                if len(punkte) < 2:
+                    continue
+                self.spuren.append({
+                    "punkte": punkte,
+                    "geschlossen": bool(spur.get("geschlossen")) and len(punkte) >= 3,
+                    "fahrgasse": bool(spur.get("fahrgasse")),
+                    "art": str(spur.get("art", "")),
+                    "nummer": int(spur.get("nummer", nr + 1)),
+                })
+            if not self.spuren:
+                self.mode = mode = "ab"
+        if mode == "ab" or mode == "plan":
             self.points = [tuple(points[0]), tuple(points[-1])]
         else:
             self.points = [tuple(p) for p in simplify(points, 0.15)]
@@ -342,6 +367,58 @@ class GuidanceLine:
             travelled += seg_len
         _, lateral, head, along = best
         return lateral, head, along
+
+    @staticmethod
+    def _spur_lateral(spur: dict, p: Point) -> tuple[float, float, float, float]:
+        """Nächster Punkt auf einer Saatplan-Spur: Abstand, Querablage (rechts +), Kurs, Weg."""
+        punkte = spur["punkte"]
+        n = len(punkte)
+        stuecke = n if spur["geschlossen"] else n - 1
+        bester = (float("inf"), 0.0, 0.0, 0.0)
+        gefahren = 0.0
+        for i in range(stuecke):
+            a, b = punkte[i], punkte[(i + 1) % n]
+            laenge = distance(a, b)
+            if laenge < 1e-6:
+                continue
+            fuss, t, quer = project_on_segment(p, a, b)
+            d = distance(p, fuss)
+            if d < bester[0]:
+                bester = (d, quer, heading_deg(a, b), gefahren + t * laenge)
+            gefahren += laenge
+        return bester
+
+    def _plan_wahl(self, p: Point, vehicle_heading: float) -> tuple[int, float, float, float]:
+        """Welche Saatplan-Spur gilt: die nächste, die zur Fahrtrichtung passt.
+
+        Alle Spuren sind gleichberechtigt - Hauptfeld, die Spuren von der
+        Gegenseite und die Vorgewende-Runden. Quer zur Fahrtrichtung liegende
+        zählen nicht, sonst spränge die Lenkung am Vorgewende auf die Runde,
+        während man noch die Spur zu Ende fährt. Die aktuelle Spur bleibt, bis
+        man eine dreiviertel Spurbreite daneben ist: zwei gleich nahe Spuren
+        (Überlappung im Füllstreifen) sollen nicht hin- und herwechseln.
+        """
+        def passt(kurs: float) -> bool:
+            return min(abs(angle_difference(kurs, vehicle_heading)),
+                       abs(angle_difference(kurs + 180.0, vehicle_heading))) <= PLAN_KURS_DEG
+
+        werte = [self._spur_lateral(spur, p) for spur in self.spuren]
+        # Ein Gerät so breit wie die Fahrgassenweite (Spritze, Streuer) fährt nur
+        # die Fahrgassen - genau dafür wurden sie beim Säen angelegt. Schmalere
+        # (Walze, Striegel) nehmen jede Spur, die passt.
+        nur_gassen = (self.fahrgasse_m > 0 and self.spacing >= 0.9 * self.fahrgasse_m
+                      and any(spur["fahrgasse"] for spur in self.spuren))
+        erlaubt = [i for i, spur in enumerate(self.spuren) if spur["fahrgasse"] or not nur_gassen]
+        jetzt = self._plan_spur
+        if jetzt is not None and jetzt in erlaubt:
+            d, quer, kurs, weg = werte[jetzt]
+            if passt(kurs) and d <= PLAN_HALTEN * self.spacing:
+                return jetzt, quer, kurs, weg
+        reihe = [i for i in erlaubt if passt(werte[i][2])] or erlaubt
+        wahl = min(reihe, key=lambda i: werte[i][0])
+        self._plan_spur = wahl
+        _, quer, kurs, weg = werte[wahl]
+        return wahl, quer, kurs, weg
 
     def _contour_lateral(self, p: Point) -> tuple[float, float, float, Point]:
         """Abstand zur Ringspur, gemessen **nach innen**.
@@ -429,6 +506,9 @@ class GuidanceLine:
         """In welche Richtung (Ost, Nord) ein positiver Versatz das Muster hier schiebt."""
         if self.mode == "contour":
             return self._contour_lateral(position)[3]
+        if self.mode == "plan":
+            spur = self.spuren[self._plan_spur if self._plan_spur is not None else 0]
+            return _right_vector(self._spur_lateral(spur, position)[2])
         if self.mode == "ab":
             _, kurs, _ = self._ab_lateral(position)
         else:
@@ -439,18 +519,23 @@ class GuidanceLine:
               speed_ms: float, profile: VehicleProfile) -> GuidanceState:
         """Compute the guidance state for a tool position and heading."""
         innen: Optional[Point] = None
-        if self.mode == "ab":
-            lateral, line_heading, along = self._ab_lateral(position)
-        elif self.mode == "contour":
-            lateral, line_heading, along, innen = self._contour_lateral(position)
+        if self.mode == "plan":
+            # Jede Saatplan-Spur liegt einzeln vor: keine Parallelen, die Spur selbst.
+            pass_number, lateral, line_heading, along = self._plan_wahl(position, vehicle_heading)
+            cross_track = lateral - self.nudge_m
         else:
-            lateral, line_heading, along = self._curve_lateral(position)
+            if self.mode == "ab":
+                lateral, line_heading, along = self._ab_lateral(position)
+            elif self.mode == "contour":
+                lateral, line_heading, along, innen = self._contour_lateral(position)
+            else:
+                lateral, line_heading, along = self._curve_lateral(position)
 
-        lateral -= self.nudge_m + self.raster_versatz()
+            lateral -= self.nudge_m + self.raster_versatz()
 
-        # Which pass are we on, and how far off its centre?
-        pass_number = round(lateral / self.spacing)
-        cross_track = lateral - pass_number * self.spacing
+            # Which pass are we on, and how far off its centre?
+            pass_number = round(lateral / self.spacing)
+            cross_track = lateral - pass_number * self.spacing
 
         # Passes are driven in both directions.  Compare the heading against the
         # line and its reverse and keep whichever the driver is actually doing,
@@ -476,7 +561,8 @@ class GuidanceLine:
             if self._vorausregler is None:
                 from .vorausregler import Vorausregler
                 self._vorausregler = Vorausregler()
-            kruemmung = self._kruemmung(position, vehicle_heading, along) if self.mode != "ab" else 0.0
+            gerade = self.mode == "ab" or (self.mode == "plan" and len(self.spuren[pass_number]["punkte"]) == 2)
+            kruemmung = 0.0 if gerade else self._kruemmung(position, vehicle_heading, along)
             steer = self._vorausregler.einschlag(signed_xte, heading_error, speed_ms, profile, kruemmung)
         else:
             steer = self._steer_angle(signed_xte, heading_error, speed_ms, profile)
@@ -515,6 +601,11 @@ class GuidanceLine:
                     # innen zeigt zur Spur hin (nach innen gemessen): Fußpunkt.
                     fuss.append((punkt[0] - innen[0] * seitlich, punkt[1] - innen[1] * seitlich)
                                 if innen is not None else punkt)
+                elif self.mode == "plan":
+                    spur = self.spuren[self._plan_spur if self._plan_spur is not None else 0]
+                    _, seitlich, kurs, _ = self._spur_lateral(spur, punkt)
+                    rx, ry = _right_vector(kurs)
+                    fuss.append((punkt[0] - rx * seitlich, punkt[1] - ry * seitlich))
                 else:
                     seitlich, kurs, _ = self._curve_lateral(punkt)
                     rx, ry = _right_vector(kurs)
@@ -551,6 +642,9 @@ class GuidanceLine:
     def pass_geometry(self, centre_pass: int, count: int = 4,
                       length: float = 400.0) -> list[dict]:
         """Geometry of the neighbouring passes so the cab display can draw them."""
+        if self.mode == "plan":
+            return [{"pass": i, "points": [list(p) for p in spur["punkte"]], "closed": spur["geschlossen"]}
+                    for i, spur in enumerate(self.spuren)]
         result = []
         for offset in range(centre_pass - count, centre_pass + count + 1):
             # Ring -1 läge außerhalb der Feldgrenze. Ihn zu zeichnen hieße, eine
@@ -636,7 +730,32 @@ class GuidanceLine:
             "fahrgassen_versatz_m": self.fahrgassen_versatz(),
             # Saatplan: die Fahrgassen in Metern neben der Spur (rechts +).
             "fahrgassen": list(self.fahrgassen_liste),
+            # Saatplan mit allen Spuren: die Spuren selbst holt die Anzeige einmal
+            # über /api/line/spuren - sie zehnmal je Sekunde mitzuschicken wäre
+            # über den Tunnel zu viel. Der Schlüssel sagt, wann es neue gibt.
+            "spuren_anzahl": len(self.spuren),
+            "spuren_schluessel": self.spuren_schluessel(),
+            "spur_name": self.spur_name(),
         }
+
+    def spur_name(self) -> str:
+        """Saatplan: wie die aktuelle Spur heißt - "A 12", "B 3", "Runde 4"."""
+        if self.mode != "plan" or self._plan_spur is None or self._plan_spur >= len(self.spuren):
+            return ""
+        spur = self.spuren[self._plan_spur]
+        return f"Runde {spur['nummer']}" if spur["art"] == "V" else f"{spur['art']} {spur['nummer']}"
+
+    def spuren_schluessel(self) -> str:
+        if not self.spuren:
+            return ""
+        erste, letzte = self.spuren[0]["punkte"][0], self.spuren[-1]["punkte"][-1]
+        return f"{self.id}:{len(self.spuren)}:{erste[0]:.2f},{erste[1]:.2f}:{letzte[0]:.2f},{letzte[1]:.2f}"
+
+    def spuren_liste(self) -> list[dict]:
+        """Die Saatplan-Spuren für die Anzeige und zum Speichern."""
+        return [{"punkte": [[round(x, 2), round(y, 2)] for x, y in spur["punkte"]],
+                 "geschlossen": spur["geschlossen"], "fahrgasse": spur["fahrgasse"],
+                 "art": spur["art"], "nummer": spur["nummer"]} for spur in self.spuren]
 
     def am_rand(self) -> bool:
         """Randspur mit Fahrgassen: dann beginnt das Raster an der Grenze.
@@ -648,7 +767,7 @@ class GuidanceLine:
         halbe Fahrgassenweite drinnen - dort, wo die Spritze mit 21 m mit der
         Kante an der Grenze fährt. Drille mit 3 m: Fahrgasse in Spur 3 (10,5 m).
         """
-        return self.rand_innen != 0 and self.fahrgasse_m > 0
+        return self.rand_innen != 0 and self.fahrgasse_m > 0 and self.mode != "plan"
 
     def raster_versatz(self) -> float:
         """Wie weit Spur 0 neben der Bezugslinie liegt (ohne nudge_m)."""
@@ -673,6 +792,9 @@ class GuidanceLine:
         derselben Stelle, auch wenn die Breiten nicht glatt aufgehen.
         Fahrgasse ist die Spur, in deren Streifen die Fahrgasse fällt.
         """
+        if self.mode == "plan":
+            # Jede Saatplan-Spur weiß selbst, ob sie eine Fahrgasse ist.
+            return 0 <= pass_number < len(self.spuren) and self.spuren[pass_number]["fahrgasse"]
         if self.fahrgasse_m <= 0 or self.spacing <= 0:
             return False
         if self.fahrgassen_liste:
