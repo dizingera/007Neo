@@ -118,6 +118,15 @@ class VehicleProfile:
 
     # Anteil der Überdeckung, ab dem ein offenes Teilstück schließt (Cerea: pcc).
     section_pcc: float = 0.9
+    # Teilbreitenschaltung wie in AgOpenGPS (Konzept, nicht Code): Ventile und
+    # Säschare brauchen Zeit. Eingeschaltet wird so viele Sekunden Fahrt voraus,
+    # ausgeschaltet etwas knapper - so schließt nichts zu früh vor dem Rand.
+    section_vorlauf_an_s: float = 1.0
+    section_vorlauf_aus_s: float = 0.5
+    # Darunter schalten die automatischen Teilbreiten ab (Wenden im Stand, Rangieren).
+    section_min_tempo_kmh: float = 1.0
+    # Im Vorgewende abschalten: sinnvoll, wenn das Vorgewende zuletzt extra gefahren wird.
+    section_vorgewende_aus: bool = False
 
     # Wie MyTerra Traktor und Gerät dieser Maschine nennt. Damit kommen beide beim
     # Einlesen einer Arbeit in MyTerra von selbst richtig an (Freigabe braucht beide).

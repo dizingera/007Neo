@@ -523,6 +523,10 @@
             <label>Überlappung (m)<input type="number" step="0.01" name="overlap_m"></label>
             <label>Teilbreiten<input type="number" step="1" min="1" max="24" name="sections"></label>
             <label>Abschalten ab (Anteil)<input type="number" step="0.05" min="0.05" max="1" name="section_pcc"></label>
+            <label>Vorlauf Einschalten (s)<input type="number" step="0.1" min="0" max="5" name="section_vorlauf_an_s"></label>
+            <label>Vorlauf Ausschalten (s)<input type="number" step="0.1" min="0" max="5" name="section_vorlauf_aus_s"></label>
+            <label>Aus unter (km/h)<input type="number" step="0.5" min="0" max="10" name="section_min_tempo_kmh"></label>
+            <label class="switch"><input type="checkbox" name="section_vorgewende_aus"> im Vorgewende abschalten</label>
           </fieldset>
           <fieldset>
             <legend>Anbau</legend>
@@ -547,6 +551,11 @@
           <p><b>Arbeitsbreite</b> legt den Spurabstand fest – vor dem Start eintragen.
             <b>Abschalten ab:</b> eine offene Teilbreite schließt erst, wenn dieser Anteil
             überdeckt ist; das verhindert Flackern am Fahrspurrand.</p>
+          <p><b>Vorlauf</b> (wie in AgOpenGPS): Ventile und Säschare brauchen Zeit. Eingeschaltet wird so
+            viele Sekunden Fahrt voraus, ausgeschaltet etwas knapper. Auf der Karte stehen beide als
+            Linien vor dem Gerät: grün Einschalten, rot Ausschalten. <b>Aus unter</b>: langsamer und
+            rückwärts schließt die Automatik alles. <b>Im Vorgewende abschalten</b>, wenn das Vorgewende
+            am Ende extra gefahren wird.</p>
           <p><b>Gerät hinter Achse</b> bestimmt, wo markiert wird. Gelenkt wird immer auf die
             Hinterachse, nie auf das Gerät.</p>
           <p><b>Gezogen:</b> ein gezogenes Gerät schwenkt erst ein, während es gezogen wird,

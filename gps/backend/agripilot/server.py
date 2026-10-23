@@ -1108,10 +1108,17 @@ def create_app(config=None) -> FastAPI:
                 section.enabled = True
         return ok({"auto_sections": engine.auto_sections})
 
+    @api.post("/api/sections/modus")
+    async def set_sections_modus(payload: dict = Body(...)):
+        """Hauptschalter wie in AgOpenGPS: auto, manuell (alle an) oder aus (alle zu)."""
+        return guard(lambda: {"teilbreiten_modus": engine.teilbreiten_modus_setzen(str(payload.get("modus", "")))})
+
     @api.post("/api/sections/{index}")
     async def set_section(index: int, payload: dict = Body(...)):
         if not 0 <= index < len(engine.sections):
             raise HTTPException(404, "Sektion gibt es nicht")
+        if "zustand" in payload:              # auto | an | aus
+            return guard(engine.teilbreite_setzen, index, str(payload["zustand"]))
         section = engine.sections[index]
         if "forced_off" in payload:
             section.forced_off = bool(payload["forced_off"])

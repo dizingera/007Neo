@@ -164,7 +164,12 @@ class CoverageMap:
                              look_ahead_m: float = 1.0,
                              speed_ms: float = 0.0,
                              boundary: Optional[Sequence[Point]] = None,
-                             pcc: float = 0.9) -> None:
+                             pcc: float = 0.9,
+                             vorlauf_an_s: Optional[float] = None,
+                             vorlauf_aus_s: float = 0.5,
+                             min_speed_ms: float = 0.0,
+                             rueckwaerts: bool = False,
+                             vorgewende_m: float = 0.0) -> None:
         """Switch sections off over worked ground and outside the boundary.
 
         The check is done a little ahead of the machine, scaled with speed,
@@ -181,22 +186,48 @@ class CoverageMap:
         Die Feldgrenze bleibt davon unberührt: was hinausragt, schaltet ab,
         unabhängig von der Überdeckung. Draußen zu arbeiten wäre kein
         Schönheitsfehler.
+
+        Zwei Vorlauflinien wie in AgOpenGPS (``vorlauf_an_s`` / ``vorlauf_aus_s``
+        Sekunden Fahrt voraus): offen ist ein Teilstück, sobald an **einer** der
+        beiden noch freier Boden liegt, zu erst, wenn **beide** überdeckt sind. Hinge
+        es am eigenen Zustand (offen → kurze Linie, zu → lange), ginge es beim
+        Verlassen bearbeiteten Bodens bei jedem Schritt auf und zu. Grenze und
+        Vorgewende zählen an der kurzen Linie: sonst schlösse es zu früh vor dem Rand.
+        ``vorgewende_m`` > 0: näher als so viel an der Grenze ist Vorgewende und bleibt zu -
+        gemessen am echten Abstand, nicht am gezeichneten Ring (der verliert an Stufen Ecken).
+        Unter ``min_speed_ms`` und rückwärts schließt alles Automatische.
         """
         h = math.radians(heading)
         forward = (math.sin(h), math.cos(h))
         right = (math.cos(h), -math.sin(h))
-        ahead = look_ahead_m + speed_ms * 0.5
+        tempo = max(0.0, speed_ms)
+        ahead_aus = look_ahead_m + tempo * max(0.0, vorlauf_aus_s)
+        ahead_an = look_ahead_m + tempo * max(0.0, vorlauf_an_s if vorlauf_an_s is not None else vorlauf_aus_s)
         schwelle = max(0.05, min(1.0, pcc))
+        langsam = rueckwaerts or tempo < min_speed_ms
+        if vorgewende_m > 0.0:
+            from .headland import distance_to_boundary   # spät: headland braucht guidance
         for section in sections:
             if not section.auto or section.forced_off:
                 continue
-            proben = self._section_proben(tool_centre, forward, right, section, ahead)
-            if boundary is not None and any(
-                    not point_in_polygon(punkt, boundary) for punkt in proben):
+            if langsam:
                 section.enabled = False
                 continue
-            anteil = sum(1 for punkt in proben if self.is_covered(punkt)) / len(proben)
-            section.enabled = anteil < schwelle
+            kurz = self._section_proben(tool_centre, forward, right, section, ahead_aus)
+            if boundary is not None and any(
+                    not point_in_polygon(punkt, boundary) for punkt in kurz):
+                section.enabled = False
+                continue
+            if vorgewende_m > 0.0 and boundary is not None and any(
+                    (distance_to_boundary(punkt, boundary) or 0.0) < vorgewende_m for punkt in kurz):
+                section.enabled = False
+                continue
+            frei = False
+            for proben in ((kurz,) if ahead_an == ahead_aus else
+                           (kurz, self._section_proben(tool_centre, forward, right, section, ahead_an))):
+                anteil = sum(1 for punkt in proben if self.is_covered(punkt)) / len(proben)
+                frei = frei or anteil < schwelle
+            section.enabled = frei
 
     @staticmethod
     def _section_proben(tool_centre: Point, forward: Point, right: Point,

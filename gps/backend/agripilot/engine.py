@@ -190,7 +190,8 @@ class Engine:
         self._felder_cache_at = -1e9
         if verwaist:
             self.note(f"{verwaist} unterbrochene Arbeit(en) vom letzten Mal abgeschlossen")
-        self.auto_sections = True
+        # Hauptschalter der Teilbreiten wie in AgOpenGPS: auto | manuell (alle an) | aus.
+        self.teilbreiten_modus = "auto"
         self.teilbreiten = None
 
         # Fahrspur und Zwischenstand schreibt ein eigener Faden (writer.py).
@@ -2114,19 +2115,78 @@ class Engine:
         boundary = None
         if self.field and self.field.get("boundary"):
             boundary = [tuple(p) for p in feldwerkzeuge.arbeitsgrenze(self.field)]
-        if self.auto_sections:
+        if self.teilbreiten_modus == "aus":
+            for section in self.sections:
+                section.enabled = False
+        elif self.teilbreiten_modus == "manuell":
+            for section in self.sections:
+                section.enabled = not section.forced_off
+        else:
+            p = self.profile
             self.coverage.update_auto_sections(
                 self.implement_position, kurs, self.sections,
                 speed_ms=self.fix.speed_ms if self.fix else 0.0,
                 boundary=boundary,
-                pcc=self.profile.section_pcc,
+                pcc=p.section_pcc,
+                vorlauf_an_s=p.section_vorlauf_an_s,
+                vorlauf_aus_s=p.section_vorlauf_aus_s,
+                min_speed_ms=max(0.0, p.section_min_tempo_kmh) / 3.6,
+                rueckwaerts=self.heading_filter.rueckwaerts,
+                vorgewende_m=(self.headland.tiefe_m(p.width_m)
+                              if p.section_vorgewende_aus and self.headland.aktiv else 0.0),
             )
+            for section in self.sections:
+                if not section.auto and not section.forced_off:
+                    section.enabled = True          # vom Fahrer fest eingeschaltet
         if self.teilbreiten is not None:
             maske=sum(1<<s.index for s in self.sections if s.enabled and not s.forced_off)
             self.teilbreiten.wunsch(maske if len(self.sections)<=32 else 0,min(32,len(self.sections)))
         wirksam=self._wirksame_teilbreiten()
         if previous_implement is not None:
             self.coverage.add_swath(previous_implement,self.implement_position,kurs,wirksam)
+
+    # -- Teilbreiten schalten (Bedienkonzept aus AgOpenGPS) ------------------
+
+    TEILBREITEN_MODI = ("auto", "manuell", "aus")
+    TEILBREITEN_ZUSTAENDE = ("auto", "an", "aus")
+
+    @property
+    def auto_sections(self) -> bool:
+        return self.teilbreiten_modus == "auto"
+
+    @auto_sections.setter
+    def auto_sections(self, wert: bool) -> None:
+        self.teilbreiten_modus = "auto" if wert else "manuell"
+
+    def teilbreiten_modus_setzen(self, modus: str) -> str:
+        """Hauptschalter: auto (nach Überdeckung und Grenze), manuell (alle an), aus (alle zu)."""
+        if modus not in self.TEILBREITEN_MODI:
+            raise ValueError(f"Teilbreiten: {modus!r} - erlaubt sind auto, manuell, aus")
+        self.teilbreiten_modus = modus
+        if modus == "manuell":
+            for section in self.sections:
+                section.enabled = not section.forced_off
+        return modus
+
+    def teilbreite_setzen(self, index: int, zustand: str) -> dict:
+        """Eine Teilbreite: auto (Automatik), an (fest an) oder aus (fest zu)."""
+        if not 0 <= index < len(self.sections):
+            raise KeyError("Teilbreite gibt es nicht")
+        if zustand not in self.TEILBREITEN_ZUSTAENDE:
+            raise ValueError(f"Teilbreite: {zustand!r} - erlaubt sind auto, an, aus")
+        section = self.sections[index]
+        section.forced_off = zustand == "aus"
+        section.auto = zustand != "an"
+        if zustand == "an":
+            section.enabled = True
+        return asdict(section)
+
+    def teilbreiten_vorlauf(self) -> dict:
+        """Wie weit vor dem Gerät die Schaltung gerade prüft (Meter) - für die Linien auf der Karte."""
+        tempo = max(0.0, self.fix.speed_ms) if self.fix else 0.0
+        p = self.profile
+        return {"an_m": round(1.0 + tempo * max(0.0, p.section_vorlauf_an_s), 2),
+                "aus_m": round(1.0 + tempo * max(0.0, p.section_vorlauf_aus_s), 2)}
 
     def _wirksame_teilbreiten(self):
         if self.config.teilbreiten.output!="udp":return self.sections
@@ -2301,6 +2361,8 @@ class Engine:
             "sections": [asdict(s) for s in self._wirksame_teilbreiten()],
             "teilbreiten_hardware": self.teilbreiten.status_dict() if self.teilbreiten else None,
             "auto_sections": self.auto_sections,
+            "teilbreiten_modus": self.teilbreiten_modus,
+            "teilbreiten_vorlauf": self.teilbreiten_vorlauf(),
             "job": {
                 **self.job,
                 "area_ha": self.coverage.area_ha,

@@ -463,10 +463,32 @@ Wichtig: der Versatz verschiebt alle Spuren gleichzeitig, nicht nur die
 aktuelle – sonst wäre das Muster nach einer Runde krumm. Er wird beim Feld
 gespeichert.
 
-## Sektionen
+## Sektionen (Teilbreiten schalten wie in AgOpenGPS, ab 1.5.57)
 
-Bei mehreren Teilbreiten zeigt der Balken unten, welche Sektion offen ist.
-Grün = an, grau = automatisch zu, rot = vom Fahrer zugeschaltet.
+Bei mehreren Teilbreiten steht unten links ein Balken: vorn der **Hauptschalter**, dahinter
+je Teilbreite ein Knopf.
+
+* **Hauptschalter** (tippen schaltet weiter): **AUTO** – die Automatik schaltet nach
+  Überdeckung, Feldgrenze, Tempo und auf Wunsch Vorgewende. **MAN** – alle an (gelb).
+  **AUS** – alle zu, es wird nichts markiert.
+* **Je Teilbreite** (tippen schaltet weiter): Auto → **fest an** → **fest aus** → Auto.
+* **Farben:** grün = offen, grau = von der Automatik geschlossen, gelb = fest an,
+  rot = fest aus. Auf der Karte hat das Gerät dieselben Farben.
+* **Vorlauf:** Ventile und Säschare brauchen Zeit. Die Automatik prüft deshalb zwei Linien
+  vor dem Gerät, die mit dem Tempo wachsen und auf der Karte gestrichelt zu sehen sind.
+  **Grün (Einschalten)**, Vorgabe 1,0 s Fahrt voraus: Liegt dort noch freier Boden, bleibt
+  die Teilbreite offen bzw. geht auf. **Rot (Ausschalten)**, Vorgabe 0,5 s: Erst wenn hier
+  und an der grünen Linie alles bearbeitet ist, schließt sie. Ein Teilstück schaltet also
+  nicht hin und her, wenn man aus bearbeitetem Boden herausfährt.
+* **Feldgrenze und Vorgewende** zählen an der roten Linie: was hinausragt, schließt sofort.
+  **Im Vorgewende abschalten** (Gerät) misst den echten Abstand zur Feldgrenze – sinnvoll,
+  wenn das Vorgewende am Ende extra gefahren wird.
+* **Aus unter** (Vorgabe 1 km/h) und **rückwärts** schließt die Automatik alles; was fest
+  an ist, bleibt an.
+
+Einstellen unter **Traktor & Gerät → Gerät → Arbeitsbreite und Teilbreiten**: Vorlauf
+Einschalten, Vorlauf Ausschalten, Aus unter, im Vorgewende abschalten. Übernommen ist das
+Bedienkonzept von AgOpenGPS, nicht dessen Code. Nicht an echter Teilbreiten-Hardware geprüft.
 
 Automatisch geschlossen wird eine Sektion, wenn sie über bereits bearbeitetes
 Land oder über die Feldgrenze hinaus laufen würde. Geprüft wird ein Stück

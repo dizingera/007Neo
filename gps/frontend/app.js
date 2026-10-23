@@ -37,7 +37,7 @@ function farbenLesen() {
   const bisher = F;
   const cs = getComputedStyle(document.body);
   F = Object.fromEntries(['boden', 'raster', 'grenze', 'vg', 'pass', 'aktiv', 'flaeche', 'doppelt', 'wende', 'spur',
-    'traktor', 'traktor-rand', 'geraet', 'fahrgasse', 'konflikt', 'lack', 'lack-hell', 'lack-dunkel', 'akzent', 'reifen', 'kabine']
+    'traktor', 'traktor-rand', 'geraet', 'fest', 'fahrgasse', 'konflikt', 'lack', 'lack-hell', 'lack-dunkel', 'akzent', 'reifen', 'kabine']
     .map((k) => [k, cs.getPropertyValue('--f-' + k).trim()]));
   if (bisher.flaeche !== F.flaeche || bisher.doppelt !== F.doppelt)
     flaeche.farbenSetzen(F.flaeche, F.doppelt);
@@ -418,24 +418,49 @@ function drawLightbar(guidance) {
   }
 }
 
+/* Teilbreiten wie in AgOpenGPS: vorn der Hauptschalter (AUTO → MAN = alle an → AUS),
+ * dahinter je Teilbreite ein Knopf (Auto → fest an → fest aus). Farben: grün offen,
+ * grau von der Automatik zu, gelb fest an, rot fest aus. */
+const TB_MODUS_NAECHST = { auto: 'manuell', manuell: 'aus', aus: 'auto' };
+const TB_MODUS_TEXT = { auto: 'AUTO', manuell: 'MAN', aus: 'AUS' };
+
+function teilbreitenZustand(section) {
+  return section.forced_off ? 'aus' : section.auto ? 'auto' : 'an';
+}
+
 function drawSections(sections) {
   const host = el('sections');
   if (sections.length <= 1) { host.hidden = true; return; }
   host.hidden = false;
-  if (host.children.length !== sections.length) {
+  if (host.children.length !== sections.length + 1) {
     host.innerHTML = '';
+    const master = document.createElement('div');
+    master.className = 'sec master';
+    master.title = 'Hauptschalter: AUTO, MAN (alle an), AUS';
+    master.onclick = () => api('POST', '/api/sections/modus',
+      { modus: TB_MODUS_NAECHST[(state.live && state.live.teilbreiten_modus) || 'auto'] });
+    host.appendChild(master);
     sections.forEach((section, index) => {
       const box = document.createElement('div');
       box.className = 'sec';
       box.textContent = index + 1;
-      box.onclick = () => api('POST', `/api/sections/${index}`,
-        { forced_off: !state.live.sections[index].forced_off });
+      box.title = 'Tippen: Auto → fest an → fest aus';
+      box.onclick = () => {
+        const jetzt = teilbreitenZustand(state.live.sections[index]);
+        api('POST', `/api/sections/${index}`, { zustand: { auto: 'an', an: 'aus', aus: 'auto' }[jetzt] });
+      };
       host.appendChild(box);
     });
   }
+  const modus = (state.live && state.live.teilbreiten_modus) || 'auto';
+  const master = host.children[0];
+  master.textContent = TB_MODUS_TEXT[modus];
+  master.className = 'sec master ' + modus;
   sections.forEach((section, index) => {
-    const box = host.children[index];
-    box.className = 'sec' + (section.forced_off ? ' forced' : (section.enabled ? ' on' : ''));
+    const box = host.children[index + 1];
+    const zustand = teilbreitenZustand(section);
+    box.className = 'sec' + (zustand === 'aus' ? ' forced'
+      : (section.enabled ? (zustand === 'an' ? ' manuell' : ' on') : ''));
   });
 }
 
@@ -1049,9 +1074,26 @@ function geraetZeichnen(s, profil, implement, rechts, vor) {
   const teile = sections.length ? sections : [{ left_m: -breite / 2, right_m: breite / 2, enabled: true }];
   teile.forEach((t) => {
     const an = t.enabled && !t.forced_off;
-    ctx.fillStyle = t.forced_off ? F.vg : an ? F.aktiv : F.geraet;
+    ctx.fillStyle = t.forced_off ? F.vg : an ? (t.auto === false ? F.fest : F.aktiv) : F.geraet;
     ctx.fillRect(t.left_m, -leiste / 2, t.right_m - t.left_m, leiste);
   });
+  // Vorlauflinien der Automatik wie in AgOpenGPS: grün wird eingeschaltet, rot ausgeschaltet.
+  const vorlauf = s.teilbreiten_vorlauf;
+  if (vorlauf && s.job && s.teilbreiten_modus === 'auto' && sections.length > 1
+      && s.fix && s.fix.speed_ms > 0.3) {
+    const links = teile[0].left_m, ganz = teile[teile.length - 1].right_m - teile[0].left_m;
+    ctx.save();
+    ctx.lineWidth = Math.max(0.06, 1.6 * px);
+    ctx.setLineDash([4 * px, 3 * px]);
+    [[vorlauf.an_m, F.aktiv], [vorlauf.aus_m, F.vg]].forEach(([y, farbe]) => {
+      ctx.strokeStyle = farbe;
+      ctx.beginPath();
+      ctx.moveTo(links, y);
+      ctx.lineTo(links + ganz, y);
+      ctx.stroke();
+    });
+    ctx.restore();
+  }
   // Fugen zwischen den Teilbreiten und ein Rand ums ganze Gerät
   ctx.strokeStyle = F['traktor-rand'];
   ctx.lineWidth = Math.max(0.05, 1.2 * px);
