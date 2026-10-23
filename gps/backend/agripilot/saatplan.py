@@ -100,6 +100,78 @@ def _schnitt_mit_polygon(p: Point, e: Point, polygon: Sequence[Point]) -> list[t
     return stuecke
 
 
+MIN_STUECK_M = 1.0       # kürzere Säspur-Stücke (Zipfel) lohnen nicht
+
+
+def _nah_an_kante(p: Point, e: Point, a: Point, b: Point, abstand: float) -> Optional[tuple[float, float]]:
+    """Das s-Intervall der Geraden p + s·e, das näher als ``abstand`` an der Strecke a-b liegt.
+
+    Der Bereich um eine Strecke ist ein Rechteck mit zwei Halbkreisen; die
+    Gerade schneidet ihn in höchstens einem Intervall (er ist konvex).
+    """
+    teile: list[tuple[float, float]] = []
+    for c in (a, b):                                     # die beiden Kreise
+        wx, wy = p[0] - c[0], p[1] - c[1]
+        bq = wx * e[0] + wy * e[1]
+        disk = bq * bq - (wx * wx + wy * wy - abstand * abstand)
+        if disk > 0.0:
+            w = math.sqrt(disk)
+            teile.append((-bq - w, -bq + w))
+    laenge = distance(a, b)
+    if laenge > 1e-9:                                    # das Rechteck
+        u = ((b[0] - a[0]) / laenge, (b[1] - a[1]) / laenge)
+        n = (-u[1], u[0])
+        lo, hi = -math.inf, math.inf
+        for richtung, grenzen in ((u, (0.0, laenge)), (n, (-abstand, abstand))):
+            start = (p[0] - a[0]) * richtung[0] + (p[1] - a[1]) * richtung[1]
+            steigung = e[0] * richtung[0] + e[1] * richtung[1]
+            if abs(steigung) < 1e-12:
+                if not grenzen[0] < start < grenzen[1]:
+                    lo, hi = 1.0, -1.0
+                    break
+                continue
+            s1, s2 = sorted(((grenzen[0] - start) / steigung, (grenzen[1] - start) / steigung))
+            lo, hi = max(lo, s1), min(hi, s2)
+        if lo < hi:
+            teile.append((lo, hi))
+    if not teile:
+        return None
+    return min(t[0] for t in teile), max(t[1] for t in teile)
+
+
+def _hauptfeld_stuecke(p: Point, e: Point, ring: Sequence[Point], abstand: float) -> list[tuple[Point, Point]]:
+    """Die Stücke der Geraden p + s·e im Schlag, die mindestens ``abstand`` von jeder Grenzkante liegen.
+
+    Genau statt über den versetzten Ring (``headland.ring``): der ist eine
+    Zeichenhilfe und verliert bei gestuften Schlägen ganze Ecken - am
+    23.10.2026 auf Fünfzehn Jauchert ein Dreieck, das dann keine Säspur bekam.
+    """
+    stuecke = []
+    for a, b in _schnitt_mit_polygon(p, e, ring):
+        s_a = (a[0] - p[0]) * e[0] + (a[1] - p[1]) * e[1]
+        s_b = (b[0] - p[0]) * e[0] + (b[1] - p[1]) * e[1]
+        frei = [(min(s_a, s_b), max(s_a, s_b))]
+        n = len(ring)
+        for i in range(n):
+            sperre = _nah_an_kante(p, e, ring[i], ring[(i + 1) % n], abstand)
+            if sperre is None:
+                continue
+            neu = []
+            for lo, hi in frei:
+                if sperre[1] <= lo or sperre[0] >= hi:
+                    neu.append((lo, hi))
+                    continue
+                if sperre[0] > lo:
+                    neu.append((lo, sperre[0]))
+                if sperre[1] < hi:
+                    neu.append((sperre[1], hi))
+            frei = neu
+        for lo, hi in frei:
+            if hi - lo >= MIN_STUECK_M:
+                stuecke.append(((p[0] + e[0] * lo, p[1] + e[1] * lo), (p[0] + e[0] * hi, p[1] + e[1] * hi)))
+    return stuecke
+
+
 def _r(wert: float) -> float:
     return round(wert, 2)
 
@@ -168,9 +240,20 @@ def planen(grenze: Sequence[Point], von: Point, nach: Point, breite_m: float,
                       "punkte": [[_r(x), _r(y)] for x, y in punkte]})
 
     # -- Hauptfeld ---------------------------------------------------------
-    innen = headland.ring(ring, vorgewende_m) if tiefe >= 2 * vorgewende_m + w else []
     spuren = []
-    if len(innen) < 3:
+    if tiefe >= 2 * vorgewende_m + w:
+        k = math.floor(min(versatz(p) for p in ring) / w) - 1
+        while (k + 0.5) * w <= tiefe + w:
+            mitte_m = (k + 0.5) * w
+            basis = (von[0] + nrm[0] * mitte_m, von[1] + nrm[1] * mitte_m)
+            stuecke = _hauptfeld_stuecke(basis, e, ring, vorgewende_m)
+            if stuecke:
+                spuren.append({"nummer": len(spuren) + 1, "versatz_m": _r(mitte_m),
+                               "fahrgasse": ist_fahrgasse(mitte_m),
+                               "stuecke": [[[_r(a[0]), _r(a[1])], [_r(b[0]), _r(b[1])]] for a, b in stuecke],
+                               "laenge_m": _r(sum(distance(a, b) for a, b in stuecke))})
+            k += 1
+    if not spuren:
         konflikte.append({
             "art": "zu_schmal",
             "text": (f"Der Schlag ist schmaler als zweimal das Vorgewende ({2 * vorgewende_m:g} m): "
@@ -178,18 +261,6 @@ def planen(grenze: Sequence[Point], von: Point, nach: Point, breite_m: float,
             "anpassung": ["Nur Vorgewende-Runden fahren (Kontur)",
                           "Vorgewende an den Schmalseiten weglassen und längs durchsäen"],
         })
-    else:
-        k = math.floor(min(versatz(p) for p in ring) / w) - 1
-        while (k + 0.5) * w <= tiefe + w:
-            mitte_m = (k + 0.5) * w
-            basis = (von[0] + nrm[0] * mitte_m, von[1] + nrm[1] * mitte_m)
-            stuecke = _schnitt_mit_polygon(basis, e, innen)
-            if stuecke:
-                spuren.append({"nummer": len(spuren) + 1, "versatz_m": _r(mitte_m),
-                               "fahrgasse": ist_fahrgasse(mitte_m),
-                               "stuecke": [[[_r(a[0]), _r(a[1])], [_r(b[0]), _r(b[1])]] for a, b in stuecke],
-                               "laenge_m": _r(sum(distance(a, b) for a, b in stuecke))})
-            k += 1
 
     # -- Gegenrand ----------------------------------------------------------
     # So wird gesät: von der Startkante (A) so viele Fahrgassen wie passen,
@@ -208,7 +279,10 @@ def planen(grenze: Sequence[Point], von: Point, nach: Point, breite_m: float,
         if max(d_werte) < 1.0:
             continue                               # die Startkante selbst (oder auf ihrer Linie)
         parallele.append((kante, randspuren.benennen(kante, ring), min(d_werte), max(d_werte)))
-    gegen = [p for p in parallele if p[2] > tiefe / 2.0 and p[3] - p[2] <= w]
+    # Die Gegenseite ist eine Kante, hinter der das Feld aufhört (p[3] reicht bis an die
+    # Tiefe des Schlags). Eine Stufe mitten im Feld ist es nicht: 23.10.2026 nahm der Plan auf
+    # Fünfzehn Jauchert eine Stufe der Westgrenze als B - alles dahinter blieb ohne Säspur.
+    gegen = [p for p in parallele if p[2] > tiefe / 2.0 and p[3] - p[2] <= w and p[3] >= tiefe - w]
     gegenrand = min(gegen, key=lambda p: p[2]) if gegen and spuren else None
     fuellstreifen = None
     gassen_m: list[float] = [F / 2.0]              # wo Fahrgassen liegen, ab Startkante
@@ -253,7 +327,7 @@ def planen(grenze: Sequence[Point], von: Point, nach: Point, breite_m: float,
             fuell_zahl += 1
             if mitte_m < D - vorgewende_m + 1e-6:  # im Band liegen die Vorgewende-Runden
                 basis = (von[0] + nrm[0] * mitte_m, von[1] + nrm[1] * mitte_m)
-                stuecke = _schnitt_mit_polygon(basis, e, innen) if len(innen) >= 3 else []
+                stuecke = _hauptfeld_stuecke(basis, e, ring, vorgewende_m)
                 if stuecke:
                     spuren.append({"nummer": len(spuren) + 1, "versatz_m": _r(mitte_m), "fahrgasse": False,
                                    "fuell": True, "von_b": True,

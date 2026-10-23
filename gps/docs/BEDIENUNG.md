@@ -397,6 +397,15 @@ die Teilbreite für Spritze und Streuer an der Fahrgasse von B (bei weniger als
 der Säspuren von B her und die Überlappung der letzten. Die Reihenfolge steht
 beim Plan; was von B her gesät wird, ist auf der Karte bernsteinfarben.
 
+**Gestufte oder spitz zulaufende Schläge (ab 1.5.56):** Die Gegenseite B ist nur eine
+gerade Kante, hinter der der Schlag wirklich aufhört. Eine Stufe mitten in der Grenze
+zählt nicht als B. Gibt es hinten keine solche Kante, laufen die Säspuren von A mit
+ihren Fahrgassen bis zum Ende durch. Jede Säspur wird an der echten Grenze geschnitten
+und hält überall die Vorgewende-Tiefe ein, so bekommen auch Ecken und Dreiecke hinter
+einer Stufe ihre Säspuren. Vorher blieb dort ein Teil des Schlags leer (am 23.10.2026 auf
+Fünfzehn Jauchert fast ein Hektar). **Ältere Pläne neu rechnen:** einmal **Ab hier
+planen** bzw. die Startecke neu wählen.
+
 * **Vorgewende** rundum, so tief wie eine Fahrgassenweite: bei 3 m und 21 m
   sieben Runden – drei Säspuren, die Fahrgasse auf 10,5 m, drei Säspuren.
 * **Hauptfeld** parallel zur Startkante im Raster der Drille, Fahrgasse alle

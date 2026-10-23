@@ -115,6 +115,32 @@ class PlanTests(unittest.TestCase):
         p = saatplan.planen(grenze, tuple(o["von"]), tuple(o["nach"]), 3.0, 21.0, 3)
         self.assertTrue(any(k["art"] == "keil" for k in p["konflikte"]))
 
+    def test_a_step_in_the_field_is_not_the_opposite_side(self):
+        # Westen nur 120 m tief, Osten 168 m: die Stufe bei 120 m ist keine Gegenseite,
+        # B liegt am echten Rand bei 168 m - und das Feld bis dorthin bekommt Säspuren.
+        grenze = [(0.0, 0.0), (300.0, 0.0), (300.0, 168.0), (150.0, 168.0), (150.0, 120.0), (0.0, 120.0)]
+        o = sued(grenze)
+        p = saatplan.planen(grenze, tuple(o["von"]), tuple(o["nach"]), 3.0, 21.0, 3)
+        self.assertIsNotNone(p["fuellstreifen"])
+        self.assertAlmostEqual(p["fuellstreifen"]["bis_m"], 168.0 - 10.5 - 1.5, delta=0.01)
+        self.assertEqual(p["saisonspur_b"][0][1], 157.5)
+        tiefste = max(s["versatz_m"] for s in p["spuren"])
+        self.assertGreaterEqual(tiefste, 145.5)                   # bis ans Vorgewende am echten Rand
+        # Im Osten hinter der Stufe liegen Säspuren, im Westen nicht (dort ist Vorgewende).
+        hinter_stufe = [s for s in p["spuren"] if s["versatz_m"] > 120.0]
+        self.assertTrue(hinter_stufe)
+        for s in hinter_stufe:
+            for a, b in s["stuecke"]:
+                self.assertGreaterEqual(min(a[0], b[0]), 150.0 + 21.0 - 0.05)
+
+    def test_a_field_without_a_straight_far_side_is_sown_from_a_to_the_end(self):
+        # Hinten schräg, davor eine gerade Stufe: keine Gegenseite, A läuft bis zum Ende durch.
+        grenze = [(0.0, 0.0), (300.0, 0.0), (300.0, 200.0), (150.0, 120.0), (0.0, 120.0)]
+        o = sued(grenze)
+        p = saatplan.planen(grenze, tuple(o["von"]), tuple(o["nach"]), 3.0, 21.0, 3)
+        self.assertIsNone(p["fuellstreifen"])
+        self.assertGreaterEqual(max(s["versatz_m"] for s in p["spuren"]), 160.0)
+
     def test_start_options_offer_both_corners_of_each_edge(self):
         optionen = saatplan.startkanten(rechteck(168.0))
         self.assertEqual(len(optionen), 8)
