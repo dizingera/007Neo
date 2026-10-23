@@ -156,6 +156,35 @@ class LuftbildErsatz(unittest.TestCase):
             self.assertEqual([u for u in aufrufe if "dienst.example" in u], [])
         luftbild._gestoert_bis.clear()
 
+    def test_a_fresh_coarse_image_does_not_block_the_sharp_one_from_the_master(self):
+        # 23.10.2026: das LGL war wieder da, der Master hatte das scharfe Bild - die Arbeiter
+        # zeigten trotzdem bis zu 6 Stunden ihr grobes Ersatzbild.
+        master_hat_es = False
+
+        def lesen(url, kopf, timeout):
+            if "/api/sync/luftbild/" in url:
+                if master_hat_es:
+                    return JPEG + b"scharf"
+                raise OSError("HTTP 503: nur grobes Ersatzbild")
+            if "ersatz.example" in url:
+                return JPEG
+            raise TimeoutError("timed out")
+
+        ersatz = ("https://ersatz.example/wms", "rgb", "Ersatz")
+        master = ("http://master:8090", {"X-AgriPilot-Token": "c"})
+        luftbild._gestoert_bis.clear()
+        with tempfile.TemporaryDirectory() as ordner:
+            _, info = luftbild.holen(FELD, Path(ordner), lesen=lesen, ersatz=ersatz, master=master)
+            self.assertTrue(info["grob"])
+            master_hat_es = True
+            pfad, info = luftbild.holen(FELD, Path(ordner), lesen=lesen, ersatz=ersatz, master=master)
+            self.assertFalse(info.get("grob"))
+            self.assertEqual(pfad.read_bytes(), JPEG + b"scharf")
+            self.assertEqual(list(Path(ordner).glob("ersatz-*")), [])   # das grobe ist weg
+            _, gefunden = luftbild.vorhanden(FELD, Path(ordner))
+            self.assertFalse(gefunden.get("grob"))
+        luftbild._gestoert_bis.clear()
+
     def test_timeout_reads_like_german(self):
         def lesen(url, kopf, timeout):
             raise TimeoutError("timed out")

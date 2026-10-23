@@ -128,14 +128,11 @@ def holen(feld: dict, ordner: Path, wms: str = STANDARD_WMS, ebene: str = STANDA
     bild, meta = ordner / f"{kennung}.jpg", ordner / f"{kennung}.json"
     if bild.exists() and meta.exists():
         return bild, json.loads(meta.read_text(encoding="utf-8"))
-    # Ein frisches Ersatzbild nehmen, statt jedes Mal auf den ausgefallenen Dienst zu warten.
-    if ersatz is not None:
-        e_kennung = "ersatz-" + _kennung(feld, ersatz[0], ersatz[1], box)
-        e_bild, e_meta = ordner / f"{e_kennung}.jpg", ordner / f"{e_kennung}.json"
-        if e_bild.exists() and e_meta.exists() and time.time() - e_bild.stat().st_mtime < ERSATZ_NEU_S:
-            return e_bild, json.loads(e_meta.read_text(encoding="utf-8"))
     daten = b""
     fehler = []
+    # Erst den Master: er antwortet schnell (auch mit "nur Ersatzbild"), und hat er das scharfe
+    # Bild inzwischen, soll kein Ersatzbild von gestern davorstehen (22./23.10.2026: das LGL war
+    # wieder da, die Arbeiter zeigten noch bis zu 6 Stunden das grobe Bild).
     if master is not None:
         basis, kopf = master
         try:
@@ -143,6 +140,13 @@ def holen(feld: dict, ordner: Path, wms: str = STANDARD_WMS, ebene: str = STANDA
         except Exception as exc:  # noqa: BLE001 - dann eben direkt beim Dienst
             fehler.append(f"Master: {_fehlertext(exc)}")
             daten = b""
+    # Ein frisches Ersatzbild nehmen, statt jedes Mal auf den ausgefallenen Dienst zu warten.
+    if ersatz is not None:
+        e_kennung = "ersatz-" + _kennung(feld, ersatz[0], ersatz[1], box)
+        e_bild, e_meta = ordner / f"{e_kennung}.jpg", ordner / f"{e_kennung}.json"
+        if (not ist_jpeg(daten) and e_bild.exists() and e_meta.exists()
+                and time.time() - e_bild.stat().st_mtime < ERSATZ_NEU_S):
+            return e_bild, json.loads(e_meta.read_text(encoding="utf-8"))
     if not ist_jpeg(daten) and time.time() < _gestoert_bis.get(wms, 0.0) and ersatz is not None:
         fehler.append("Dienst: eben erst nicht erreichbar")
     elif not ist_jpeg(daten):

@@ -858,7 +858,10 @@ Gebäude wirklich, statt nur das Raster. Nachts ist es gedämpft.
 * **Rückfall:** Antwortet der Dienst nicht (am 22.10.2026 war das Landesamt stundenlang
   nicht erreichbar), kommt das Sentinel-2-Satellitenbild des BKG – bundesweit frei, aber
   nur 10 m je Bildpunkt: Felder, Wege und Dörfer ja, Gräben nein. Die Quellenangabe
-  unten sagt es dazu. Nach sechs Stunden wird das scharfe Luftbild erneut versucht.
+  unten sagt es dazu. Nach sechs Stunden wird das scharfe Luftbild erneut beim Dienst
+  versucht. Den Master fragt ein Tablet ab 1.5.55 jedes Mal zuerst: Hat er das scharfe
+  Bild inzwischen, ersetzt es sofort das grobe. Bleibt ein Feld grob, obwohl der Dienst
+  wieder läuft: **Menü → Felder → Luftbilder aller Felder laden**.
 
 ## Traktor- und Gerätebild (ab 1.5.51)
 
