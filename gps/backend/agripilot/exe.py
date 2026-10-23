@@ -229,6 +229,33 @@ def arbeiter_eintragen(konfig: Path, master_url: str = "", code: str = "") -> No
     cfg.save(konfig)
 
 
+WIEDERHOLUNGEN = 10   # je eine Sekunde: Windows und Virenscanner geben Dateien verzögert frei
+
+
+def _beharrlich(aktion: Callable[[], object]) -> object:
+    """WinError 32 (Datei noch offen) ist auf Windows oft nach Sekunden vorbei."""
+    for versuch in range(WIEDERHOLUNGEN):
+        try:
+            return aktion()
+        except PermissionError:
+            if versuch == WIEDERHOLUNGEN - 1:
+                raise
+            time.sleep(1.0)
+    return None
+
+
+def _beiseite(datei: Path, ablage: Path) -> None:
+    """Schiebt datei nach ablage. Eine laufende exe lässt sich unter Windows nicht
+    überschreiben, wohl aber umbenennen - so stört ein Rest, der noch läuft, nicht."""
+    if ablage.exists():
+        try:
+            ablage.unlink()
+        except PermissionError:
+            # Die Ablage läuft selbst noch (ein früherer Tausch): sie bekommt einen eigenen Namen.
+            ablage.replace(ablage.with_name(f"{ablage.name}.{time.time_ns()}"))
+    datei.replace(ablage)
+
+
 def plan(ziel: str, port: int = 8080, quelle: Optional[str] = None,
          daten: Optional[str] = None, rechnername: Optional[str] = None,
          still: bool = False, rolle: str = "master", master_url: str = "",
@@ -258,7 +285,15 @@ def plan(ziel: str, port: int = 8080, quelle: Optional[str] = None,
         _lauf(["powershell", "-NoProfile", "-Command",
                f"Get-Process AgriPilot -ErrorAction SilentlyContinue | "
                f"Where-Object {{ $_.Id -ne {eigene} }} | Stop-Process -Force"], ok_codes=None)
-        time.sleep(2.0)       # Port und Datei werden erst jetzt frei
+        # Warten, bis wirklich keiner mehr läuft - erst dann sind Port und Datei frei.
+        for _ in range(WIEDERHOLUNGEN):
+            time.sleep(1.0)
+            if _lauf(["powershell", "-NoProfile", "-Command",
+                      f"if (Get-Process AgriPilot -ErrorAction SilentlyContinue | "
+                      f"Where-Object {{ $_.Id -ne {eigene} }}) {{ exit 1 }} else {{ exit 0 }}"],
+                     ok_codes=None) == 0:
+                break
+        time.sleep(1.0)
 
     alt = zielpfad / (EXE_NAME + ".alt")
 
@@ -266,8 +301,16 @@ def plan(ziel: str, port: int = 8080, quelle: Optional[str] = None,
         zielpfad.mkdir(parents=True, exist_ok=True)
         if Path(quelle).resolve() != exe.resolve():
             if exe.exists():
-                shutil.copy2(exe, alt)       # der bisherige Stand, falls der neue nicht anläuft
-            shutil.copy2(quelle, exe)
+                # Der bisherige Stand, falls der neue nicht anläuft. Umbenannt, nicht
+                # überschrieben: hält noch ein Prozess die exe, ging das Kopieren mit
+                # WinError 32 schief, und die alte Version lief einfach weiter.
+                _beharrlich(lambda: _beiseite(exe, alt))
+            try:
+                _beharrlich(lambda: shutil.copy2(quelle, exe))
+            except Exception:
+                if not exe.exists() and alt.exists():
+                    shutil.copy2(alt, exe)   # nie ohne Programm zurücklassen
+                raise
 
     def zurueckrollen() -> bool:
         if not alt.exists():
@@ -277,7 +320,9 @@ def plan(ziel: str, port: int = 8080, quelle: Optional[str] = None,
                f"Get-Process AgriPilot -ErrorAction SilentlyContinue | "
                f"Where-Object {{ $_.Id -ne {os.getpid()} }} | Stop-Process -Force"], ok_codes=None)
         time.sleep(2.0)
-        shutil.copy2(alt, exe)
+        if exe.exists():
+            _beharrlich(lambda: _beiseite(exe, zielpfad / (EXE_NAME + ".kaputt")))
+        _beharrlich(lambda: shutil.copy2(alt, exe))
         _lauf(["schtasks", "/Run", "/TN", AUFGABE], ok_codes=None)
         return True
 
@@ -360,6 +405,12 @@ def plan(ziel: str, port: int = 8080, quelle: Optional[str] = None,
 
     def aufraeumen() -> None:
         _lauf(["schtasks", "/Delete", "/TN", UPDATE_AUFGABE, "/F"], ok_codes=None)
+        # Reste früherer Tausche, die damals noch liefen; was noch läuft, bleibt liegen.
+        for rest in [*zielpfad.glob(EXE_NAME + ".alt.*"), zielpfad / (EXE_NAME + ".kaputt")]:
+            try:
+                rest.unlink(missing_ok=True)
+            except OSError:
+                pass
 
     return [
         Schritt("Laufende Version anhalten", stoppen),

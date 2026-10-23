@@ -194,6 +194,76 @@ class PlanTests(unittest.TestCase):
             self.assertIn("vorige Stand wurde wieder eingesetzt", str(fehler.exception))
             self.assertEqual((ziel / "AgriPilot.exe").read_bytes(), b"MZ-alt")
 
+    def _kopier_schritt(self, ordner, alt=b"MZ-alt"):
+        quelle = Path(ordner) / "neu.exe"
+        quelle.write_bytes(b"MZ-neu")
+        ziel = Path(ordner) / "AgriPilot"
+        ziel.mkdir()
+        if alt is not None:
+            (ziel / "AgriPilot.exe").write_bytes(alt)
+        schritt = [s for s in exe.plan(str(ziel), quelle=str(quelle), daten=str(Path(ordner) / "d"))
+                   if s.text.startswith("Programm nach")][0]
+        return ziel, schritt
+
+    def test_a_running_exe_is_moved_aside_not_overwritten(self):
+        # Windows: eine laufende exe lässt sich umbenennen, aber nicht überschreiben.
+        with tempfile.TemporaryDirectory() as ordner:
+            ziel, schritt = self._kopier_schritt(ordner)
+            echt = exe.shutil.copy2
+
+            def kopie(von, nach, *a, **k):
+                if Path(nach) == ziel / "AgriPilot.exe" and Path(nach).exists():
+                    raise PermissionError(32, "wird von einem anderen Prozess verwendet")
+                return echt(von, nach, *a, **k)
+            with mock.patch.object(exe.shutil, "copy2", side_effect=kopie):
+                schritt.aktion()
+            self.assertEqual((ziel / "AgriPilot.exe").read_bytes(), b"MZ-neu")
+            self.assertEqual((ziel / "AgriPilot.exe.alt").read_bytes(), b"MZ-alt")
+
+    def test_a_briefly_locked_file_is_retried(self):
+        with tempfile.TemporaryDirectory() as ordner:
+            ziel, schritt = self._kopier_schritt(ordner)
+            echt = exe.shutil.copy2
+            fehlschlaege = iter([True, True])
+
+            def kopie(von, nach, *a, **k):
+                if next(fehlschlaege, False):
+                    raise PermissionError(32, "noch offen")
+                return echt(von, nach, *a, **k)
+            with mock.patch.object(exe.shutil, "copy2", side_effect=kopie),                     mock.patch.object(exe.time, "sleep"):
+                schritt.aktion()
+            self.assertEqual((ziel / "AgriPilot.exe").read_bytes(), b"MZ-neu")
+
+    def test_when_copying_fails_for_good_the_old_program_stays(self):
+        with tempfile.TemporaryDirectory() as ordner:
+            ziel, schritt = self._kopier_schritt(ordner)
+            echt = exe.shutil.copy2
+
+            def kopie(von, nach, *a, **k):
+                if Path(von).name == "neu.exe":
+                    raise PermissionError(32, "gesperrt")
+                return echt(von, nach, *a, **k)
+            with mock.patch.object(exe.shutil, "copy2", side_effect=kopie),                     mock.patch.object(exe.time, "sleep"):
+                with self.assertRaises(PermissionError):
+                    schritt.aktion()
+            self.assertEqual((ziel / "AgriPilot.exe").read_bytes(), b"MZ-alt")
+
+    def test_an_old_backup_that_is_still_in_use_gets_its_own_name(self):
+        with tempfile.TemporaryDirectory() as ordner:
+            ziel, schritt = self._kopier_schritt(ordner)
+            (ziel / "AgriPilot.exe.alt").write_bytes(b"MZ-uralt")
+            echt = Path.unlink
+
+            def loeschen(pfad, *a, **k):
+                if pfad.name == "AgriPilot.exe.alt":
+                    raise PermissionError(32, "läuft noch")
+                return echt(pfad, *a, **k)
+            with mock.patch.object(Path, "unlink", loeschen):
+                schritt.aktion()
+            self.assertEqual((ziel / "AgriPilot.exe.alt").read_bytes(), b"MZ-alt")
+            reste = list(ziel.glob("AgriPilot.exe.alt.*"))
+            self.assertEqual([r.read_bytes() for r in reste], [b"MZ-uralt"])
+
     def test_dry_run_touches_nothing(self):
         with mock.patch.object(exe, "_lauf") as lauf, mock.patch("builtins.print"):
             code = exe.installieren(r"C:\AgriPilot", 8080, trocken=True)

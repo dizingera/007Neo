@@ -1252,6 +1252,12 @@ spielt sie ein.
   verbindet sich von selbst wieder.
 * **Läuft die neue Version nicht an,** setzt die Installation den vorigen Stand
   automatisch wieder ein (`AgriPilot.exe.alt`).
+* **„Datei wird von einem anderen Prozess verwendet“ (WinError 32):** bis 1.5.59
+  scheiterte das Einspielen daran, wenn die alte `AgriPilot.exe` beim Tausch noch offen
+  war – das Protokoll zeigte den Fehler, und die alte Version lief weiter. Ab dem Setup
+  1.5.60 wird die alte exe beiseite geschoben statt überschrieben, und kurz gesperrte
+  Dateien werden bis zu zehn Sekunden lang erneut versucht. Weil das Setup der *neuen*
+  Version den Tausch macht, hilft das schon beim Update von 1.5.57 auf 1.5.60.
 * Das Protokoll steht in `C:\ProgramData\AgriPilot\update.log`. Ohne Netz meldet die
   Suche das, das Programm arbeitet normal weiter. Abschalten: `update_online: false`
   in der Konfiguration (Abschnitt `server`).
