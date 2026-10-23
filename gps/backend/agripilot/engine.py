@@ -987,6 +987,14 @@ class Engine:
         plan = gespeichert.get("plan")
         if not plan:
             raise ValueError("Erst planen, dann übernehmen")
+        # Mit der gespeicherten Vorgabe frisch rechnen: gelenkt wird auf genau diesen
+        # Spuren, also mit der aktuellen Grenze und der aktuellen Rechnung (1.5.63:
+        # Vorgewende-Runden ohne Zacken an Einbuchtungen) - nicht mit einem alten Stand.
+        if gespeichert.get("vorgabe"):
+            try:
+                plan = self.saatplan_planen(field_id, gespeichert["vorgabe"])
+            except ValueError:
+                pass                               # Startecke gibt es nicht mehr: der gespeicherte Plan
         jahr = self._erntejahr(saison)
         for alt in self.store.list_lines(field_id):
             if alt["name"].startswith(SAATPLAN_PRAEFIX) and alt["saison"] == jahr:

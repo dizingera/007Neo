@@ -433,6 +433,15 @@ Fahrgassenweite (Spritze, Streuer mit 21 m) fährt auf dieser Spur nur die Fahrg
 auch die Vorgewende-Fahrgasse und die von B. Schmalere Geräte (Walze, Striegel)
 nehmen jede passende Spur.
 
+**Vorgewende-Runden an Einbuchtungen (ab 1.5.63):** Die Runden sind die Grenze, um
+1,5 m, 4,5 m, 7,5 m … nach innen versetzt. An einspringenden Ecken (Einbuchtung,
+Stufe, Mast-Ecke) und an spitzen Zipfeln schnitt sich der Versatz früher selbst, und
+es blieben Zacken quer durchs Feld. Jetzt hat jede Runde überall genau ihren Abstand
+zur Grenze; zerfällt der Schlag an einem engen Hals, bekommt jeder Teil seine eigene
+Runde. **Ein vorher übernommener Plan hat noch die alten Runden: einmal
+„Als Aussaat übernehmen“ drücken** – dabei wird der Plan mit der gespeicherten
+Vorgabe neu gerechnet.
+
 Daneben bleiben die zwei AB-Spuren: „Saatplan … A“ durch die
 erste Fahrgasse (10,5 m von der Startkante) und „Saatplan … B“ durch die Fahrgasse von B. Die
 B-Spur beim Säen von B her laden: dort liegt das Raster um den Rest versetzt. Sie kennt genau

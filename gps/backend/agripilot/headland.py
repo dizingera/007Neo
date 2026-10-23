@@ -299,26 +299,76 @@ def reihenfolge_hinweis(settings: HeadlandSettings, abdeckung_anteil: Optional[f
 
 
 def ring(boundary: Sequence[Point], inset_m: float) -> list[Point]:
-    """Die Feldgrenze um ``inset_m`` nach innen versetzt - als Zeichenhilfe.
+    """Die Feldgrenze um ``inset_m`` nach innen versetzt - der größte Ring.
 
-    Jede Kante wird nach innen geschoben und mit ihren Nachbarn geschnitten; das
-    hält Ecken spitz, statt sie wie ein Versatz über die Eckpunkte abzurunden.
-    Bei einem schmalen Zipfel im Schlag kann sich das Ergebnis selbst
-    überschlagen. Solche Punkte werden verworfen, aber es bleibt eine
-    Zeichenhilfe: **die Führung rechnet nie damit**, sie misst den Abstand zur
-    echten Grenze (siehe ``GuidanceLine`` im Kontur-Modus).
+    Zerfällt der Schlag bei diesem Abstand in mehrere Teile (enger Hals, tiefe
+    Einbuchtung), liefert ``ringe`` alle; hier kommt der größte.
+    """
+    alle = ringe(boundary, inset_m)
+    if not alle:
+        return [] if len(boundary) >= 3 and inset_m > 0.0 else [tuple(p) for p in boundary]
+    return max(alle, key=lambda r: abs(_flaeche(r)))
+
+
+ZACKEN_M = 5.0       # Haken unter dieser Länge mit scharfem Knick sind Rechenreste, keine Ecken
+
+
+def ringe(boundary: Sequence[Point], inset_m: float) -> list[list[Point]]:
+    """Alle Ringe der um ``inset_m`` nach innen versetzten Feldgrenze.
+
+    Jede Kante wird nach innen geschoben und mit ihren Nachbarn geschnitten -
+    das hält Ecken spitz. An einspringenden Ecken (Einbuchtung, Stufe) und an
+    schmalen Zipfeln schneidet sich das Ergebnis dann selbst und bildet
+    Schleifen, die näher als ``inset_m`` an der Grenze liegen oder draußen.
+    Auf diesen Ringen wird gelenkt (Saatplan): die Schleifen werden deshalb an
+    den Schnittpunkten herausgeschnitten, nicht nur einzelne Punkte
+    verworfen - sonst blieben Zacken quer durchs Feld (Stelle 2, 23.10.2026).
+    Übrig bleibt, was überall mindestens ``inset_m`` von der Grenze entfernt
+    ist, als ein oder mehrere geschlossene Ringe.
     """
     if len(boundary) < 3 or inset_m <= 0.0:
-        return [tuple(p) for p in boundary]
+        return [[tuple(p) for p in boundary]] if len(boundary) >= 3 else []
+    punkte = [tuple(map(float, p)) for p in boundary]
+    roh = _versatz_roh(punkte, inset_m)
+    if len(roh) < 3:
+        return []
+    toleranz = 0.05                 # die Übergänge werden auf 1 cm genau gesucht
 
-    punkte = [tuple(p) for p in boundary]
+    def gueltig(p: Point) -> bool:
+        return point_in_polygon(p, punkte) and (distance_to_boundary(p, punkte) or 0.0) >= inset_m - toleranz
+
+    stuecke = []
+    for a, b in _an_schnitten_teilen(roh):
+        if distance(a, b) > 1e-9:
+            stuecke.extend(_gueltige_teile(a, b, gueltig))
+    def abruecken(p: Point) -> Point:
+        # Zu nah an der Grenze: vom nächsten Grenzpunkt weg auf genau inset_m.
+        fuss = _naechster_grenzpunkt(p, punkte)
+        d = distance(p, fuss)
+        if d >= inset_m - toleranz or d < 1e-9:
+            return p
+        return (fuss[0] + (p[0] - fuss[0]) * inset_m / d, fuss[1] + (p[1] - fuss[1]) * inset_m / d)
+
+    geschlossen, offen = _zu_ringen(stuecke)
+    geschlossen += _offene_verbinden(offen, len(stuecke), 10.0 * inset_m + 30.0, abruecken, gueltig)
+    ergebnis = []
+    for schleife in geschlossen:
+        schleife = _ohne_zacken(_ohne_doppelte(schleife), ZACKEN_M, abruecken, gueltig)
+        if len(schleife) >= 3 and abs(_flaeche(schleife)) > inset_m * inset_m:
+            ergebnis.append(schleife)
+    return ergebnis
+
+
+def _flaeche(punkte: Sequence[Point]) -> float:
     n = len(punkte)
-    # Umlaufsinn: bei positiver Fläche (gegen den Uhrzeigersinn) zeigt die
-    # Linksnormale nach innen, sonst die Rechtsnormale.
-    flaeche = sum(punkte[i][0] * punkte[(i + 1) % n][1]
-                  - punkte[(i + 1) % n][0] * punkte[i][1] for i in range(n))
-    vorzeichen = 1.0 if flaeche > 0 else -1.0
+    return 0.5 * sum(punkte[i][0] * punkte[(i + 1) % n][1] - punkte[(i + 1) % n][0] * punkte[i][1]
+                     for i in range(n))
 
+
+def _versatz_roh(punkte: list[Point], inset_m: float) -> list[Point]:
+    """Jede Kante nach innen, mit den Nachbarn geschnitten - noch mit Schleifen."""
+    n = len(punkte)
+    vorzeichen = 1.0 if _flaeche(punkte) > 0 else -1.0   # gegen den Uhrzeigersinn: links ist innen
     kanten = []
     for i in range(n):
         a, b = punkte[i], punkte[(i + 1) % n]
@@ -330,24 +380,279 @@ def ring(boundary: Sequence[Point], inset_m: float) -> list[Point]:
         kanten.append(((a[0] + nx * inset_m, a[1] + ny * inset_m), (ex, ey)))
     if len(kanten) < 3:
         return []
-
-    innen: list[Point] = []
+    roh: list[Point] = []
     for i in range(len(kanten)):
         (px, py), (ex, ey) = kanten[i]
         (qx, qy), (fx, fy) = kanten[(i + 1) % len(kanten)]
         nenner = ex * fy - ey * fx
         if abs(nenner) < 1e-9:
-            innen.append((qx, qy))      # fast parallel: der Versatzpunkt genügt
+            roh.append((qx, qy))      # fast parallel: der Versatzpunkt genügt
             continue
         t = ((qx - px) * fy - (qy - py) * fx) / nenner
-        innen.append((px + ex * t, py + ey * t))
+        roh.append((px + ex * t, py + ey * t))
+    return roh
 
-    # Aufräumen: was beim Versatz nach außen gerutscht oder zu nah an die Grenze
-    # geraten ist, war ein Selbstüberschlag und hat im Ring nichts zu suchen.
-    sauber = [p for p in innen
-              if point_in_polygon(p, punkte)
-              and (distance_to_boundary(p, punkte) or 0.0) > inset_m * 0.6]
-    return sauber if len(sauber) >= 3 else []
+
+def _an_schnitten_teilen(roh: list[Point]) -> list[tuple[Point, Point]]:
+    """Den geschlossenen Zug an jedem Punkt teilen, an dem er sich selbst kreuzt.
+
+    Der Schnittpunkt wird einmal berechnet und in beide Kanten eingesetzt -
+    so passen die Teilstücke beim Zusammensetzen exakt aneinander.
+    """
+    n = len(roh)
+    teile: list[list[tuple[float, Point]]] = [[] for _ in range(n)]
+    for i in range(n):
+        a, b = roh[i], roh[(i + 1) % n]
+        for j in range(i + 2, n):
+            if i == 0 and j == n - 1:
+                continue                         # Nachbarn: teilen sich nur den Eckpunkt
+            c, d = roh[j], roh[(j + 1) % n]
+            treffer = _schnitt(a, b, c, d)
+            if treffer is not None:
+                s, t, punkt = treffer
+                teile[i].append((s, punkt))
+                teile[j].append((t, punkt))
+    stuecke = []
+    for i in range(n):
+        folge = [roh[i]] + [p for _, p in sorted(teile[i])] + [roh[(i + 1) % n]]
+        stuecke.extend(zip(folge, folge[1:]))
+    return stuecke
+
+
+def _schnitt(a: Point, b: Point, c: Point, d: Point) -> Optional[tuple[float, float, Point]]:
+    """Echter Schnitt zweier Strecken im Inneren (nicht an den Enden)."""
+    rx, ry = b[0] - a[0], b[1] - a[1]
+    sx, sy = d[0] - c[0], d[1] - c[1]
+    nenner = rx * sy - ry * sx
+    if abs(nenner) < 1e-12:
+        return None
+    qx, qy = c[0] - a[0], c[1] - a[1]
+    s = (qx * sy - qy * sx) / nenner
+    t = (qx * ry - qy * rx) / nenner
+    if 1e-9 < s < 1.0 - 1e-9 and 1e-9 < t < 1.0 - 1e-9:
+        return s, t, (a[0] + rx * s, a[1] + ry * s)
+    return None
+
+
+def _zu_ringen(stuecke: list[tuple[Point, Point]]) -> tuple[list[list[Point]], list[tuple[int, int, list[Point]]]]:
+    """Die übrigen Teilstücke wieder verketten: geschlossene Ringe und offene Züge.
+
+    Ein offener Zug kommt mit der Nummer seines ersten und letzten Stücks -
+    die Stücke liegen in der Reihenfolge entlang der Grenze.
+    """
+    def schluessel(p: Point) -> tuple[int, int]:
+        return (round(p[0] * 1e6), round(p[1] * 1e6))
+
+    ab: dict[tuple[int, int], list[int]] = {}
+    for k, (a, _) in enumerate(stuecke):
+        ab.setdefault(schluessel(a), []).append(k)
+    benutzt = [False] * len(stuecke)
+    ringe_, offen = [], []
+    for anfang in range(len(stuecke)):
+        if benutzt[anfang]:
+            continue
+        ziel = schluessel(stuecke[anfang][0])
+        zug, k, geschlossen = [], anfang, False
+        while True:
+            benutzt[k] = True
+            a, b = stuecke[k]
+            zug.append(a)
+            if schluessel(b) == ziel:
+                geschlossen = True
+                break
+            weiter = [m for m in ab.get(schluessel(b), []) if not benutzt[m]]
+            if not weiter:
+                break
+            k = weiter[0]
+        if geschlossen and len(zug) >= 3:
+            ringe_.append(zug)
+        elif not geschlossen:
+            offen.append((anfang, k, zug + [b]))
+    return ringe_, offen
+
+
+def _gueltige_teile(a: Point, b: Point, gueltig) -> list[tuple[Point, Point]]:
+    """Die Teile der Strecke a-b, die gültig liegen - mit genauen Übergängen.
+
+    Nicht jede Schleife zeigt sich als Selbstschnitt: verschwindet beim
+    Versetzen eine kurze Kante ganz, läuft die Nachbarkante einfach durch den
+    zu nahen Bereich. Deshalb wird entlang der Strecke geprüft (alle halben
+    Meter) und jeder Übergang auf einen Zentimeter genau eingegrenzt.
+    """
+    laenge = distance(a, b)
+    schritte = max(2, int(laenge / 0.5) + 1)
+    def punkt(t: float) -> Point:
+        return (a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t)
+    def uebergang(t0: float, t1: float) -> float:
+        g0 = gueltig(punkt(t0))
+        for _ in range(30):
+            if (t1 - t0) * laenge < 0.01:
+                break
+            m = (t0 + t1) / 2.0
+            if gueltig(punkt(m)) == g0:
+                t0 = m
+            else:
+                t1 = m
+        return (t0 + t1) / 2.0
+    ts = [i / schritte for i in range(schritte + 1)]
+    werte = [gueltig(punkt(t)) for t in ts]
+    # Die Enden liegen oft genau auf der Grenze des Bereichs: dort gilt die Mitte daneben.
+    werte[0] = werte[0] or werte[1]
+    werte[-1] = werte[-1] or werte[-2]
+    teile, anfang = [], (0.0 if werte[0] else None)
+    for i in range(1, len(ts)):
+        if werte[i] != werte[i - 1]:
+            t = uebergang(ts[i - 1], ts[i])
+            if werte[i]:
+                anfang = t
+            elif anfang is not None:
+                teile.append((anfang, t))
+                anfang = None
+    if anfang is not None:
+        teile.append((anfang, 1.0))
+    return [(a if t0 == 0.0 else punkt(t0), b if t1 == 1.0 else punkt(t1))
+            for t0, t1 in teile if (t1 - t0) * laenge > 1e-6]
+
+
+def _naechster_grenzpunkt(p: Point, grenze: Sequence[Point]) -> Point:
+    bester, beste_d = grenze[0], float("inf")
+    for i in range(len(grenze)):
+        fuss, _, _ = project_on_segment(p, grenze[i], grenze[(i + 1) % len(grenze)])
+        d = distance(p, fuss)
+        if d < beste_d:
+            bester, beste_d = fuss, d
+    return bester
+
+
+def _bruecke(a: Point, b: Point, abruecken, davor: Optional[Point] = None,
+            danach: Optional[Point] = None, gueltig=None) -> list[Point]:
+    """Was zwischen dem Ende a und dem Anfang b fehlt.
+
+    An einer spitzen Ecke ist das die Spitze selbst: die beiden Stücke
+    verlängert, bis sie sich treffen (wie es der Versatz ohne die kurze,
+    umgeklappte Kante dort getan hätte). Sonst die Punkte der geraden
+    Verbindung, jeder auf Rundenabstand von der Grenze gerückt - um eine
+    einspringende Ecke ist die richtige Runde ein Bogen, die Gerade schnitte
+    ihn ab.
+    """
+    if davor is not None and danach is not None and gueltig is not None:
+        rx, ry = a[0] - davor[0], a[1] - davor[1]
+        sx, sy = b[0] - danach[0], b[1] - danach[1]
+        nenner = rx * sy - ry * sx
+        if abs(nenner) > 1e-9:
+            qx, qy = b[0] - a[0], b[1] - a[1]
+            s_ = (qx * sy - qy * sx) / nenner        # vor a hinaus
+            t_ = (qx * ry - qy * rx) / nenner        # vor b zurück
+            spitze = (a[0] + rx * s_, a[1] + ry * s_)
+            if s_ > 0 and t_ > 0 and distance(a, spitze) + distance(spitze, b) < 4.0 * distance(a, b) + 1.0                     and all(gueltig((a[0] + (spitze[0] - a[0]) * k / 4.0, a[1] + (spitze[1] - a[1]) * k / 4.0))
+                            for k in range(1, 5))                     and all(gueltig((spitze[0] + (b[0] - spitze[0]) * k / 4.0, spitze[1] + (b[1] - spitze[1]) * k / 4.0))
+                            for k in range(0, 4)):
+                return [spitze]
+    schritte = max(1, int(distance(a, b) / 0.5))
+    return [abruecken((a[0] + (b[0] - a[0]) * k / schritte, a[1] + (b[1] - a[1]) * k / schritte))
+            for k in range(1, schritte)]
+
+
+def _ohne_zacken(punkte: list[Point], kurz_m: float, abruecken=None, gueltig=None) -> list[Point]:
+    """Zickzack heraus: scharfe Knicke (über 105°) zwischen kurzen Stücken.
+
+    Streift eine versetzte Kante den zu nahen Bereich mehrmals knapp, bleiben
+    Haken von wenigen Metern. Eine echte Ecke im Feld hat lange Schenkel.
+    """
+    punkte = list(punkte)
+    geaendert = True
+    while geaendert and len(punkte) > 3:
+        geaendert = False
+        for i in range(len(punkte)):
+            a, p, b = punkte[i - 1], punkte[i], punkte[(i + 1) % len(punkte)]
+            da, db = distance(a, p), distance(p, b)
+            if da < 1e-9 or db < 1e-9:
+                continue
+            cos = ((p[0] - a[0]) * (b[0] - p[0]) + (p[1] - a[1]) * (b[1] - p[1])) / (da * db)
+            if cos < -0.26 and min(da, db) < kurz_m:
+                # Die Abkürzung a-b darf der Grenze nicht näher kommen als die Runde:
+                # sonst ihre Punkte auf Rundenabstand rücken.
+                ersatz: list[Point] = []
+                if gueltig is not None and abruecken is not None:
+                    schritte = max(1, int(distance(a, b) / 0.5))
+                    probe = [(a[0] + (b[0] - a[0]) * k / schritte, a[1] + (b[1] - a[1]) * k / schritte)
+                             for k in range(1, schritte)]
+                    if not all(gueltig(q) for q in probe):
+                        ersatz = _bruecke(a, b, abruecken)
+                punkte[i:i + 1] = ersatz
+                geaendert = True
+                break
+    return punkte
+
+
+def _offene_verbinden(offen: list[tuple[int, int, list[Point]]], anzahl: int, reichweite: float,
+                      abruecken, gueltig=None) -> list[list[Point]]:
+    """Offene Züge schließen, in ihrer Reihenfolge entlang der Grenze.
+
+    Wo eine Schleife oder eine umgeklappte kurze Kante herausgeschnitten wurde,
+    fehlt ein Stück. Der Zug geht dort mit dem Zug weiter, der entlang der
+    Grenze als nächster beginnt (der eigene Anfang zählt mit) - nicht mit dem,
+    dessen Anfang zufällig am nächsten liegt: das wäre manchmal der eigene, und
+    aus der Runde würde ein schmaler Streifen (Langer Bauer, 23.10.2026).
+    Eine Verbindung muss dabei selbst überall Rundenabstand halten können;
+    über einen zu engen Hals geht keine - dann schließt sich jeder Teil für
+    sich, und der Schlag hat dort zwei Runden (Roggental).
+    """
+    zuege = sorted((z for z in offen if len(z[2]) >= 2), key=lambda z: z[0])
+    fertig = []
+
+    def verbindung(zug: list[Point], ziel: list[Point]) -> Optional[list[Point]]:
+        ende, anfang = zug[-1], ziel[0]
+        if distance(ende, anfang) > reichweite:
+            return None
+        bruecke = _bruecke(ende, anfang, abruecken, zug[-2] if len(zug) > 1 else None,
+                           ziel[1] if len(ziel) > 1 else None, gueltig)
+        if gueltig is not None and not all(gueltig(p) for p in bruecke):
+            return None
+        return bruecke
+
+    while zuege:
+        erster, letzter, zug = zuege.pop(0)
+        zug = list(zug)
+        while True:
+            def hinter(nummer: int) -> int:
+                return (nummer - letzter) % anzahl
+            reihe = sorted([(hinter(z[0]), i) for i, z in enumerate(zuege)] + [(hinter(erster), -1)])
+            weiter = None
+            for _, i in reihe:
+                bruecke = verbindung(zug, zug if i < 0 else zuege[i][2])
+                if bruecke is not None:
+                    weiter = (i, bruecke)
+                    break
+            if weiter is None:
+                break                          # nirgends sauber anzuschließen: der Zug entfällt
+            i, bruecke = weiter
+            if i < 0:
+                if len(zug) >= 3:
+                    fertig.append(zug + bruecke)
+                break
+            _, letzter, naechster = zuege.pop(i)
+            zug.extend(bruecke)
+            zug.extend(naechster)
+    return fertig
+
+
+def _ohne_doppelte(punkte: list[Point]) -> list[Point]:
+    """Doppelte und gerade durchlaufene Punkte heraus - der Ring bleibt derselbe."""
+    sauber: list[Point] = []
+    for p in punkte:
+        if not sauber or distance(p, sauber[-1]) > 1e-6:
+            sauber.append(p)
+    if len(sauber) > 1 and distance(sauber[0], sauber[-1]) <= 1e-6:
+        sauber.pop()
+    ergebnis: list[Point] = []
+    n = len(sauber)
+    for i, p in enumerate(sauber):
+        a, b = sauber[i - 1], sauber[(i + 1) % n]
+        kreuz = (p[0] - a[0]) * (b[1] - p[1]) - (p[1] - a[1]) * (b[0] - p[0])
+        if abs(kreuz) > 1e-9 * max(1.0, distance(a, b)):
+            ergebnis.append(p)
+    return ergebnis if len(ergebnis) >= 3 else sauber
 
 
 # ---------------------------------------------------------------------------

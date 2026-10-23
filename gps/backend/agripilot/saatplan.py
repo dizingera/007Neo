@@ -230,14 +230,17 @@ def planen(grenze: Sequence[Point], von: Point, nach: Point, breite_m: float,
         return -w / 2.0 + 1e-6 < abweichung <= w / 2.0 + 1e-6
 
     # -- Vorgewende-Runden -------------------------------------------------
+    # Zerfällt der Schlag an einem engen Hals, hat eine Runde mehrere Ringe.
     ringe = []
     for i in range(runden):
         einzug = (i + 0.5) * w
-        punkte = headland.ring(ring, einzug)
-        if len(punkte) < 3:
+        teile = [p for p in headland.ringe(ring, einzug) if len(p) >= 3]
+        if not teile:
             break
-        ringe.append({"runde": i + 1, "einzug_m": _r(einzug), "fahrgasse": ist_fahrgasse(einzug),
-                      "punkte": [[_r(x), _r(y)] for x, y in punkte]})
+        for punkte in teile:
+            ringe.append({"runde": i + 1, "einzug_m": _r(einzug), "fahrgasse": ist_fahrgasse(einzug),
+                          "punkte": [[_r(x), _r(y)] for x, y in punkte]})
+    anzahl_runden = len({x["runde"] for x in ringe})
 
     # -- Hauptfeld ---------------------------------------------------------
     spuren = []
@@ -486,7 +489,7 @@ def planen(grenze: Sequence[Point], von: Point, nach: Point, breite_m: float,
         reihenfolge.append(
             f"Von der Startecke (A) bis zum Gegenrand: Spur 1–{haupt_spuren[-1]['nummer']}, Fahrgassen in Spur "
             f"{', '.join(str(s['nummer']) for s in gassen_haupt) or 'keine'} (alle {F:g} m)")
-    reihenfolge.append(f"Vorgewende rundum: {len(ringe)} Runden, Fahrgasse in Runde {r + 1}")
+    reihenfolge.append(f"Vorgewende rundum: {anzahl_runden} Runden, Fahrgasse in Runde {r + 1}")
 
     # Die Saisonspur: eine AB-Linie durch die erste Fahrgasse, parallel zur
     # Startkante. Mit Gegenrand bekommt sie die Liste der Fahrgassen mit (in
@@ -516,7 +519,7 @@ def planen(grenze: Sequence[Point], von: Point, nach: Point, breite_m: float,
 
     return {
         "breite_m": w, "fahrgasse_m": F, "randspuren": r, "randvorgabe_passt": passt,
-        "vorgewende_runden": len(ringe), "vorgewende_m": _r(vorgewende_m),
+        "vorgewende_runden": anzahl_runden, "vorgewende_m": _r(vorgewende_m),
         "spuren": spuren, "ringe": ringe,
         "anzahl_spuren": len(spuren), "anzahl_fahrgassen": len(fahrgassen),
         "fahrgassen_abstaende": [_r(b["versatz_m"] - a["versatz_m"]) for a, b in zip(fahrgassen, fahrgassen[1:])],
