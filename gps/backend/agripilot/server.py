@@ -61,6 +61,7 @@ from . import __version__ as VERSION
 MINDESTLAENGE_AUSSEN = 8
 SPERRE_VERSUCHE = 8             # falsche Versuche ...
 SPERRE_FENSTER_S = 900.0        # ... innerhalb von 15 Minuten sperren den Absender
+UPDATE_SUCHE_S = 1800.0         # so oft nach einer neuen Version suchen (halbe Stunde)
 # Was über einen Tunnel hereinkommen darf: der Abgleich und das Update für die Arbeiter.
 VON_AUSSEN_ERLAUBT = frozenset({"/api/sync", "/api/sync/live", "/api/sync/setup", "/api/sync/setup/datei"})
 
@@ -338,17 +339,23 @@ class Application:
         return ergebnis
 
     async def _online_loop(self) -> None:
-        """Beim Start (nach einer Minute, das Netz braucht oft etwas) und danach alle zwölf Stunden."""
+        """Beim Start (nach einer Minute, das Netz braucht oft etwas) und danach alle halbe Stunde.
+
+        So oft, weil der Knopf "Update" auf dem Hauptbildschirm bald nach dem
+        Ausrollen auf den Master erscheinen soll. Ein Arbeiter fragt dabei
+        zuerst den Master (eine kleine Anfrage); GitHub zweimal je Stunde liegt
+        weit unter dessen Grenze.
+        """
         await asyncio.sleep(60)
         while True:
             try:
                 ergebnis = await asyncio.to_thread(self.online_pruefen)
                 if ergebnis["verfuegbar"]:
                     self.engine.note(f"Neue Version {ergebnis['neu']} verfügbar - "
-                                     "Menü → System → Aktualisierung")
+                                     "Knopf „Update“ rechts auf dem Hauptbildschirm")
             except Exception as exc:  # noqa: BLE001 - Suchen darf nie etwas mitreißen
                 self.engine.note(f"Update-Suche: {exc}")
-            await asyncio.sleep(12 * 3600)
+            await asyncio.sleep(UPDATE_SUCHE_S)
 
     def setup_ordner(self) -> Path:
         return Path(self.config.server.data_dir) / "setup"

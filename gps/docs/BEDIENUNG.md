@@ -1247,10 +1247,12 @@ Maschine auf einem Gerät gelöscht, verschwindet sie überall.
 ## Online aktualisieren (Menü → System → Aktualisierung)
 
 In der Programmversion (`AgriPilot.exe`) sucht das Programm beim Start und dann alle
-zwölf Stunden von allein nach einer neuen Version. Gibt es eine, steht unter den
-Hinweisen **„Neue Version x.y.z verfügbar“**. **Online nach neuer Version suchen**
-fragt sofort nach und zeigt, was neu ist; **Jetzt aktualisieren** lädt, prüft und
-spielt sie ein.
+halbe Stunde von allein nach einer neuen Version. **Gibt es eine, erscheint auf dem
+Hauptbildschirm rechts unter „Menü“ der grüne Knopf „Update x.y.z“ (ab 1.5.62).** Ein
+Tipp darauf fragt einmal nach und spielt die Version ein – ohne Umweg über das Menü.
+Ohne neue Version ist der Knopf nicht da. Im Menü geht es weiterhin: **Online nach
+neuer Version suchen** fragt sofort nach und zeigt, was neu ist; **Jetzt
+aktualisieren** lädt, prüft und spielt sie ein.
 
 * **Nichts geschieht von selbst.** Gesucht wird automatisch, eingespielt nur auf
   deinen Druck.

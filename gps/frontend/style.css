@@ -147,6 +147,10 @@ body.tag .vignette { background: radial-gradient(120% 90% at 50% 70%, transparen
 /* Markieren und Lenkung sitzen unten, auch wenn oben Platz frei bleibt. */
 .leiste { grid-template-rows: repeat(4, auto) 1fr; }
 .leiste .unten-rechts { grid-row: 5; }
+/* Mit dem Update-Knopf ist oben eine Zeile mehr: Markieren und Lenkung bleiben unten. */
+.leiste:has(#btnUpdateHaupt:not([hidden])) { grid-template-rows: repeat(5, auto) 1fr; }
+.leiste:has(#btnUpdateHaupt:not([hidden])) .unten-rechts { grid-row: 6; }
+.leiste:has(#btnUpdateHaupt:not([hidden])) .fahrgasse-hinweis { grid-row: 5; }
 
 /* Fahrgasse: nicht zu übersehen, aber kein Alarm - Bernstein, ruhig. */
 .fahrgasse-hinweis { grid-column: 1 / -1; grid-row: 4; display: flex; flex-direction: column; align-items: center; gap: 2px;
@@ -207,6 +211,8 @@ body.tag .vignette { background: radial-gradient(120% 90% at 50% 70%, transparen
 
 /* Rückfrage (A+, Kontur): die Frage steht links neben der Leiste, nicht in der Taste. */
 .taste.bestaetigen { border: 2px solid var(--amber); color: var(--amber); }
+/* Neue Version da: grün und unübersehbar, aber nur solange es etwas einzuspielen gibt. */
+.taste.update { grid-column: 1 / -1; flex-direction: row; gap: 8px; min-height: 0; height: auto; padding: 8px 6px; color: var(--green-bright); border: 2px solid var(--green); background: color-mix(in srgb, var(--green) 14%, transparent); }
 .taste.bestaetigen::after { content: attr(data-frage); position: absolute; right: calc(100% + 10px); top: 50%; transform: translateY(-50%);
   padding: 8px 12px; border-radius: 10px; background: var(--glas); border: 2px solid var(--amber); color: var(--amber);
   font-size: max(14px, calc(1.3 * var(--u))); font-weight: 700; white-space: nowrap; pointer-events: none; }

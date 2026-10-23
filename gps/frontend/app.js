@@ -288,8 +288,12 @@ function updateHud(s) {
                            : 'Wende geplant, liegt aber nicht im Feld – Richtung oder Wendekreis ändern');
   }
   if (headland && headland.hinweis) hint.push(headland.hinweis);
-  if (s.system && s.system.update_online) {
-    hint.push(`Neue Version ${s.system.update_online} verfügbar – Menü → System → Aktualisierung`);
+  // Neue Version: der grüne Knopf „Update“ in der Leiste, statt eines Hinweises im Menü.
+  const neueVersion = s.system && s.system.update_online;
+  el('btnUpdateHaupt').hidden = !neueVersion;
+  if (neueVersion) {
+    el('btnUpdateHauptText').textContent = `Update ${neueVersion}`;
+    el('btnUpdateHaupt').title = `Version ${neueVersion} einspielen`;
   }
   if (s.positionsfilter?.aktiv && !s.positionsfilter.akzeptiert) hint.push('GNSS-Ausreißer verworfen – Lenkung ausgeschaltet');
   if (s.steering && s.steering.tempo_begrenzt) {
@@ -2236,20 +2240,26 @@ async function onlineSuchen(still) {
 
 el('btnUpdateSuchen').onclick = () => onlineSuchen(false);
 
-el('btnUpdateOnline').onclick = async () => {
-  if (!onlineNeu) return;
-  if (!confirm(`Auf Version ${onlineNeu} aktualisieren?\n\nDie Lenkung muss aus sein und der Traktor stehen. ` +
+async function onlineEinspielen(neu) {
+  if (!neu) return;
+  if (!confirm(`Auf Version ${neu} aktualisieren?\n\nDie Lenkung muss aus sein und der Traktor stehen. ` +
                `Eine laufende Arbeit wird gesichert und danach fortgesetzt. Das Programm startet ` +
                `dabei neu (eine Minute); geht es schief, wird der vorige Stand wieder eingesetzt.`)) return;
   const info = el('updateOnlineInfo');
-  info.textContent = `Version ${onlineNeu} wird geladen und geprüft …`;
+  info.textContent = `Version ${neu} wird geladen und geprüft …`;
+  toast(`Version ${neu} wird geladen und geprüft …`);
   const antwort = await api('POST', '/api/update/online');
   if (!antwort) { info.textContent = ''; return; }
   if (antwort.data.schon_aktuell) { info.textContent = 'Schon auf dem neuesten Stand.'; return; }
   info.textContent = `Version ${antwort.data.version} wird eingespielt. Das Programm startet neu - ` +
     'diese Seite verbindet sich von selbst wieder (etwa eine Minute).';
+  el('btnUpdateHaupt').hidden = true;
   toast('Aktualisierung läuft – Programm startet neu');
-};
+}
+
+el('btnUpdateOnline').onclick = () => onlineEinspielen(onlineNeu);
+// Der Knopf auf dem Hauptbildschirm: dieselbe Rückfrage, ohne Umweg über das Menü.
+el('btnUpdateHaupt').onclick = () => onlineEinspielen(state.live && state.live.system && state.live.system.update_online);
 
 async function dateiAlsBase64(datei) {
   const puffer = await datei.arrayBuffer();
