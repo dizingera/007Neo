@@ -794,12 +794,12 @@ und allen Maschinen, darunter je Maschine: Feld, Arbeit und Hektar, Tempo, ob si
 lenkt, Fix und wie alt die Meldung ist. Auf der **Fahrkarte** erscheinen die anderen
 als blaue Pfeile mit Namen – praktisch, wenn zwei auf demselben Schlag arbeiten.
 
-* Läuft nur, solange am Büro-PC AgriPilot offen ist. Im Hof-WLAN direkt, draußen
-  über den Tunnel – der muss im Cloudflare-Dashboard auf `localhost:8080` zeigen.
+* Läuft rund um die Uhr über den Master auf dem Pi (ab 1.5.54), im Hof-WLAN wie draußen
+  über den Tunnel `https://agripilot.dizinger.com`.
 * Älter als eine Minute: grau. Nach 15 Minuten ohne Meldung verschwindet die
   Maschine. Positionen werden nicht gespeichert, nur im Speicher des Masters gehalten.
-* Ein Gerät im Simulator wird als „Simulator“ gekennzeichnet; der Master meldet sich
-  selbst nur mit echtem Empfänger.
+* Wer im Simulator fährt, meldet sich nicht (ab 1.5.54, vorher mit „Simulator“
+  gekennzeichnet) – sonst stünde der Büro-PC als Traktor auf der Karte der Tablets.
 
 ## Diagnosepaket (Menü → System, ab 1.5.48)
 
@@ -1067,6 +1067,47 @@ erkennbar.
 * **Dauer:** Beginn bis Ende der Arbeit; die Zeit in Bewegung steht im Hinweis. Bei der
   Freigabe lässt sich beides anpassen.
 
+## Der Master läuft auf dem Raspberry Pi (ab 1.5.54)
+
+Seit dem 22.10.2026 ist der **Pi** (Dreambox) der Master, nicht mehr der Büro-PC. Er läuft
+rund um die Uhr als Dienst `agripilot`, auch nach einem Stromausfall oder Absturz, und
+hat keinen GPS-Empfänger (Quelle „Keiner“). Die Tablets merken davon nichts: Sie haben
+dieselbe Master-Adresse `https://agripilot.dizinger.com` und denselben Arbeitercode.
+
+| | |
+|---|---|
+| Oberfläche des Masters (nur im Heimnetz) | `http://192.168.0.126:8090` |
+| Daten | `/var/lib/agripilot/` auf der SD-Karte (nicht auf der SSD, die immer wieder ausfällt) |
+| Konfiguration | `/etc/agripilot/config.yaml` |
+| Programm | `/opt/agripilot/`, Protokoll: `journalctl -u agripilot` |
+| Tunnel-Route | `agripilot.dizinger.com` → `http://192.168.0.126:8090` |
+
+**Der Büro-PC ist jetzt ein Arbeiter** (Büroansicht). Er gleicht wie die Tablets mit dem
+Pi ab, sobald AgriPilot dort offen ist. Ist er aus, fehlt niemandem etwas. Läuft er im
+Simulator, meldet er sich nicht in der Fernansicht; die Tablets sieht er trotzdem.
+
+**Sicherung an zwei Orten.** Der Pi sichert täglich nach `/var/lib/agripilot/sicherungen`
+(14 Tage). Der PC holt die Sicherungen jeden Tag um 12:30 nach
+`J:\AgriPilot\Pi-Master-Sicherungen` (Aufgabe „AgriPilotPiSicherung“). War der PC um
+die Zeit aus, holt er es beim nächsten Einschalten nach. Jede Datei wird per SHA-256
+gegen den Pi geprüft, der Stand steht in `status.json` und `sicherung.log` daneben.
+
+**Neue Version für alle.** Am PC bauen, dann auf den Pi bringen:
+
+    .buildvenv/Scripts/python.exe scripts/build_exe.py
+    backend/.venv/Scripts/python.exe scripts/pi_ausrollen.py --adresse 192.168.0.126 --setup AgriPilot-Setup.exe
+
+Das Skript sichert vorher Programm, Konfiguration und Datenbank nach
+`/var/backups/agripilot/`, spielt das Programm ein, startet den Dienst neu und legt das
+Setup als `AgriPilot-Setup-<Version>.exe` in `/var/lib/agripilot/setup/`. Von dort holen
+es sich alle Arbeiter (Tablets und Büro-PC) über **Online nach neuer Version suchen**.
+
+**Zurück auf den PC**, falls der Pi ausfällt: AgriPilot am PC schließen und die neueste
+Sicherung aus `J:\AgriPilot\Pi-Master-Sicherungen` entpacken. `agripilot.db` kommt nach
+`C:\ProgramData\AgriPilot\` (der Explorer fragt nach Adminrechten). Danach AgriPilot
+öffnen und unter Einstellungen → Netzwerk die Rolle „Master“ wählen, dann neu starten.
+Die Tunnel-Route bekommt wieder `http://192.168.0.53:8080`.
+
 ## Master und Arbeiter: Daten an die Tablets schicken
 
 **Der Master** ist dieser Rechner im Büro: hier erfasst du Felder, legst Maschinen an,
@@ -1121,8 +1162,10 @@ durchprobieren; im Heimnetz geht er weiter), und nach acht falschen Versuchen in
 Tippen nachsichtig (Groß-/Kleinschreibung, Strich und Leerzeichen sind egal). Ist er
 falsch, steht am Tablet „Arbeitercode falsch oder fehlt“. Wer den Code weitergegeben
 hat und ihn ändern will, setzt am Master und an den Tablets einen neuen.
-Der Büro-Rechner muss dafür laufen (nicht im Ruhezustand): Energiesparplan „Ruhezustand:
-nie“.
+Der Master muss dafür laufen – seit 1.5.54 ist das der Pi, der nie schläft. Läuft der
+Tunnel wie hier auf zwei Rechnern (Pi und PC), muss die Route auf die **Heimnetz-Adresse**
+des Masters zeigen (`http://192.168.0.126:8090`), nicht auf `localhost`: Jeder der
+beiden Rechner beantwortet Anfragen, und `localhost` wäre jedes Mal ein anderer.
 
 Beide Wege führen zusammen statt zu überschreiben: je Feld, Spur und Maschine gilt der
 neuere Stand, bearbeitete Flächen mehrerer Geräte werden vereinigt. Ein Paket kann
@@ -1156,8 +1199,10 @@ spielt sie ein.
   in der Konfiguration (Abschnitt `server`).
 
 **Arbeiter holen das Update vom Master.** Ein Tablet, das als Arbeiter eingerichtet
-ist, fragt zuerst seinen Master: der gibt das Programm heraus, mit dem er selbst
-läuft. Also: neue Version am Master-PC installieren, dann am Tablet **Online nach
+ist, fragt zuerst seinen Master: Ein Master als exe gibt das Programm heraus, mit dem
+er selbst läuft. Der Master auf dem Pi gibt das neueste Setup aus
+`/var/lib/agripilot/setup/` heraus (dorthin bringt es `scripts/pi_ausrollen.py --setup`,
+siehe „Der Master läuft auf dem Raspberry Pi“). Dann am Tablet **Online nach
 neuer Version suchen** → **Jetzt aktualisieren**. Das geht im Hof-WLAN wie über den
 Tunnel draußen auf dem Feld, mit demselben Arbeitercode wie der Abgleich; der Hinweis
 lautet dann „Vom Master übernommen“. Hat der Master nichts Neueres, wird wie bisher

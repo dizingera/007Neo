@@ -109,6 +109,29 @@ def suche(aktuell: str, repo: str = STANDARD_REPO,
 
 MASTER_INFO = "/api/sync/setup"
 MASTER_DATEI = "/api/sync/setup/datei"
+SETUP_NAME = re.compile(r"^AgriPilot-Setup-(\d+(?:\.\d+)+)\.exe$", re.IGNORECASE)
+
+
+def abgelegtes_setup(ordner: Path) -> Optional[tuple[Path, str]]:
+    """Das neueste Setup, das im Ordner zum Verteilen liegt - oder None.
+
+    Ein Master, der nicht selbst die exe ist (der Pi), hat kein eigenes Programm
+    zum Herausgeben. Dort legt man ``AgriPilot-Setup-1.5.54.exe`` in den Ordner;
+    die Version steht im Namen, damit niemand eine Begleitdatei pflegen muss.
+    """
+    try:
+        dateien = list(Path(ordner).iterdir())
+    except OSError:
+        return None
+    beste: Optional[tuple[tuple[int, ...], Path, str]] = None
+    for pfad in dateien:
+        treffer = SETUP_NAME.match(pfad.name)
+        if not treffer or not pfad.is_file():
+            continue
+        zahlen = version_zahlen(treffer.group(1))
+        if beste is None or zahlen > beste[0]:
+            beste = (zahlen, pfad, treffer.group(1))
+    return (beste[1], beste[2]) if beste else None
 
 
 def vom_master(aktuell: str, master_url: str, code: str = "",

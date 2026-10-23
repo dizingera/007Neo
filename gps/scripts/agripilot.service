@@ -1,7 +1,7 @@
 [Unit]
 Description=AgriPilot GPS-Spurführung
 Documentation=file:///opt/agripilot/README.md
-After=network.target
+After=network-online.target
 Wants=network-online.target
 
 [Service]
@@ -20,8 +20,11 @@ RestartSec=3
 TimeoutStopSec=15
 KillSignal=SIGINT
 
-# Datenverzeichnis gehört dem Dienst, sonst nichts
+# Datenverzeichnis gehört dem Dienst, sonst nichts. Die Sicherungen darin
+# enthalten die Konfiguration mit dem Arbeitercode: für andere nicht lesbar.
 StateDirectory=agripilot
+StateDirectoryMode=0750
+UMask=0027
 ReadWritePaths=/var/lib/agripilot
 NoNewPrivileges=true
 PrivateTmp=true

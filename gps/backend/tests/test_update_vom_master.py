@@ -135,5 +135,57 @@ class UpdateVomMasterTests(unittest.TestCase):
         self.assertTrue(ergebnis["fehler"])
 
 
+class MasterAusDemQuelltextTests(unittest.TestCase):
+    """Der Pi läuft aus dem Quelltext: er gibt das abgelegte Setup heraus."""
+
+    def setUp(self):
+        warnings.filterwarnings("ignore")
+        self.dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.dir.cleanup)
+        p = mock.patch("agripilot.update.als_programm", lambda: False)
+        p.start()
+        self.addCleanup(p.stop)
+        self.ordner = Path(self.dir.name) / "setup"
+
+    _master = UpdateVomMasterTests._master
+    _ueber = UpdateVomMasterTests._ueber
+
+    def _ablegen(self, name, inhalt=INHALT):
+        self.ordner.mkdir(exist_ok=True)
+        (self.ordner / name).write_bytes(inhalt)
+
+    def test_without_a_file_there_is_nothing_to_hand_out(self):
+        with self._master() as c:
+            antwort = c.get("/api/sync/setup", headers={"X-AgriPilot-Token": CODE})
+            self.assertEqual(antwort.status_code, 404)
+            self.assertIn("ablegen", antwort.json()["detail"])
+
+    def test_the_newest_file_wins_by_number_not_by_letter(self):
+        self._ablegen("AgriPilot-Setup-1.5.9.exe", b"MZalt")
+        self._ablegen("AgriPilot-Setup-1.5.10.exe")
+        self._ablegen("AgriPilot-Setup-9.9.9.exe.teil", b"halb")
+        self._ablegen("notizen.txt", b"x")
+        with self._master() as c:
+            daten = c.get("/api/sync/setup", headers={"X-AgriPilot-Token": CODE}).json()
+            self.assertEqual(daten["version"], "1.5.10")
+            self.assertEqual(daten["sha256"], hashlib.sha256(INHALT).hexdigest())
+            datei = c.get("/api/sync/setup/datei", headers={"X-AgriPilot-Token": CODE})
+            self.assertEqual(datei.content, INHALT)
+            self.assertIn("1.5.10", datei.headers["content-disposition"])
+            self.assertEqual(c.get("/api/sync/setup").status_code, 401)
+
+    def test_a_worker_gets_it_through_the_tunnel(self):
+        self._ablegen("AgriPilot-Setup-99.0.0.exe")
+        with self._master() as c, self._ueber(c, TUNNEL):
+            ergebnis, info = onlineupdate.vom_master(VERSION, "https://agripilot.example", CODE)
+            self.assertTrue(ergebnis["verfuegbar"])
+            self.assertEqual(ergebnis["neu"], "99.0.0")
+            pfad = onlineupdate.herunterladen(info, Path(self.dir.name) / "update")
+        self.assertEqual(pfad.read_bytes(), INHALT)
+
+    def test_a_missing_folder_is_not_an_error(self):
+        self.assertIsNone(onlineupdate.abgelegtes_setup(self.ordner / "gibt-es-nicht"))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -134,9 +134,14 @@ class SyncClient:
         url = self.config.network.master_url.rstrip("/") + "/api/sync/live"
         kopf = ({"X-AgriPilot-Token": self.config.network.sync_token}
                 if self.config.network.sync_token else {})
+        eigene = self.engine.live_meldung()
+        if eigene and eigene.get("simulator"):
+            # Wie am Master: ein Simulator ist keine Maschine auf dem Feld. Der
+            # Büro-PC als Arbeiter sieht die anderen, erscheint aber nicht bei ihnen.
+            eigene = None
         payload = {"device": {"id": self.config.network.device_id,
                               "name": self.config.network.device_name},
-                   "live": self.engine.live_meldung()}
+                   "live": eigene}
         try:
             async with httpx.AsyncClient(timeout=10.0) as client:
                 antwort = await client.post(url, json=payload, headers=kopf)

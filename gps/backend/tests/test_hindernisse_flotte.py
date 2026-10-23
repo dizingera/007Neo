@@ -117,6 +117,8 @@ class ApiUndAbgleich(unittest.TestCase):
                 tempfile.TemporaryDirectory() as c:
             with geraet(a, "master", "buero") as master, geraet(b, "client", "tablet-a") as links, \
                     geraet(c, "client", "tablet-b") as rechts:
+                for tablet in (links, rechts):     # echte Empfänger, kein Simulator
+                    tablet.app.state.app.config.gnss.source = "serial"
                 self._feld(links)
                 self._feld(rechts)
                 abgleichen(links, master)          # der Master kennt das Feld erst nach dem Abgleich
@@ -130,6 +132,24 @@ class ApiUndAbgleich(unittest.TestCase):
                 namen = sorted(m["id"] for m in uebersicht["maschinen"])
                 self.assertEqual(namen, ["tablet-a", "tablet-b"])
                 self.assertEqual(len(next(iter(uebersicht["felder"].values()))["grenze"]), 4)
+
+    def test_the_office_in_the_simulator_sees_the_tablets_but_is_not_seen(self):
+        with tempfile.TemporaryDirectory() as a, tempfile.TemporaryDirectory() as b, \
+                tempfile.TemporaryDirectory() as c:
+            with geraet(a, "master", "pi") as master, geraet(b, "client", "tablet-a") as tablet, \
+                    geraet(c, "client", "buero") as buero:
+                tablet.app.state.app.config.gnss.source = "serial"
+                self.assertEqual(buero.app.state.app.config.gnss.source, "simulator")
+                self._feld(tablet)
+                self._feld(buero)
+                self.assertTrue(live_abgleich(tablet, master))
+                self.assertTrue(live_abgleich(buero, master))
+                self.assertTrue(live_abgleich(tablet, master))
+                self.assertEqual([m["id"] for m in buero.get("/api/state").json()["flotte"]],
+                                 ["tablet-a"])
+                self.assertEqual(tablet.get("/api/state").json()["flotte"], [])
+                self.assertEqual([m["id"] for m in master.get("/api/flotte").json()["maschinen"]],
+                                 ["tablet-a"])
 
 
 if __name__ == "__main__":

@@ -200,6 +200,20 @@ class UdpSource(GnssSource):
             transport.close()
 
 
+class KeineQuelle(GnssSource):
+    """Kein Empfänger: ein Master im Schrank, der nur die Daten hält.
+
+    Er fährt nicht und meldet keine Lage. Ein Simulator an seiner Stelle würde
+    rund um die Uhr einen Traktor durch München rechnen, für niemanden.
+    """
+
+    async def run(self) -> None:
+        self.running = True
+        self.status = "kein Empfänger"
+        while self.running:
+            await asyncio.sleep(1.0)
+
+
 class SimulatorSource(GnssSource):
     """A virtual tractor.
 
@@ -349,4 +363,6 @@ def build_source(config, on_fix: FixCallback) -> GnssSource:
             pfad = str(Path(config.server.data_dir) / "rohdaten" / pfad)
         return ReplaySource(on_fix, pfad, config.gnss.replay_speed,
                             config.gnss.replay_loop)
+    if kind == "aus":
+        return KeineQuelle(on_fix)
     return SimulatorSource(on_fix)

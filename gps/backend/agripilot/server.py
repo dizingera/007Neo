@@ -350,13 +350,27 @@ class Application:
                 self.engine.note(f"Update-Suche: {exc}")
             await asyncio.sleep(12 * 3600)
 
-    def eigenes_setup(self) -> tuple[int, str]:
-        """Größe und SHA-256 der laufenden AgriPilot.exe - sie ist zugleich das Setup.
+    def setup_ordner(self) -> Path:
+        return Path(self.config.server.data_dir) / "setup"
+
+    def verteiltes_setup(self) -> Optional[tuple[Path, str]]:
+        """Was dieser Master den Arbeitern als Update gibt: Datei und Version.
+
+        Als exe ist das Programm selbst das Setup. Ein Master aus dem Quelltext
+        (der Pi) gibt das neueste abgelegte Setup heraus, siehe
+        onlineupdate.abgelegtes_setup - liegt keins da, gibt es nichts.
+        """
+        if update_module.als_programm():
+            return Path(sys.executable), VERSION
+        return onlineupdate_module.abgelegtes_setup(self.setup_ordner())
+
+    def eigenes_setup(self, pfad: Optional[Path] = None) -> tuple[int, str]:
+        """Größe und SHA-256 des Setups (ohne Pfad: die laufende AgriPilot.exe).
         Einmal gerechnet und gemerkt, solange die Datei gleich bleibt."""
         import hashlib
-        pfad = Path(sys.executable)
+        pfad = Path(pfad or sys.executable)
         stat = pfad.stat()
-        schluessel = (stat.st_size, stat.st_mtime_ns)
+        schluessel = (str(pfad), stat.st_size, stat.st_mtime_ns)
         gemerkt = getattr(self, "_eigenes_setup", None)
         if gemerkt and gemerkt[0] == schluessel:
             return gemerkt[1]
@@ -1693,23 +1707,28 @@ def create_app(config=None) -> FastAPI:
             fehler.append(jetzt)
             raise HTTPException(401, "Arbeitercode fehlt oder ist falsch")
 
+    def setup_zum_verteilen() -> tuple[Path, str]:
+        setup = application.verteiltes_setup()
+        if setup is None:
+            raise HTTPException(404, "Kein Update zum Verteilen - AgriPilot-Setup-<Version>.exe "
+                                     f"in {application.setup_ordner()} ablegen")
+        return setup
+
     @api.get("/api/sync/setup")
     async def sync_setup_info(request: Request) -> dict:
-        """Welche Version der Master als Update für die Arbeiter bereithält: sich selbst."""
+        """Welche Version der Master als Update für die Arbeiter bereithält."""
         arbeiter_pruefen(request)
-        if not update_module.als_programm():
-            raise HTTPException(404, "Der Master läuft nicht als Programm - kein Update zum Verteilen")
-        groesse, sha = await asyncio.to_thread(application.eigenes_setup)
-        return {"version": VERSION, "groesse": groesse, "sha256": sha}
+        pfad, version = setup_zum_verteilen()
+        groesse, sha = await asyncio.to_thread(application.eigenes_setup, pfad)
+        return {"version": version, "groesse": groesse, "sha256": sha}
 
     @api.get("/api/sync/setup/datei")
     async def sync_setup_datei(request: Request):
         arbeiter_pruefen(request)
-        if not update_module.als_programm():
-            raise HTTPException(404, "Der Master läuft nicht als Programm - kein Update zum Verteilen")
+        pfad, version = setup_zum_verteilen()
         from fastapi.responses import FileResponse
-        return FileResponse(sys.executable, media_type="application/octet-stream",
-                            filename=f"AgriPilot-Setup-{VERSION}.exe")
+        return FileResponse(pfad, media_type="application/octet-stream",
+                            filename=f"AgriPilot-Setup-{version}.exe")
 
     @api.post("/api/sync")
     async def sync_endpoint(request: Request, payload: dict = Body(...)) -> dict:

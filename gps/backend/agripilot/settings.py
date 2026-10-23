@@ -100,6 +100,7 @@ GRUPPEN: list[Gruppe] = [
                 ("udp", "UDP (Empfänger im Netz)"),
                 ("simulator", "Simulator (keine Hardware)"),
                 ("replay", "Aufzeichnung abspielen (Fehlersuche)"),
+                ("aus", "Keiner (Master ohne GPS, z. B. auf dem Pi)"),
             ), hilfe="Der übliche Fall ist ein F9P per USB: seriell. "
                      "'Aufzeichnung abspielen' fährt eine mitgeschriebene Fahrt "
                      "noch einmal - zum Untersuchen am Schreibtisch, nicht zum "
