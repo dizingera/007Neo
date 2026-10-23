@@ -151,6 +151,30 @@ class PlanTests(unittest.TestCase):
         self.assertFalse(any(o.get("laengste") for o in optionen if o["laenge_m"] < 300.0))
 
 
+class FastGeradeKanten(unittest.TestCase):
+    """Höllochweg: die längste Kante (406 m) war ein Bogen mit 2,9 m Stich - nicht wählbar."""
+
+    def grenze(self, stich):
+        # Südkante 400 m mit einem Knick in der Mitte, die Nordkante 380 m.
+        return [(0.0, 0.0), (200.0, -stich), (400.0, 0.0), (390.0, 120.0), (10.0, 120.0)]
+
+    def test_a_nearly_straight_bend_is_a_start_edge_and_the_longest_comes_first(self):
+        optionen = saatplan.startkanten(self.grenze(2.9))
+        self.assertTrue(optionen[0]['laengste'])
+        self.assertIn('(fast gerade)', optionen[0]['text'])
+        self.assertTrue(optionen[0]['id'].startswith('k'))
+        self.assertAlmostEqual(optionen[0]['laenge_m'], 400.0)
+
+    def test_a_real_bend_stays_out(self):
+        self.assertFalse(any('Süd' in o['kante'] and '400' in o['kante'] for o in saatplan.startkanten(self.grenze(12.0))))
+
+    def test_ids_of_straight_edges_do_not_move(self):
+        # Mit und ohne den fast geraden Bogen: die geraden Kanten behalten ihre Kennung.
+        mit = {o['id']: o['kante'] for o in saatplan.startkanten(self.grenze(2.9)) if not o['id'].startswith('k')}
+        ohne = {o['id']: o['kante'] for o in saatplan.startkanten(self.grenze(12.0))}
+        self.assertEqual(mit, {k: v for k, v in ohne.items() if k in mit})
+
+
 class EngineTests(unittest.TestCase):
     def setUp(self):
         ordner = tempfile.TemporaryDirectory()

@@ -43,19 +43,30 @@ KLEINE_LUECKE_M = 5.0    # darunter keine Zusatz-Fahrgasse vorschlagen
 def startkanten(grenze: Sequence[Point]) -> list[dict]:
     """Die Kanten, an denen ein Plan beginnen kann - je zwei Startecken.
 
-    Gerade Kanten ab 20 m (wie bei den Randspuren). Hat ein Schlag gar keine,
-    gehen auch Bögen, ihre Sehne gibt dann die Richtung vor. Die längste gerade
-    Kante steht vorn: an ihr fängt man beim Säen an, sie ist vorgewählt.
+    Gerade Kanten ab 20 m (wie bei den Randspuren), dazu Bögen, die fast gerade
+    sind (``fast_gerade``): bei ihnen gibt die Sehne die Richtung vor. Hat ein
+    Schlag gar keine, gehen alle Bögen. Die längste Kante steht vorn: an ihr
+    fängt man beim Säen an, sie ist vorgewählt (Höllochweg, 23.10.2026: die
+    längste Kante, 406 m, war ein Bogen mit 2,9 m Stich und fehlte in der Auswahl).
     """
     ring = [tuple(map(float, p)) for p in grenze]
     if len(ring) < 3:
         return []
     alle = randspuren.kanten(ring)
-    geraden = [k for k in alle if k["mode"] == "ab"] or alle
+    # Die Kennungen müssen bleiben, was sie waren: eine gespeicherte Vorgabe ("1a")
+    # wird beim Übernehmen neu gerechnet. Gerade Kanten zählen wie bisher 0, 1, 2 …,
+    # die fast geraden Bögen bekommen eigene Nummern (k0, k1 …).
+    geraden = [k for k in alle if k["mode"] == "ab"]
+    if geraden:
+        auswahl = [(str(i), k) for i, k in enumerate(geraden)]
+        auswahl += [(f"k{i}", k) for i, k in enumerate(k for k in alle
+                                                       if k["mode"] != "ab" and fast_gerade(k["points"]))]
+    else:
+        auswahl = [(str(i), k) for i, k in enumerate(alle)]
     xs, ys = [p[0] for p in ring], [p[1] for p in ring]
     mitte = ((min(xs) + max(xs)) / 2.0, (min(ys) + max(ys)) / 2.0)
     ergebnis = []
-    for nr, kante in enumerate(geraden):
+    for nr, kante in auswahl:
         a, b = tuple(kante["points"][0]), tuple(kante["points"][-1])
         name = randspuren.benennen(kante, ring)
         for start, (von, nach) in (("a", (a, b)), ("b", (b, a))):
@@ -68,6 +79,8 @@ def startkanten(grenze: Sequence[Point]) -> list[dict]:
                 "von": list(von), "nach": list(nach),
                 "laenge_m": _r(distance(a, b)),
             })
+            if kante["mode"] != "ab" and geraden:
+                ergebnis[-1]["text"] += " (fast gerade)"
     ergebnis.sort(key=lambda o: -o["laenge_m"])           # stabil: je Kante bleibt a vor b
     if ergebnis:
         laengste = ergebnis[0]["laenge_m"]
@@ -76,6 +89,20 @@ def startkanten(grenze: Sequence[Point]) -> list[dict]:
                 o["text"] += " · längste Kante"
                 o["laengste"] = True
     return ergebnis
+
+
+FAST_GERADE_M = 1.5        # so weit darf ein Bogen von seiner Sehne abweichen ...
+FAST_GERADE_ANTEIL = 0.01  # ... oder so viel seiner Länge, was größer ist
+
+
+def fast_gerade(punkte: Sequence[Sequence[float]]) -> bool:
+    """Ein Bogen, der kaum von der Geraden zwischen seinen Enden abweicht."""
+    a, b = tuple(punkte[0]), tuple(punkte[-1])
+    laenge = distance(a, b)
+    if laenge < 20.0:
+        return False
+    stich = max(abs((p[0] - a[0]) * (b[1] - a[1]) - (p[1] - a[1]) * (b[0] - a[0])) / laenge for p in punkte)
+    return stich <= max(FAST_GERADE_M, FAST_GERADE_ANTEIL * laenge)
 
 
 def _richtung_name(kurs: float) -> str:

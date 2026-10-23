@@ -402,7 +402,10 @@ Spur ausrichten, **Spur → Saatplan** drücken (oder im Menü **Ab hier planen*
 AgriPilot nimmt die nächste Ecke (höchstens 40 m weg) und die Kante, die dort in
 Fahrtrichtung zeigt. Am Schreibtisch geht es auch mit einer gewählten Ecke: **die
 längste gerade Kante steht in der Auswahl oben und ist vorgewählt** (ab 1.5.64, „längste
-Kante“) – an ihr fängt man beim Säen an.
+Kante“) – an ihr fängt man beim Säen an. **Fast gerade Bögen zählen mit** (ab 1.5.66):
+weicht eine „Kurve“ höchstens 1,5 m oder 1 % ihrer Länge von der Geraden zwischen ihren
+Enden ab, steht sie als „(fast gerade)“ in der Auswahl; gesät wird parallel zu dieser
+Geraden. So ist auf Höllochweg die 406-m-Südostkante (2,9 m Stich) wählbar und vorgewählt.
 Weitere Eingaben: **Sämaschine** (z. B. 3 m), **Fahrgassenweite** (21 m) und
 **Säspuren am Rand vor der Fahrgasse** (3) – sie bleiben beim Feld gespeichert.
 
