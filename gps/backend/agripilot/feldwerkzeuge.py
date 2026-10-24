@@ -50,34 +50,12 @@ def strecke_enthalten(a,b,ring,abstand=0.):
     return all(_innen((a[0]+dx*(s+t)/2,a[1]+dy*(s+t)/2),ring) for s,t in zip(ts,ts[1:]))
 
 
-GRENZ_TOLERANZ_M = 0.5   # so weit darf eine Arbeitsgrenze über die Feldgrenze hinaus
-
-
-def aussen_hoechstens(punkte, ring, schritt_m=0.25):
-    """Wie weit ``punkte`` (geschlossen) höchstens außerhalb von ``ring`` liegt, und bei
-    welchem Punkt (Anfang der Kante). Abgetastet alle ``schritt_m`` Meter."""
-    if len(punkte) < 3 or len(ring) < 3:
-        return 0.0, 0
-    weitest, wo = 0.0, 0
-    for i, a in enumerate(punkte):
-        b = punkte[(i + 1) % len(punkte)]
-        n = max(1, int(math.dist(a, b) / schritt_m))
-        for k in range(n + 1):
-            p = (a[0] + (b[0] - a[0]) * k / n, a[1] + (b[1] - a[1]) * k / n)
-            if geo.point_in_polygon(p, ring):
-                continue
-            d = min(_abstand(p, c, ring[(j + 1) % len(ring)]) for j, c in enumerate(ring))
-            if d > weitest:
-                weitest, wo = d, (i if k < n else (i + 1) % len(punkte))
-    return weitest, wo
-
-
 def flaeche_enthalten(punkte,ring,abstand=0.):
     if len(punkte)<3 or len(ring)<3: return False
     return all(strecke_enthalten(a,punkte[(i+1)%len(punkte)],ring,abstand) for i,a in enumerate(punkte))
 
 
-def grenze_pruefen(punkte,original,innerhalb=True):
+def grenze_pruefen(punkte,original):
     if not isinstance(punkte,list) or not 3<=len(punkte)<=2000:
         raise ValueError("Eine Arbeitsgrenze braucht 3 bis 2000 Punkte")
     try:
@@ -95,16 +73,8 @@ def grenze_pruefen(punkte,original,innerhalb=True):
             if j==i+1 or (i==0 and j==len(ring)-1): continue
             if _schneiden(a,b,ring[j],ring[(j+1)%len(ring)]):
                 raise ValueError("Die Arbeitsgrenze überschneidet oder berührt sich selbst")
-    # Eine geänderte Feldgrenze selbst (innerhalb=False) darf über die alte hinaus. Die
-    # Arbeitsgrenze darf um GRENZ_TOLERANZ_M hinaus: eine abgefahrene Grenze hat Zacken von
-    # ein paar Zentimetern, und eine darüber gezogene Gerade lag sonst "außerhalb".
-    if innerhalb:
-        aussen, punkt = aussen_hoechstens(ring, original)
-        if aussen > GRENZ_TOLERANZ_M:
-            raise ValueError(
-                f"Die Arbeitsgrenze liegt bis zu {aussen:.1f} m außerhalb der Feldgrenze (bei Punkt {punkt + 1})"
-                .replace(".", ",", 1) + f" – erlaubt sind {GRENZ_TOLERANZ_M:.1f} m".replace(".", ",")
-                + ". Soll die Feldgrenze selbst so verlaufen: Häkchen „Feldgrenze selbst ändern“ setzen.")
+    # Kein Limit gegenüber der Feldgrenze (Andy, 24.10.2026): die Arbeitsgrenze darf auch
+    # darüber hinaus. Geprüft wird nur, was Lenkung und Fläche brauchen (oben).
     return ring
 
 

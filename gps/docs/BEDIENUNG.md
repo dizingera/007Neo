@@ -1574,15 +1574,13 @@ Radius nicht zu, wird er so groß wie möglich und die Meldung sagt, wie groß. 
 mit **Rückgängig** zurücknehmen.
 
 **Feldgrenze selbst ändern:** mit dem Häkchen wird nicht die Arbeitsgrenze, sondern die
-Feldgrenze gespeichert – dann darf sie auch über die alte hinaus (eine nach innen gebogene
-Rundung gerade ziehen). Die bisherige Feldgrenze wird vorher gesichert, die Fläche neu
+Feldgrenze gespeichert (statt einer eigenen Arbeitsgrenze). Die bisherige Feldgrenze wird vorher gesichert, die Fläche neu
 berechnet, eine Arbeitsgrenze fällt weg. Geschlossen, ohne Selbstschnitt und mindestens
 100 m² muss sie auch dann sein.
 
 Der Entwurf muss ein geschlossenes, nicht selbstüberschneidendes Feld von
-mindestens 100 m² innerhalb der ursprünglichen Grenze ergeben – bis 0,5 m darüber hinaus
-ist erlaubt (ab 1.5.72; eine abgefahrene Grenze hat Zacken von ein paar Zentimetern). Liegt
-er weiter draußen, sagt die Meldung wie weit und bei welchem Punkt. Ein ungültiger
+mindestens 100 m² ergeben. **Ab 1.5.73 gibt es kein Limit gegenüber der Feldgrenze:** die
+Arbeitsgrenze darf auch über sie hinaus verlaufen. Ein ungültiger
 Entwurf bleibt mit verständlicher Meldung geöffnet. Die ursprüngliche Grenze
 wird nicht überschrieben. Die Arbeitsgrenze gilt für Vorgewende, Wendeprüfung,
 Teilbreiten, Saatplan und neue Randspuren und wird zwischen Geräten abgeglichen.

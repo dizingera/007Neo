@@ -30,9 +30,8 @@ class FeldwerkzeugeAPI(unittest.TestCase):
     def test_feldgrenze_selbst_aendern_darf_ueber_die_alte_hinaus_und_sichert_sie(self):
         # Erst eine Arbeitsgrenze - sie fällt mit der neuen Feldgrenze weg.
         neu=self.c.post(self.url,json=dict(stand=self.f['updated_at'],punkte=[[5,5],[95,5],[95,95],[5,95]])).json()['data']
-        # Die Südostecke 5 m nach außen gezogen: als Arbeitsgrenze verboten, als Feldgrenze erlaubt.
+        # Die Südostecke 5 m nach außen gezogen und als Feldgrenze gespeichert.
         pts=[[0,0],[105,-5],[100,100],[0,100]]
-        self.assertEqual(self.c.post(self.url,json=dict(stand=neu['updated_at'],punkte=pts)).status_code,400)
         r=self.c.post(self.url,json=dict(stand=neu['updated_at'],punkte=pts,ziel='feldgrenze'))
         self.assertEqual(r.status_code,200,r.text)
         feld=r.json()['data']
@@ -47,23 +46,14 @@ class FeldwerkzeugeAPI(unittest.TestCase):
         self.assertEqual(self.c.post(self.url,json=dict(stand=feld['updated_at'],punkte=[],ziel='feldgrenze')).status_code,400)
         self.assertEqual(self.s.get_field(self.f['id'])['boundary'],pts)
 
-    def test_kleine_zacken_der_grenze_sind_kein_aussen(self):
-        # Eine abgefahrene Südkante mit Zacken von 30 cm nach innen; die gerade gezogene
-        # Arbeitsgrenze liegt dort ein paar Zentimeter "außerhalb" - das ist Messrauschen.
-        zackig=[[0,0],[25,0.3],[50,0],[75,0.3],[100,0],[100,100],[0,100]]
-        f=self.s.save_field(dict(name='Zackig',datum_lat=50,datum_lon=10,boundary=zackig))
-        url='/api/fields/'+f['id']+'/arbeitsgrenze'
-        gerade=[[0,0],[100,0],[100,100],[0,100]]
-        r=self.c.post(url,json=dict(stand=f['updated_at'],punkte=gerade))
+    def test_arbeitsgrenze_darf_ueber_die_feldgrenze_hinaus(self):
+        # Kein Limit (Andy, 24.10.2026): auch 30 m über die Feldgrenze hinaus wird gespeichert.
+        weit=[[0,-30],[100,-30],[100,100],[0,100]]
+        r=self.c.post(self.url,json=dict(stand=self.f['updated_at'],punkte=weit))
         self.assertEqual(r.status_code,200,r.text)
-        # 3 m hinaus ist kein Rauschen: abgelehnt, mit Abstand, Punkt und dem Weg dahin.
-        weit=[[0,-3],[100,-3],[100,100],[0,100]]
-        r=self.c.post(url,json=dict(stand=r.json()['data']['updated_at'],punkte=weit))
-        self.assertEqual(r.status_code,400,r.text)
-        text=r.json()['detail']
-        self.assertIn('3,3 m außerhalb',text)          # 3 m plus die 30-cm-Zacke
-        self.assertIn('bei Punkt 1',text)
-        self.assertIn('Feldgrenze selbst ändern',text)
+        self.assertEqual(r.json()['data']['working_boundary'],weit)
+        self.assertEqual(r.json()['data']['boundary'],self.f['boundary'])   # die Feldgrenze bleibt
+
 
     def test_ungueltiger_ring_veraendert_nichts(self):
         r=self.c.post(self.url,json=dict(stand=self.f['updated_at'],punkte=[[0,0],[100,100],[0,100],[100,0]]))

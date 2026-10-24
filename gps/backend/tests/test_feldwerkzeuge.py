@@ -8,10 +8,13 @@ class FeldwerkzeugeTest(unittest.TestCase):
     def test_arbeitsgrenze_erhaelt_original_und_prueft_kanten(self):
         original=[[0,0],[100,0],[100,100],[0,100]]
         self.assertEqual(f.grenze_pruefen([[2,2],[98,2],[98,98],[2,98]],original)[0],[2.,2.])
-        for punkte in ([[0,0],[100,100],[0,100],[100,0]], [[-1,0],[10,0],[10,20]], [[0,0],[1,0],[0,1]], [[0,0],[math.nan,1],[30,30]]):
+        # Ungültig bleibt: Selbstschnitt, unter 100 m², kaputte Koordinaten.
+        for punkte in ([[0,0],[100,100],[0,100],[100,0]], [[0,0],[1,0],[0,1]], [[0,0],[math.nan,1],[30,30]]):
             with self.assertRaises(ValueError): f.grenze_pruefen(punkte,original)
+        # Kein Limit gegenüber der Feldgrenze mehr (24.10.2026): außerhalb und über eine Bucht ist erlaubt.
+        self.assertEqual(len(f.grenze_pruefen([[-1,0],[10,0],[10,20]],original)),3)
         bucht=[[0,0],[100,0],[100,100],[60,100],[60,40],[40,40],[40,100],[0,100]]
-        with self.assertRaises(ValueError): f.grenze_pruefen([[10,10],[90,10],[90,90],[10,90]],bucht)
+        self.assertEqual(len(f.grenze_pruefen([[10,10],[90,10],[90,90],[10,90]],bucht)),4)
 
     def test_spuren_trennen_luecken_wenden_und_unbearbeitet(self):
         plane=LocalPlane(50,10)
