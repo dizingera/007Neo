@@ -1112,26 +1112,32 @@ function geraetZeichnen(s, profil, implement, rechts, vor) {
   const tiefe = Math.max(0.9, 7 * px);
   const sections = s.sections || [];
   const breite = profil.width_m || 3;
+  const art = profil.geraet_art || 'balken';
 
-  // Verbindung von der Hinterachse zum Gerät
-  ctx.beginPath();
-  ctx.moveTo(0, -0.6);
-  ctx.lineTo(rechts, vor + tiefe / 2);
-  ctx.save();
-  ctx.strokeStyle = F.traktor;
-  ctx.globalAlpha = 0.7;
-  ctx.lineWidth = Math.max(0.12, 2.5 * px);
-  ctx.stroke();
-  ctx.restore();
+  // Verbindung von der Hinterachse zum Gerät - das Schneidwerk hängt vorn am Schrägförderer.
+  if (art !== 'schneidwerk') {
+    ctx.beginPath();
+    ctx.moveTo(0, -0.6);
+    ctx.lineTo(rechts, vor + tiefe / 2);
+    ctx.save();
+    ctx.strokeStyle = F.traktor;
+    ctx.globalAlpha = 0.7;
+    ctx.lineWidth = Math.max(0.12, 2.5 * px);
+    ctx.stroke();
+    ctx.restore();
+  }
 
   ctx.save();
   ctx.translate(rechts, vor);
   if (implement.trailed && implement.heading != null) {
     ctx.rotate(-winkelDifferenz(implement.heading, s.heading) * Math.PI / 180);
   }
-  const art = profil.geraet_art || 'balken';
-  // Der Aufbau reicht vom Arbeitspunkt nach vorn - höchstens bis ans Heck des Traktors.
-  if (art !== 'balken') window.Fahrzeugbild.geraet(ctx, art, breite, px, F, Math.max(0.5, -1.0 - vor));
+  // Der Aufbau reicht vom Arbeitspunkt nach vorn - höchstens bis ans Heck des Traktors;
+  // das Schneidwerk vom Messerbalken zurück bis an den Mähdrescher.
+  const platz = art === 'schneidwerk' ? vor - window.Fahrzeugbild.DRESCHER_VORN : Math.max(0.5, -1.0 - vor);
+  if (art !== 'balken') {
+    window.Fahrzeugbild.geraet(ctx, art, breite, px, F, platz, window.Fahrzeugbild.farben(profil.marke, F));
+  }
   const leiste = art === 'balken' ? tiefe : Math.max(0.3, 5 * px);
   const teile = sections.length ? sections : [{ left_m: -breite / 2, right_m: breite / 2, enabled: true }];
   teile.forEach((t) => {
@@ -1906,7 +1912,21 @@ FORMULARE.forEach((id) => {
 
 /* Mehrere Maschinen: die Liste oben wählt, das Formular darunter gehört zur
  * gewählten. "Neue Maschine" kopiert die aktuellen Werte unter neuem Namen. */
-function renderProfiles(profile) {
+/* Ein Mähdrescher fährt mit Schneidwerk, ein Traktor mit Gerät dahinter: die Liste
+   zeigt nur, was zum gewählten Fahrzeug passt (das gewählte immer). */
+let geraeteAlle = [];
+
+function drescherGewaehlt() {
+  const traktor = traktorenListe.find((t) => t.aktiv);
+  return (traktor ? traktor.bauform : ((state.live && state.live.profile) || {}).bauform) === 'maehdrescher';
+}
+
+function renderProfiles(alle) {
+  geraeteAlle = alle;
+  const drescher = drescherGewaehlt();
+  const profile = alle.filter((p) => p.aktiv || (p.geraet_art === 'schneidwerk') === drescher);
+  el('kopfGeraet').textContent = drescher ? 'Schneidwerk' : 'Gerät';
+  el('btnNewProfile').textContent = drescher ? 'Neues Schneidwerk' : 'Neues Gerät';
   const select = el('profileSelect');
   select.innerHTML = '';
   profile.forEach((p) => {
@@ -1916,7 +1936,7 @@ function renderProfiles(profile) {
     option.selected = !!p.aktiv;
     select.appendChild(option);
   });
-  el('btnDeleteProfile').disabled = profile.length <= 1;
+  el('btnDeleteProfile').disabled = alle.length <= 1;
   myterraAuswahlLaden();
 }
 
@@ -2009,6 +2029,13 @@ async function renderTraktoren() {
   })));
   el('btnDeleteTraktor').disabled = liste.length <= 1;
   fillTraktorForm(liste.find((t) => t.aktiv));
+  // Mit dem Mähdrescher kommt sein Schneidwerk (und zurück das letzte Gerät).
+  const vorher = (geraeteAlle.find((p) => p.aktiv) || {}).id;
+  const geraete = await fetch('/api/profiles').then((r) => r.json()).catch(() => null);
+  if (!Array.isArray(geraete)) return;
+  renderProfiles(geraete);
+  const jetzt = geraete.find((p) => p.aktiv);
+  if (jetzt && vorher !== undefined && jetzt.id !== vorher) fillProfileFrom(jetzt);
 }
 
 el('traktorSelect').onchange = async (event) => {

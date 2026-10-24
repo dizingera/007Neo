@@ -1135,7 +1135,7 @@ def create_app(config=None) -> FastAPI:
 
     @api.post("/api/traktoren/{traktor_id}/select")
     async def select_traktor(traktor_id: str):
-        return guard(engine.select_traktor, traktor_id)
+        return guard(engine.traktor_waehlen, traktor_id)
 
     @api.delete("/api/traktoren/{traktor_id}")
     async def delete_traktor(traktor_id: str):
@@ -1144,8 +1144,13 @@ def create_app(config=None) -> FastAPI:
 
     @api.post("/api/traktor")
     async def update_traktor(payload: dict = Body(...)):
-        """Den gewählten Traktor ändern: Name, Antenne, Lenkung."""
-        return guard(engine.update_traktor, payload)
+        """Den gewählten Traktor ändern: Name, Antenne, Lenkung - und Bauform: wird er
+        zum Mähdrescher, kommt das Schneidwerk als Gerät gleich mit."""
+        def aendern():
+            engine.update_traktor(payload)
+            engine.geraet_zum_fahrzeug()
+            return engine.aktiver_traktor()
+        return guard(aendern)
 
     # -- Geräte -----------------------------------------------------------
 

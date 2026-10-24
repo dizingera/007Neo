@@ -23,7 +23,7 @@ import time
 import unicodedata
 from typing import Any, Optional
 
-from .guidance import VehicleProfile
+from .guidance import SCHNEIDWERK, VehicleProfile, ist_maehdrescher
 from .storage import Storage
 
 FORMAT = "agripilot-arbeitsbericht"
@@ -142,19 +142,38 @@ def _ist_traktor(eintrag: dict) -> bool:
     return _glatt(eintrag.get("type") or "") in ("traktor", "schlepper")
 
 
+def _ist_drescher(eintrag: dict) -> bool:
+    return not _ist_traktor(eintrag) and ist_maehdrescher(eintrag.get("type") or "")
+
+
+# Lackfarbe aus dem Namen (Schlüssel wie in fahrzeugbild.js MARKEN).
+MARKEN_IM_NAMEN = (("claas", "claas"), ("john deere", "johndeere"), ("deere", "johndeere"),
+                   ("fendt", "fendt"), ("new holland", "newholland"), ("case", "case"),
+                   ("steyr", "case"), ("deutz", "deutz"), ("massey", "massey"),
+                   ("valtra", "valtra"), ("kubota", "kubota"))
+
+
+def marke_aus(name: str) -> str:
+    glatt = _glatt(name)
+    return next((marke for wort, marke in MARKEN_IM_NAMEN if wort in glatt), "standard")
+
+
 def maschinen_uebernehmen(engine, liste: list[dict], traktor: str = "") -> dict:
     """Die Maschinenliste von MyTerra übernehmen.
 
     Wie in MyTerra sind Traktoren und Geräte getrennt: jeder MyTerra-Traktor wird ein
-    AgriPilot-Traktor (Antenne und Lenkung vom gewählten als Vorlage), jedes Gerät und
-    jeder Mähdrescher eine Maschine. Was es schon gibt, bleibt unverändert - was dort
+    AgriPilot-Traktor (Antenne und Lenkung vom gewählten als Vorlage), jedes Gerät eine
+    Maschine. Ein Mähdrescher ist ein Fahrzeug (Bauform Mähdrescher) und bekommt sein
+    Schneidwerk als Gerät vorn - seit 1.5.75; ein früher als Gerät angelegter Mähdrescher
+    wird dabei zu seinem Schneidwerk. Was es schon gibt, bleibt unverändert - was dort
     eingestellt ist, hat jemand gemessen. Gewählter Traktor und gewählte Maschine bleiben
     gewählt. ``traktor`` ist seit 1.5.7 ohne Wirkung (nur noch geprüft).
     """
     aktive = [e for e in liste if isinstance(e, dict) and (e.get("name") or "").strip()
               and e.get("active", True) is not False]
-    traktoren = sorted({e["name"].strip() for e in aktive if _ist_traktor(e)})
-    geraete = [e for e in aktive if not _ist_traktor(e)]
+    drescher = [e for e in aktive if _ist_drescher(e)]
+    traktoren = sorted({e["name"].strip() for e in aktive if _ist_traktor(e) or _ist_drescher(e)})
+    geraete = [e for e in aktive if not _ist_traktor(e) and not _ist_drescher(e)]
     if traktor and traktor not in traktoren:
         raise ValueError(f"Traktor „{traktor}“ gibt es in MyTerra nicht")
     engine.store.set_setting(KATALOG, {
@@ -186,18 +205,58 @@ def maschinen_uebernehmen(engine, liste: list[dict], traktor: str = "") -> dict:
         engine.save_profile_as(name, werte)
         belegt.add(_glatt(name))
         ergebnis["neu"].append(name)
+    for eintrag in drescher:
+        name = eintrag["name"].strip()
+        schneidwerk = f"Schneidwerk {name}"
+        if _glatt(schneidwerk) in {_glatt(p["name"]) for p in engine.list_profiles()}:
+            ergebnis["vorhanden"].append(schneidwerk)
+            continue
+        alt = next((p for p in engine.list_profiles() if p.get("geraet_art") != "schneidwerk"
+                    and _glatt(name) in (_glatt(p["name"]), _glatt(p.get("anbaugeraet") or ""))), None)
+        if alt is not None:
+            engine.zum_schneidwerk(alt["id"], name)
+            ergebnis["vorhanden"].append(schneidwerk)
+            continue
+        werte = {**basis, **SCHNEIDWERK, "sections": 1}
+        try:
+            breite = float(eintrag.get("widthM") or 0.0)
+        except (TypeError, ValueError):
+            breite = 0.0
+        if breite > 0:
+            werte["width_m"] = breite
+        else:
+            ergebnis["ohne_breite"].append(schneidwerk)
+        engine.save_profile_as(schneidwerk, werte)
+        ergebnis["neu"].append(schneidwerk)
     if zuvor and ergebnis["neu"]:
         engine.select_profile(zuvor["id"])
     # Die Traktoren: was es unter diesem Namen noch nicht gibt, kommt dazu.
     traktor_zuvor = engine.aktiver_traktor()["id"]
     bekannt = {_glatt(t["name"]) for t in engine.list_traktoren()}
     traktoren_neu = []
+    namen_drescher = {_glatt(e["name"]) for e in drescher}
     for name in traktoren:
         if _glatt(name) not in bekannt:
-            engine.save_traktor_as(name)
+            # Die Vorlage ist der gewählte - auch wenn das gerade ein Mähdrescher ist.
+            werte = {"bauform": "maehdrescher" if _glatt(name) in namen_drescher else "traktor"}
+            if marke_aus(name) != "standard" or _glatt(name) in namen_drescher:
+                werte["marke"] = marke_aus(name)
+            engine.save_traktor_as(name, werte)
             bekannt.add(_glatt(name))
             traktoren_neu.append(name)
-    if traktoren_neu:
+    # Ein Mähdrescher, den es schon als Traktor gab, bekommt seine Bauform.
+    liste_traktoren = [dict(t) for t in engine.store.get_setting("traktoren") or []]
+    umgestellt = False
+    for t in liste_traktoren:
+        if _glatt(t.get("name") or "") in namen_drescher and t.get("bauform") != "maehdrescher":
+            t["bauform"] = "maehdrescher"
+            if t.get("marke") in (None, "", "standard"):
+                t["marke"] = marke_aus(t["name"])
+            t["stand"] = time.time()
+            umgestellt = True
+    if umgestellt:
+        engine.store.set_setting("traktoren", liste_traktoren)
+    if traktoren_neu or umgestellt:
         engine.select_traktor(traktor_zuvor)
     engine.note(f"Aus MyTerra: {len(ergebnis['neu'])} Maschinen und {len(traktoren_neu)} "
                 f"Traktoren neu, {len(ergebnis['vorhanden'])} Maschinen schon da")

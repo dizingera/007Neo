@@ -43,7 +43,12 @@
     pflug: 'Pflug',
     maehwerk: 'Mähwerk',
     walze: 'Walze',
+    schneidwerk: 'Schneidwerk (Mähdrescher, vorn)',
   };
+
+  /* Vorderkante des Mähdreschers ab Bezugsachse (m): bis hierher reicht der
+     Schrägförderer vom Schneidwerk zurück. */
+  const DRESCHER_VORN = 3.9;
 
   /* Die Farben für eine Marke; "standard" nimmt die Farben der Oberfläche (F). */
   function farben(marke, F) {
@@ -232,11 +237,49 @@
 
   /* -------------------------------------------------------------- Geräte
    * Gezeichnet ab Arbeitspunkt (y = 0) nach vorn zur Maschine hin, über die
-   * ganze Arbeitsbreite. Die Teilbreiten legt app.js darüber. */
+   * ganze Arbeitsbreite. Die Teilbreiten legt app.js darüber. Das Schneidwerk
+   * sitzt vor dem Mähdrescher: es reicht vom Messerbalken nach hinten. */
 
-  function geraet(ctx, art, breite, px, F, platz = Infinity) {
+  /* Schneidwerk von oben: Halmteiler, Messerbalken, Haspel, Mulde mit
+     Einzugsschnecke, Schrägförderer zurück bis an den Mähdrescher (platz). */
+  function schneidwerk(ctx, breite, px, platz, p) {
+    const b = breite / 2, tief = 1.3, stahl = '#8f979e';
+    const lack = (p && p.lack) || '#b3c41c', dunkel = (p && p.dunkel) || '#7f8c12';
+    const akzent = (p && p.akzent) || '#d20a11';
+    if (Number.isFinite(platz) && platz > tief) {                                           // Schrägförderer
+      rundRechteck(ctx, -0.6, -platz - 0.1, 1.2, platz - tief + 0.2, 0.08);
+      ctx.fillStyle = dunkel; ctx.fill();
+    }
+    rundRechteck(ctx, -b, -tief, breite, tief - 0.02, 0.18);          // Mulde
+    ctx.fillStyle = lack; schatten(ctx, true); ctx.fill(); schatten(ctx, false);
+    ctx.strokeStyle = 'rgba(0,0,0,.55)'; ctx.lineWidth = 1.2 * px; ctx.stroke();
+    rundRechteck(ctx, -b + 0.12, -tief + 0.14, breite - 0.24, tief - 0.24, 0.1);
+    ctx.fillStyle = 'rgba(0,0,0,.28)'; ctx.fill();
+    ctx.lineCap = 'round';
+    const linie = (x0, y0, x1, y1, w, farbe) => {
+      ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1);
+      ctx.lineWidth = Math.max(w, 1.2 * px); ctx.strokeStyle = farbe; ctx.stroke();
+    };
+    linie(-b + 0.2, -1.0, b - 0.2, -1.0, 0.16, stahl);                // Einzugsschnecke
+    for (let x = -b + 0.35; x < b - 0.2; x += 0.35) linie(x - 0.08, -1.08, x + 0.08, -0.92, 0.03, '#5d656c');
+    [-0.2, -0.42, -0.64].forEach((y) => linie(-b + 0.3, y, b - 0.3, y, 0.06, akzent));   // Haspel
+    [-b + 0.18, b - 0.18].forEach((x) => linie(x, -0.15, x, -0.8, 0.07, dunkel));
+    linie(-b, 0, b, 0, 0.05, stahl);                                  // Messerbalken
+    for (let x = -b + 0.08; x < b; x += 0.16) linie(x, 0, x, 0.08, 0.02, stahl);
+    [-1, 1].forEach((seite) => {                                      // Halmteiler
+      ctx.beginPath();
+      ctx.moveTo(seite * b, -0.3); ctx.lineTo(seite * (b - 0.12), 0.45); ctx.lineTo(seite * (b - 0.25), -0.3);
+      ctx.closePath(); ctx.fillStyle = dunkel; ctx.fill();
+    });
+  }
+
+  function geraet(ctx, art, breite, px, F, platz = Infinity, p = null) {
     const b = breite / 2;
     const rahmen = '#3b4148', stahl = '#8f979e', rot = '#c62828';
+    if (art === 'schneidwerk') {
+      ctx.save(); schneidwerk(ctx, breite, px, platz, p); ctx.restore();
+      return;
+    }
     ctx.save();
     // Kurz angebaut: der Aufbau endet vorn am Heck des Traktors und reicht dafür
     // hinter den Arbeitspunkt - in echter Tiefe, nicht gestaucht.
@@ -318,7 +361,7 @@
     ctx.restore();
   }
 
-  const ausfuhr = { MARKEN, BAUFORMEN, GERAETE, TIEFE, farben, radwinkel, fahrzeug, geraet };
+  const ausfuhr = { MARKEN, BAUFORMEN, GERAETE, TIEFE, DRESCHER_VORN, farben, radwinkel, fahrzeug, geraet };
   if (typeof module !== 'undefined' && module.exports) module.exports = ausfuhr;
   else wurzel.Fahrzeugbild = ausfuhr;
 })(typeof window !== 'undefined' ? window : globalThis);

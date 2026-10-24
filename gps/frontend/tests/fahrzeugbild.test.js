@@ -54,3 +54,21 @@ test('every body shape and implement draws without error; front wheels turn', ()
     geraet(ctx, art, 6, 0.05, F);
   });
 });
+
+test('Schneidwerk zeichnet die Mulde in der Lackfarbe der Marke, Schrägförderer nur mit Platz', () => {
+  const farbenGesetzt = [];
+  const rechtecke = [];
+  const ctx = new Proxy({}, {
+    get(_, name) {
+      if (name === 'createLinearGradient' || name === 'createRadialGradient') return () => ({ addColorStop() {} });
+      if (name === 'globalAlpha') return 1;
+      if (name === 'moveTo') return (x, y) => rechtecke.push(y);
+      return () => {};
+    },
+    set(_, name, wert) { if (name === 'fillStyle') farbenGesetzt.push(wert); return true; },
+  });
+  geraet(ctx, 'schneidwerk', 4.5, 0.05, F, 1.5, farben('claas', F));
+  assert.ok(farbenGesetzt.includes(MARKEN.claas.lack), 'Mulde nicht in Lackfarbe');
+  assert.ok(Math.min(...rechtecke) < -1.5, 'Schrägförderer reicht nicht zurück');
+  assert.ok(GERAETE.schneidwerk);
+});

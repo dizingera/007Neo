@@ -33,6 +33,7 @@ from .guidance import (
     GuidanceState,
     HeadingFilter,
     ImplementHeading,
+    SCHNEIDWERK,
     TRAKTOR_FELDER,
     VehicleProfile,
     rand_seite,
@@ -429,6 +430,57 @@ class Engine:
         traktor = self.aktiver_traktor()
         self.note(f"Traktor: {traktor['name']}")
         return traktor
+
+    def traktor_waehlen(self, traktor_id: str) -> dict:
+        """Wählen, wie der Fahrer es tut: zum Mähdrescher gehört ein Schneidwerk vorn,
+        zum Traktor ein Gerät dahinter - das passende kommt gleich mit."""
+        traktor = self.select_traktor(traktor_id)
+        self.geraet_zum_fahrzeug()
+        return traktor
+
+    def geraet_zum_fahrzeug(self) -> None:
+        """Mähdrescher mit Schneidwerk, Traktor ohne: sonst das zuletzt passende Gerät wählen.
+
+        Fehlt dem Mähdrescher ein Schneidwerk, wird das Gerät unter seinem Namen (so legte
+        der MyTerra-Abgleich vor 1.5.75 Mähdrescher an) zum Schneidwerk, sonst ein neues
+        angelegt - die Arbeitsbreite trägt der Fahrer ein.
+        """
+        drescher = self.profile.bauform == "maehdrescher"
+        if (self.profile.geraet_art == "schneidwerk") == drescher:
+            return
+        profile = self.list_profiles()
+        zuletzt = dict(self.store.get_setting("geraet_zuletzt") or {})
+        aktiv = next((p for p in profile if p["aktiv"]), None)
+        if aktiv:
+            zuletzt["traktor" if drescher else "drescher"] = aktiv["id"]
+            self.store.set_setting("geraet_zuletzt", zuletzt)
+        passend = [p for p in profile if (p.get("geraet_art") == "schneidwerk") == drescher]
+        ziel = next((p for p in passend if p["id"] == zuletzt.get("drescher" if drescher else "traktor")), None)
+        if ziel is None and drescher:
+            name = self.aktiver_traktor()["name"]
+            ziel = next((p for p in passend if name.lower() in p["name"].lower()), None)
+            alt = next((p for p in profile if p.get("geraet_art") != "schneidwerk" and name.lower()
+                        in (p["name"].lower(), (p.get("anbaugeraet") or "").lower())), None)
+            if ziel is None and alt is not None:
+                self.zum_schneidwerk(alt["id"], name)
+                ziel = alt
+            elif ziel is None and not passend:
+                self.save_profile_as(f"Schneidwerk {name}", {**SCHNEIDWERK, "width_m": 6.0, "sections": 1})
+                return
+        ziel = ziel or (passend[0] if passend else None)
+        if ziel is not None:
+            self.select_profile(ziel["id"])
+
+    def zum_schneidwerk(self, profil_id: str, drescher: str) -> None:
+        """Ein Gerät, das eigentlich ein Mähdrescher war, zu dessen Schneidwerk machen.
+        Arbeitsbreite und Teilbreiten bleiben - die hat jemand eingetragen."""
+        liste = [{k: v for k, v in p.items() if k != "aktiv"} for p in self.list_profiles()]
+        for p in liste:
+            if p["id"] == profil_id:
+                p.update({**SCHNEIDWERK, "name": f"Schneidwerk {drescher}", "stand": time.time()})
+        self.store.set_setting("vehicle_profiles", liste)
+        if self.store.get_setting("vehicle_profile_active") == profil_id:
+            self.select_profile(profil_id)
 
     def save_traktor_as(self, name: str, values: dict | None = None) -> dict:
         """Einen weiteren Traktor anlegen - mit den Werten des gewählten als Vorlage."""

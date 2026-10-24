@@ -162,9 +162,11 @@ class MaschinenUebernahmeTests(unittest.TestCase):
             antwort = c.post("/api/myterra/maschinen", json={
                 "maschinen": MYTERRA_LISTE, "traktor": "John Deere 7530 Premium"}).json()["data"]
             self.assertEqual(antwort["neu"], ["Scheibenegge 3 m", "Grubber 2,50 m",
-                                              "Güttler Großfederzahnegge", "Claas Dominator 98 SL"])
-            self.assertEqual(antwort["ohne_breite"], ["Güttler Großfederzahnegge", "Claas Dominator 98 SL"])
-            self.assertEqual(antwort["traktoren_neu"], ["IHC 956 XL", "John Deere 7530 Premium"])
+                                              "Güttler Großfederzahnegge", "Schneidwerk Claas Dominator 98 SL"])
+            self.assertEqual(antwort["ohne_breite"], ["Güttler Großfederzahnegge",
+                                                      "Schneidwerk Claas Dominator 98 SL"])
+            self.assertEqual(antwort["traktoren_neu"], ["Claas Dominator 98 SL", "IHC 956 XL",
+                                                        "John Deere 7530 Premium"])
             profile = {p["name"]: p for p in c.get("/api/profiles").json()}
             self.assertEqual(profile["Grubber 2,50 m"]["width_m"], 2.5)
             self.assertEqual(profile["Grubber 2,50 m"]["anbaugeraet"], "Grubber 2,50 m")
@@ -177,8 +179,17 @@ class MaschinenUebernahmeTests(unittest.TestCase):
             self.assertTrue(profile[vorher["name"]]["aktiv"])
             self.assertTrue(traktoren[traktor_vorher["name"]]["aktiv"])
             katalog = c.get("/api/myterra/maschinen").json()
-            self.assertEqual(katalog["traktoren"], ["IHC 956 XL", "John Deere 7530 Premium"])
-            self.assertIn("Claas Dominator 98 SL", katalog["geraete"])
+            self.assertEqual(katalog["traktoren"], ["Claas Dominator 98 SL", "IHC 956 XL",
+                                                    "John Deere 7530 Premium"])
+            self.assertNotIn("Claas Dominator 98 SL", katalog["geraete"])
+            # Der Mähdrescher ist ein Fahrzeug, sein Schneidwerk sitzt vorn.
+            self.assertEqual(traktoren["Claas Dominator 98 SL"]["bauform"], "maehdrescher")
+            self.assertEqual(traktoren["Claas Dominator 98 SL"]["marke"], "claas")
+            self.assertNotIn("Claas Dominator 98 SL", profile)
+            schneidwerk = profile["Schneidwerk Claas Dominator 98 SL"]
+            self.assertEqual(schneidwerk["geraet_art"], "schneidwerk")
+            self.assertLess(schneidwerk["tool_trailing_m"], 0)
+            self.assertEqual(schneidwerk["anbaugeraet"], "")
 
     def test_running_it_again_changes_nothing_that_was_set(self):
         with tempfile.TemporaryDirectory() as ordner, self._client(ordner) as c:
@@ -189,6 +200,7 @@ class MaschinenUebernahmeTests(unittest.TestCase):
             zweites = c.post("/api/myterra/maschinen", json={"maschinen": MYTERRA_LISTE}).json()["data"]
             self.assertEqual(zweites["neu"], [])
             self.assertEqual(len(zweites["vorhanden"]), 4)
+            self.assertEqual(zweites["traktoren_neu"], [])
             egge = next(p for p in c.get("/api/profiles").json() if p["name"] == "Güttler Großfederzahnegge")
             self.assertEqual(egge["width_m"], 6.0)
 
@@ -214,6 +226,45 @@ class MaschinenUebernahmeTests(unittest.TestCase):
             # Ohne Breite aus MyTerra: die der gewählten Maschine, nicht die des Grubbers davor.
             self.assertEqual(profile["Güttler Großfederzahnegge"]["width_m"], 4.0)
             self.assertEqual(profile["Grubber 2,50 m"]["width_m"], 2.5)
+
+    def test_a_combine_from_an_older_import_becomes_vehicle_and_its_header(self):
+        with tempfile.TemporaryDirectory() as ordner, self._client(ordner) as c:
+            # So legte der Abgleich vor 1.5.75 ihn an: als Gerät, die Breite selbst eingetragen.
+            c.post("/api/profiles", json={"name": "Claas Dominator 98 SL", "werte": {
+                "width_m": 4.5, "anbaugeraet": "Claas Dominator 98 SL"}})
+            c.post("/api/traktoren", json={"name": "Claas Dominator 98 SL"})
+            c.post("/api/myterra/maschinen", json={"maschinen": MYTERRA_LISTE})
+            profile = {p["name"]: p for p in c.get("/api/profiles").json()}
+            self.assertNotIn("Claas Dominator 98 SL", profile)
+            self.assertEqual(profile["Schneidwerk Claas Dominator 98 SL"]["width_m"], 4.5)
+            self.assertEqual(profile["Schneidwerk Claas Dominator 98 SL"]["geraet_art"], "schneidwerk")
+            traktoren = {t["name"]: t for t in c.get("/api/traktoren").json()}
+            self.assertEqual(traktoren["Claas Dominator 98 SL"]["bauform"], "maehdrescher")
+
+    def test_choosing_the_combine_brings_its_header_and_back(self):
+        with tempfile.TemporaryDirectory() as ordner, self._client(ordner) as c:
+            c.post("/api/myterra/maschinen", json={"maschinen": MYTERRA_LISTE})
+            grubber = next(p for p in c.get("/api/profiles").json() if p["name"] == "Grubber 2,50 m")
+            c.post(f"/api/profiles/{grubber['id']}/select")
+            traktoren = {t["name"]: t for t in c.get("/api/traktoren").json()}
+            c.post(f"/api/traktoren/{traktoren['Claas Dominator 98 SL']['id']}/select")
+            gewaehlt = next(p for p in c.get("/api/profiles").json() if p["aktiv"])
+            self.assertEqual(gewaehlt["name"], "Schneidwerk Claas Dominator 98 SL")
+            zustand = c.get("/api/state").json()["profile"]
+            self.assertEqual(zustand["bauform"], "maehdrescher")
+            self.assertLess(zustand["tool_trailing_m"], 0)
+            # Zurück zum Traktor: das Gerät, das er zuletzt hatte.
+            c.post(f"/api/traktoren/{traktoren['IHC 956 XL']['id']}/select")
+            gewaehlt = next(p for p in c.get("/api/profiles").json() if p["aktiv"])
+            self.assertEqual(gewaehlt["name"], "Grubber 2,50 m")
+
+    def test_a_new_combine_without_header_gets_one(self):
+        with tempfile.TemporaryDirectory() as ordner, self._client(ordner) as c:
+            c.post("/api/traktoren", json={"name": "Lexion 760"})
+            c.post("/api/traktor", json={"bauform": "maehdrescher"})
+            gewaehlt = next(p for p in c.get("/api/profiles").json() if p["aktiv"])
+            self.assertEqual(gewaehlt["name"], "Schneidwerk Lexion 760")
+            self.assertEqual(gewaehlt["geraet_art"], "schneidwerk")
 
     def test_unknown_tractor_and_missing_list_are_refused(self):
         with tempfile.TemporaryDirectory() as ordner, self._client(ordner) as c:

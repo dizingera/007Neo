@@ -241,6 +241,19 @@ TRAKTOR_FELDER = (
     "actuator_latency_ms",
 )
 
+# Ein Mähdrescher ist das Fahrzeug, sein Schneidwerk das Gerät - vorn statt hinten.
+# Die Hinterachse des Mähdreschers ist die gelenkte; das Schneidwerk sitzt vor der
+# Antriebsachse, gut fünf Meter vor der Bezugsachse (negativ = vor der Achse).
+SCHNEIDWERK = {"geraet_art": "schneidwerk", "tool_trailing_m": -5.4, "tool_offset_m": 0.0,
+               "trailed": False, "anbaugeraet": "", "traktor": ""}
+
+
+def ist_maehdrescher(name_oder_art: str) -> bool:
+    """MyTerra nennt ihn "Mähdrescher"; auch "Drescher" oder "Combine" zählt."""
+    import unicodedata
+    glatt = unicodedata.normalize("NFKD", (name_oder_art or "").lower()).encode("ascii", "ignore").decode()
+    return "drescher" in glatt or "combine" in glatt
+
 
 @dataclass
 class GuidanceState:

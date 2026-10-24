@@ -598,7 +598,7 @@
             <label>Arbeitspunkt bis Gerätehinterkante (m)<input type="number" step="0.01" min="0" max="30" name="geraet_hinten_m"></label>
             <p class="note ganz">Wendeprüfung: positive Ausdehnungen ab dem Arbeitspunkt messen; Geprüfte Breite = größerer Wert aus Arbeits- und gemessener Außenbreite. 0 = noch nicht gemessen.</p>
             <label>Art (Bild auf der Karte)<select name="geraet_art" id="wahlGeraetArt"></select></label>
-            <label>Gerät hinter Achse (m)<input type="number" step="0.01" name="tool_trailing_m"></label>
+            <label>Gerät hinter Achse (m, vorn = minus)<input type="number" step="0.01" name="tool_trailing_m"></label>
             <label>Gerät seitlich (m)<input type="number" step="0.01" name="tool_offset_m"></label>
             <label class="switch"><input type="checkbox" name="trailed"> gezogen (Anhängerkinematik)</label>
             <label>Deichsellänge (m)<input type="number" step="0.1" min="0.5" name="hitch_length_m"></label>
@@ -620,7 +620,9 @@
             rückwärts schließt die Automatik alles. <b>Im Vorgewende abschalten</b>, wenn das Vorgewende
             am Ende extra gefahren wird.</p>
           <p><b>Gerät hinter Achse</b> bestimmt, wo markiert wird. Gelenkt wird immer auf die
-            Hinterachse, nie auf das Gerät.</p>
+            Hinterachse, nie auf das Gerät. Das Schneidwerk sitzt vor dem Mähdrescher, dort steht
+            ein Minuswert (Messerbalken vor der Achse). Wählt man den Mähdrescher, kommt sein
+            Schneidwerk als Gerät mit – zurück beim Traktor das Gerät, das er zuletzt hatte.</p>
           <p><b>Gezogen:</b> ein gezogenes Gerät schwenkt erst ein, während es gezogen wird,
             und steht in der Kurve innerhalb der Fahrspur. Die <b>Deichsellänge</b> ist der
             Abstand vom Zugpunkt bis zur Geräteachse.</p>
