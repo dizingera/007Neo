@@ -82,6 +82,7 @@ def startkanten(grenze: Sequence[Point]) -> list[dict]:
                 text += " (fast gerade)"
             ergebnis.append({"id": f"{nr}{start}", "kante": name, "text": text,
                              "von": list(von), "nach": list(nach), "laenge_m": _r(distance(a, b)),
+                             "punkte": [[_r(p[0]), _r(p[1])] for p in kante["points"]],
                              "bogen": bool(bogen and geraden)})
     ergebnis.sort(key=lambda o: (o["bogen"], -o["laenge_m"]))   # stabil: je Kante bleibt a vor b
     if ergebnis:

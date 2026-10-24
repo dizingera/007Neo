@@ -2120,13 +2120,20 @@ function saatVorschau() {
     return [Math.max(...q.map((p) => p[0])) - Math.min(...q.map((p) => p[0])),
       Math.max(...q.map((p) => p[1])) - Math.min(...q.map((p) => p[1]))];
   };
-  // Startkante waagrecht; liegt der Schlag dann hochkant, eine Vierteldrehung dazu.
+  // Startkante waagrecht; liegt der Schlag dann hochkant, eine Vierteldrehung dazu. Dazu
+  // die Drehung von Hand (↺ ↻, in Vierteln), „Auto“ setzt sie zurück.
+  // Antippen und Drehen von Hand halten die Ansicht fest (saat.ansicht): sonst drehte sich
+  // das Bild nach jeder Wahl, und das zweite Antippen träfe eine andere Kante.
   let winkel = wahl && wahl.von && wahl.nach ? Math.atan2(wahl.nach[1] - wahl.von[1], wahl.nach[0] - wahl.von[0]) : 0;
   let [w0, h0] = ausdehnung(winkel);
-  if (h0 > w0) { winkel += Math.PI / 2; [w0, h0] = [h0, w0]; }
+  if (h0 > w0 * 1.1) winkel += Math.PI / 2;
+  if (saat.ansicht != null) winkel = saat.ansicht;
+  [w0, h0] = ausdehnung(winkel);
+  el('btnVorschauAuto').classList.toggle('an', saat.ansicht == null);
   // Die Höhe folgt der Form: ein langer Schlag bekommt kein leeres Feld darüber und darunter.
-  const rand = 26;
-  const hoehe = Math.round(Math.max(170, Math.min(320, (breite - 2 * rand) * (h0 / Math.max(1, w0)) + 2 * rand)));
+  // Oben mehr Rand: dort liegen die Knöpfe.
+  const rand = 26, oben = 58;
+  const hoehe = Math.round(Math.max(190, Math.min(340, (breite - 2 * rand) * (h0 / Math.max(1, w0)) + rand + oben)));
   leinwand.style.height = `${hoehe}px`;
   const k = window.devicePixelRatio || 1;
   leinwand.width = breite * k; leinwand.height = hoehe * k;
@@ -2135,9 +2142,17 @@ function saatVorschau() {
   c.clearRect(0, 0, breite, hoehe);
   const gedreht = grenze.map((p) => drehen(p, winkel));
   const xs = gedreht.map((p) => p[0]), ys = gedreht.map((p) => p[1]);
-  const massstab = Math.min((breite - 2 * rand) / Math.max(1, w0), (hoehe - 2 * rand) / Math.max(1, h0));
+  const massstab = Math.min((breite - 2 * rand) / Math.max(1, w0), (hoehe - rand - oben) / Math.max(1, h0));
   const mx = (Math.max(...xs) + Math.min(...xs)) / 2, my = (Math.max(...ys) + Math.min(...ys)) / 2;
-  const px = (p) => { const [u, v] = drehen(p, winkel); return [breite / 2 + (u - mx) * massstab, hoehe / 2 - (v - my) * massstab]; };
+  const mitteY = oben + (hoehe - rand - oben) / 2;
+  const px = (p) => { const [u, v] = drehen(p, winkel); return [breite / 2 + (u - mx) * massstab, mitteY - (v - my) * massstab]; };
+  // Für das Antippen: jede wählbare Kante als Linie in Bildpunkten, mit ihren zwei Startecken.
+  const kanten = new Map();
+  (saat.optionen || []).forEach((o) => {
+    if (!kanten.has(o.kante)) kanten.set(o.kante, { kante: o.kante, linie: (o.punkte || [o.von, o.nach]).map(px), optionen: [] });
+    kanten.get(o.kante).optionen.push(o);
+  });
+  saat.vorschau = { px, kanten: [...kanten.values()], winkel };
   const pfad = (punkte, zu) => {
     punkte.forEach((p, i) => { const [x, y] = px(p); i ? c.lineTo(x, y) : c.moveTo(x, y); });
     if (zu) c.closePath();
@@ -2170,6 +2185,12 @@ function saatVorschau() {
   c.beginPath(); pfad(grenze, true);
   c.strokeStyle = tinte; c.globalAlpha = 0.8; c.lineWidth = 2; c.stroke(); c.globalAlpha = 1;
   teile.unshift(['Grenze', tinte]);
+  // Kante unter der Maus: hell hervorgehoben, damit man sieht, was ein Klick wählt.
+  const unter = saat.vorschau.kanten.find((x) => x.kante === saat.hoverKante);
+  if (unter) {
+    c.beginPath(); unter.linie.forEach(([x, y], i) => (i ? c.lineTo(x, y) : c.moveTo(x, y)));
+    c.strokeStyle = 'rgba(31, 111, 255, 0.45)'; c.lineWidth = 10; c.stroke();
+  }
   const marke = (x, y, text, farbe) => {
     c.beginPath(); c.arc(x, y, 11, 0, Math.PI * 2);
     c.fillStyle = farbe; c.fill(); c.lineWidth = 2.5; c.strokeStyle = '#fff'; c.stroke();
@@ -2218,11 +2239,91 @@ function saatVorschau() {
   }));
 }
 el('saatplanStart').addEventListener('change', saatVorschau);
-window.addEventListener('resize', () => { if (!el('saatplanVorschau').closest('[hidden]')) saatVorschau(); });
+
+/* Vorschau bedienen: Kante antippen wählt sie (Start am näheren Ende), nochmal antippen dreht
+ * die Richtung; danach wird sofort geplant. ↺ ↻ drehen das Bild, „Auto“ richtet es wieder aus. */
+function vorschauAbstand(p, linie) {
+  let best = Infinity;
+  for (let i = 0; i + 1 < linie.length; i++) {
+    const [ax, ay] = linie[i], [bx, by] = linie[i + 1];
+    const dx = bx - ax, dy = by - ay, l2 = dx * dx + dy * dy;
+    const t = l2 > 0 ? Math.max(0, Math.min(1, ((p[0] - ax) * dx + (p[1] - ay) * dy) / l2)) : 0;
+    best = Math.min(best, Math.hypot(p[0] - (ax + t * dx), p[1] - (ay + t * dy)));
+  }
+  return best;
+}
+
+function vorschauKanteBei(p, fang) {
+  const v = saat.vorschau;
+  if (!v) return null;
+  let treffer = null, best = fang;
+  v.kanten.forEach((k) => { const d = vorschauAbstand(p, k.linie); if (d < best) { best = d; treffer = k; } });
+  return treffer;
+}
+
+function vorschauStartSetzen(option) {
+  if (!option || el('saatplanStart').value === option.id) return;
+  if (saat.vorschau) saat.ansicht = saat.vorschau.winkel;   // Ansicht bleibt, wie sie ist
+  el('saatplanStart').value = option.id;
+  saatVorschau();
+  clearTimeout(saat.planTakt);
+  // Kurz warten: wer zweimal tippt (Richtung umdrehen), soll nicht zweimal rechnen lassen.
+  saat.planTakt = setTimeout(() => el('btnSaatplanPlanen').click(), 350);
+}
+
+(function vorschauBedienung() {
+  const leinwand = el('saatplanVorschau');
+  const ort = (e) => { const r = leinwand.getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top]; };
+  leinwand.addEventListener('click', (e) => {
+    const p = ort(e);
+    const kante = vorschauKanteBei(p, 24);
+    if (!kante) return;
+    const jetzt = el('saatplanStart').value;
+    const wahl = kante.optionen.some((o) => o.id === jetzt)
+      ? kante.optionen.find((o) => o.id !== jetzt)
+      : kante.optionen.reduce((a, b) => {
+        const da = Math.hypot(saat.vorschau.px(a.von)[0] - p[0], saat.vorschau.px(a.von)[1] - p[1]);
+        const db = Math.hypot(saat.vorschau.px(b.von)[0] - p[0], saat.vorschau.px(b.von)[1] - p[1]);
+        return db < da ? b : a;
+      });
+    vorschauStartSetzen(wahl);
+  });
+  leinwand.addEventListener('pointermove', (e) => {
+    if (e.pointerType !== 'mouse') return;
+    const kante = vorschauKanteBei(ort(e), 18);
+    const name = kante ? kante.kante : null;
+    if (name !== saat.hoverKante) { saat.hoverKante = name; saatVorschau(); }
+  });
+  leinwand.addEventListener('pointerleave', () => { if (saat.hoverKante) { saat.hoverKante = null; saatVorschau(); } });
+  const drehen = (viertel) => {
+    if (!saat.vorschau) return;
+    saat.ansicht = saat.vorschau.winkel + viertel * Math.PI / 2;
+    saatVorschau();
+  };
+  el('btnVorschauLinks').onclick = () => drehen(1);
+  el('btnVorschauRechts').onclick = () => drehen(-1);
+  el('btnVorschauAuto').onclick = () => { saat.ansicht = null; saatVorschau(); };
+  el('btnVorschauRichtung').onclick = () => {
+    const jetzt = (saat.optionen || []).find((o) => o.id === el('saatplanStart').value);
+    if (!jetzt) return;
+    vorschauStartSetzen((saat.optionen || []).find((o) => o.kante === jetzt.kante && o.id !== jetzt.id));
+  };
+})();
+// Neu zeichnen, sobald sich die Breite ändert - auch wenn rechts die Ergebnis-Karte
+// erscheint und die Spalte schmaler wird; sonst würde das alte Bild gestaucht.
+if (window.ResizeObserver) {
+  let breiteVorher = 0;
+  new ResizeObserver(() => {
+    const b = el('saatplanVorschau').clientWidth;
+    if (b && b !== breiteVorher) { breiteVorher = b; saatVorschau(); }
+  }).observe(el('saatplanVorschau'));
+} else {
+  window.addEventListener('resize', () => { if (!el('saatplanVorschau').closest('[hidden]')) saatVorschau(); });
+}
 
 function zeigeSaatplan(plan) {
-  saatVorschau();
   el('saatplanErgebnis').hidden = !plan;
+  saatVorschau();
   if (!plan) return;
   const zahl = (x) => Number(x).toLocaleString('de-DE');
   el('saatplanZusammenfassung').textContent =

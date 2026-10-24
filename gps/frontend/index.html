@@ -360,8 +360,19 @@
         <h3>Vorgabe</h3>
         <!-- Vorschau: der Schlag mit Startkante und Fahrtrichtung, nach dem Planen alle Spuren. -->
         <figure class="saat-vorschau-rahmen">
-          <canvas id="saatplanVorschau" class="saat-vorschau" role="img" aria-label="Vorschau des Saatplans"></canvas>
+          <div class="saat-vorschau-buehne">
+            <canvas id="saatplanVorschau" class="saat-vorschau" role="img"
+                    aria-label="Vorschau des Saatplans – eine Feldkante antippen macht sie zur Startkante"></canvas>
+            <!-- Drehen und Richtung: am Bild, wo der Blick ist. -->
+            <div class="saat-vorschau-knoepfe" role="group" aria-label="Vorschau bedienen">
+              <button type="button" id="btnVorschauLinks" title="Bild 90° nach links drehen" aria-label="Nach links drehen"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4v6h6"/><path d="M4.6 14a8 8 0 102.2-7.6L4 10"/></svg></button>
+              <button type="button" id="btnVorschauRechts" title="Bild 90° nach rechts drehen" aria-label="Nach rechts drehen"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 4v6h-6"/><path d="M19.4 14a8 8 0 11-2.2-7.6L20 10"/></svg></button>
+              <button type="button" id="btnVorschauAuto" title="Automatisch ausrichten (Startkante waagrecht)">Auto</button>
+              <button type="button" id="btnVorschauRichtung" title="Fahrtrichtung umdrehen"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7h11l-3-3M17 17H6l3 3"/></svg>Richtung</button>
+            </div>
+          </div>
           <figcaption class="saat-legende" id="saatplanLegende"></figcaption>
+          <p class="note saat-vorschau-hinweis">Feldkante antippen = Startkante (Start an dem Ende, das näher am Finger liegt), nochmal antippen = Richtung umdrehen. Der Plan wird sofort gerechnet.</p>
         </figure>
         <div class="formular" id="saatplanForm">
           <label class="breit">Startecke und Fahrtrichtung

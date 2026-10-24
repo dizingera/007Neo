@@ -418,3 +418,15 @@ body.tag { --f-flaeche: rgba(23, 140, 70, .38); --f-doppelt: rgba(200, 104, 12, 
   .sheet .sheet-untertitel { display: none; }
   .sheet .saat-vorschau { height: 200px; }
 }
+/* Saatplan-Vorschau bedienbar (1.5.70): Kanten antippen, drehen, Richtung umdrehen. */
+.sheet .saat-vorschau-buehne { position: relative; }
+.sheet .saat-vorschau { cursor: pointer; touch-action: manipulation; }
+.sheet .saat-vorschau-knoepfe { position: absolute; left: 8px; top: 8px; display: flex; gap: 6px; }
+.sheet .saat-vorschau-knoepfe button { display: inline-flex; align-items: center; gap: 6px; min-height: 40px; min-width: 40px;
+  padding: 0 10px; justify-content: center; border-radius: 10px; font-size: 13px; font-weight: 600;
+  border: 1px solid color-mix(in srgb, var(--text) 18%, transparent);
+  background: color-mix(in srgb, var(--panel) 90%, transparent); box-shadow: 0 1px 4px rgba(0, 0, 0, .18); }
+.sheet .saat-vorschau-knoepfe button.an { background: var(--blue-solid); color: #fff; border-color: var(--blue-solid); }
+.sheet .saat-vorschau-knoepfe svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2;
+  stroke-linecap: round; stroke-linejoin: round; }
+.sheet .saat-vorschau-hinweis { margin: 6px 0 0; font-size: 13px; }

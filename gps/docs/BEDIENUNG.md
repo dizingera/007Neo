@@ -410,6 +410,12 @@ Geraden. So ist auf Höllochweg die 406-m-Südostkante (2,9 m Stich) wählbar un
 gebogene stehen am Ende der Auswahl als „(Bogen, Stich x m)“ – vorgewählt wird nie ein Bogen.
 Die Vorschau hat eigene Farben (nicht die Kartenfarben): Grenze dunkel, Startkante kräftig
 blau mit Pfeilen und „A“ an der Startecke, „B“ an der Gegenseite, Vorgewende als getöntes Band.
+**Kante im Bild wählen (ab 1.5.70):** eine Feldkante im Vorschaubild antippen macht sie zur
+Startkante – gestartet wird an dem Ende, das näher am Finger liegt; dieselbe Kante nochmal
+antippen dreht die Richtung um (oder der Knopf **Richtung**). Der Plan wird gleich gerechnet.
+Mit der Maus leuchtet die Kante unter dem Zeiger auf. **↺ ↻** drehen das Bild um 90°, **Auto**
+legt die Startkante wieder waagrecht. Nach dem Antippen bleibt das Bild stehen, damit das
+zweite Antippen dieselbe Kante trifft.
 Weitere Eingaben: **Sämaschine** (z. B. 3 m), **Fahrgassenweite** (21 m) und
 **Säspuren am Rand vor der Fahrgasse** (3) – sie bleiben beim Feld gespeichert.
 

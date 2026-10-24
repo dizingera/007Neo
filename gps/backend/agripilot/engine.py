@@ -918,7 +918,7 @@ class Engine:
         optionen = saatplan_module.startkanten(grenze)
         return {
             "feld": feld["name"],
-            "optionen": [{k: o[k] for k in ("id", "text", "kante", "laenge_m", "von", "nach")} for o in optionen],
+            "optionen": [{k: o[k] for k in ("id", "text", "kante", "laenge_m", "von", "nach", "punkte")} for o in optionen],
             # Ohne eigene Vorgabe: an der längsten geraden Kante anfangen, wie beim Säen üblich.
             "vorgabe": gespeichert.get("vorgabe") or {"breite_m": breite, "fahrgasse_m": weite,
                                                        "randspuren": rand, "start": (optionen[0]["id"] if optionen else None)},
