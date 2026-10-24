@@ -1580,7 +1580,9 @@ berechnet, eine Arbeitsgrenze fällt weg. Geschlossen, ohne Selbstschnitt und mi
 100 m² muss sie auch dann sein.
 
 Der Entwurf muss ein geschlossenes, nicht selbstüberschneidendes Feld von
-mindestens 100 m² innerhalb der ursprünglichen Grenze ergeben. Ein ungültiger
+mindestens 100 m² innerhalb der ursprünglichen Grenze ergeben – bis 0,5 m darüber hinaus
+ist erlaubt (ab 1.5.72; eine abgefahrene Grenze hat Zacken von ein paar Zentimetern). Liegt
+er weiter draußen, sagt die Meldung wie weit und bei welchem Punkt. Ein ungültiger
 Entwurf bleibt mit verständlicher Meldung geöffnet. Die ursprüngliche Grenze
 wird nicht überschrieben. Die Arbeitsgrenze gilt für Vorgewende, Wendeprüfung,
 Teilbreiten, Saatplan und neue Randspuren und wird zwischen Geräten abgeglichen.
