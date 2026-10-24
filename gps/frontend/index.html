@@ -188,7 +188,14 @@
 <div class="sheet" id="sheet" role="dialog" aria-modal="true" aria-label="Menü" hidden>
   <div class="sheet-head">
     <div class="sheet-brand"><img src="icon-192.png" width="32" height="32" alt=""><span>AgriPilot</span></div>
-    <h2 class="sheet-titel" id="sheetTitel">Felder</h2>
+    <!-- Seitenkopf: Symbol und Titel der Seite, darunter in einer Zeile, was dort steht. -->
+    <div class="sheet-titelblock">
+      <span class="sheet-symbol" id="sheetSymbol" aria-hidden="true"></span>
+      <div class="sheet-titeltext">
+        <h2 class="sheet-titel" id="sheetTitel">Felder</h2>
+        <p class="sheet-untertitel" id="sheetUntertitel"></p>
+      </div>
+    </div>
     <!-- Suche über alle Seiten: Überschriften, Knöpfe, Einstellungen. Ein Treffer
          öffnet die Seite, klappt den Abschnitt auf und hebt die Stelle hervor. -->
     <div class="menue-suche">
@@ -203,20 +210,22 @@
          Maschine, und die Werkstatt. Auf schmalen Geräten wird daraus eine Zeile. -->
     <nav class="tabs" role="tablist" aria-label="Menü-Seiten" aria-orientation="vertical">
       <span class="tab-gruppe" aria-hidden="true">Im Feld</span>
-      <button data-tab="fields" class="tab active" role="tab" aria-selected="true"><span class="tab-name">Felder</span><small>Grenze, Shapefile, Luftbild</small></button>
-      <button data-tab="lines" class="tab" role="tab" aria-selected="false" tabindex="-1"><span class="tab-name">Spuren</span><small>AB, Kontur, Fahrgassen</small></button>
-      <button data-tab="jobs" class="tab" role="tab" aria-selected="false" tabindex="-1"><span class="tab-name">Arbeiten</span><small>Liste, Export, Löschen</small></button>
-      <button data-tab="maschinen" class="tab" role="tab" aria-selected="false" tabindex="-1"><span class="tab-name">Fernansicht</span><small>Wo die anderen fahren</small></button>
-      <button data-tab="saatplan" class="tab" role="tab" aria-selected="false" tabindex="-1"><span class="tab-name">Saatplan</span><small>Säspuren und Fahrgassen</small></button>
-      <button data-tab="headland" class="tab" role="tab" aria-selected="false" tabindex="-1"><span class="tab-name">Vorgewende &amp; Wende</span><small>Breite, Wendeart</small></button>
+      <button data-tab="fields" class="tab active" role="tab" aria-selected="true"><svg class="tab-symbol" viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 8.5L10 4l10.5 3.5-2 11.5L5 20z"/><path d="M8 13h9"/></svg><span class="tab-text"><span class="tab-name">Felder</span><small>Grenze, Shapefile, Luftbild</small></span></button>
+      <button data-tab="lines" class="tab" role="tab" aria-selected="false" tabindex="-1"><svg class="tab-symbol" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 21L9 3M12 21V3M18 21L15 3"/></svg><span class="tab-text"><span class="tab-name">Spuren</span><small>AB, Kontur, Fahrgassen</small></span></button>
+      <button data-tab="jobs" class="tab" role="tab" aria-selected="false" tabindex="-1"><svg class="tab-symbol" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 4V3h6v1M8.5 11.5l2 2 4.5-4.5M8.5 17h7"/></svg><span class="tab-text"><span class="tab-name">Arbeiten</span><small>Liste, Export, Löschen</small></span></button>
+      <button data-tab="maschinen" class="tab" role="tab" aria-selected="false" tabindex="-1"><svg class="tab-symbol" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4.5"/><path d="M12 12l5.5-5.5"/></svg><span class="tab-text"><span class="tab-name">Fernansicht</span><small>Wo die anderen fahren</small></span></button>
+      <button data-tab="saatplan" class="tab" role="tab" aria-selected="false" tabindex="-1"><svg class="tab-symbol" viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="1.5"/><path d="M9.3 4v16M14.7 4v16" stroke-dasharray="2.2 2.2"/><path d="M4 9h16"/></svg><span class="tab-text"><span class="tab-name">Saatplan</span><small>Säspuren und Fahrgassen</small></span></button>
+      <button data-tab="headland" class="tab" role="tab" aria-selected="false" tabindex="-1"><svg class="tab-symbol" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 20V10a5 5 0 0110 0v3"/><path d="M14 11l3 3 3-3"/></svg><span class="tab-text"><span class="tab-name">Vorgewende &amp; Wende</span><small>Breite, Wendeart</small></span></button>
       <span class="tab-gruppe" aria-hidden="true">Maschine</span>
-      <button data-tab="machine" class="tab" role="tab" aria-selected="false" tabindex="-1"><span class="tab-name">Traktor &amp; Gerät</span><small>Maße, Antenne, Teilbreiten</small></button>
-      <button data-tab="lenkung" class="tab" role="tab" aria-selected="false" tabindex="-1"><span class="tab-name">Lenkung</span><small>Live, Motortest, Mitte</small></button>
+      <button data-tab="machine" class="tab" role="tab" aria-selected="false" tabindex="-1"><svg class="tab-symbol" viewBox="0 0 24 24" aria-hidden="true"><circle cx="7.5" cy="16" r="3.5"/><circle cx="18" cy="17" r="2.5"/><path d="M5 12V6h6l2 5h5.5l1 3.5M10.5 6v5"/></svg><span class="tab-text"><span class="tab-name">Traktor &amp; Gerät</span><small>Maße, Antenne, Teilbreiten</small></span></button>
+      <button data-tab="lenkung" class="tab" role="tab" aria-selected="false" tabindex="-1"><svg class="tab-symbol" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="2.6"/><path d="M12 14.6V21M9.5 11.3L3.2 10.2M14.5 11.3l6.3-1.1"/></svg><span class="tab-text"><span class="tab-name">Lenkung</span><small>Live, Motortest, Mitte</small></span></button>
       <span class="tab-gruppe" aria-hidden="true">Werkstatt</span>
-      <button data-tab="settings" class="tab werkstatt" role="tab" aria-selected="false" tabindex="-1"><span class="tab-name">Einstellungen</span><small>Alle Werte, Kartenfarben</small></button>
-      <button data-tab="daten" class="tab werkstatt" role="tab" aria-selected="false" tabindex="-1"><span class="tab-name">Daten &amp; Geräte</span><small>Abgleich, Paket, Sicherung</small></button>
-      <button data-tab="system" class="tab werkstatt" role="tab" aria-selected="false" tabindex="-1"><span class="tab-name">System</span><small>Zustand, Update, Diagnose</small></button>
-      <button data-tab="setup" class="tab werkstatt" role="tab" aria-selected="false" tabindex="-1"><span class="tab-name">Einbau</span><small>Schritt für Schritt abhaken</small></button>
+      <button data-tab="settings" class="tab werkstatt" role="tab" aria-selected="false" tabindex="-1"><svg class="tab-symbol" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1"/><circle cx="15" cy="6" r="2"/><circle cx="9" cy="12" r="2"/><circle cx="17" cy="18" r="2"/></svg><span class="tab-text"><span class="tab-name">Einstellungen</span><small>Alle Werte, Kartenfarben</small></span></button>
+      <button data-tab="daten" class="tab werkstatt" role="tab" aria-selected="false" tabindex="-1"><svg class="tab-symbol" viewBox="0 0 24 24" aria-hidden="true"><path d="M19.5 10A8 8 0 006 6.2L4 8.5M4 4v4.5h4.5M4.5 14A8 8 0 0018 17.8l2-2.3M20 20v-4.5h-4.5"/></svg><span class="tab-text"><span class="tab-name">Daten &amp; Geräte</span><small>Abgleich, Paket, Sicherung</small></span></button>
+      <button data-tab="system" class="tab werkstatt" role="tab" aria-selected="false" tabindex="-1"><svg class="tab-symbol" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12h4l2.5-6 4.5 12 2.5-6H21"/></svg><span class="tab-text"><span class="tab-name">System</span><small>Zustand, Update, Diagnose</small></span></button>
+      <button data-tab="setup" class="tab werkstatt" role="tab" aria-selected="false" tabindex="-1"><svg class="tab-symbol" viewBox="0 0 24 24" aria-hidden="true"><path d="M14.6 3.6a4.5 4.5 0 00-5.4 6.1L3.6 15.3a1.9 1.9 0 002.7 2.7l5.6-5.6a4.5 4.5 0 006.1-5.4l-2.6 2.6-2.5-.4-.4-2.5z"/></svg><span class="tab-text"><span class="tab-name">Einbau</span><small>Schritt für Schritt abhaken</small></span></button>
+      <!-- Fuß der Leiste: welches Programm, welche Rolle - nur zum Nachsehen. -->
+      <div class="tabs-fuss" id="menueFuss" aria-hidden="true"></div>
     </nav>
     <div class="panels">
 
@@ -256,15 +265,15 @@
         Stelle.</p>
     </details>
     <!-- Wie bei Cerea: den Schlag auf der Karte antippen statt in der Liste suchen. -->
-    <div class="row feld-ansicht" role="group" aria-label="Felder zeigen als">
-      <button id="btnFelderListe" class="an" aria-pressed="true">Liste</button>
-      <button id="btnFelderKarte" aria-pressed="false">Karte</button>
+    <div class="feld-ansicht" role="group" aria-label="Felder zeigen als">
+      <button id="btnFelderListe" class="an" aria-pressed="true"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 6h12M8 12h12M8 18h12M4 6h.01M4 12h.01M4 18h.01"/></svg>Liste</button>
+      <button id="btnFelderKarte" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 4L3 6.5v13.5l6-2.5 6 2.5 6-2.5V4l-6 2.5z"/><path d="M9 4v13.5M15 6.5V20"/></svg>Karte</button>
     </div>
     <div class="feldkarte" id="feldkarteBox" hidden>
       <canvas id="feldkarte" aria-label="Karte aller Felder – ein Feld antippen wählt es aus"></canvas>
       <div class="feldkarte-knoepfe">
-        <button id="btnFeldkarteAlle" title="Alle Felder zeigen">Alle Felder</button>
-        <button id="btnFeldkarteHier" title="Auf den Traktor zentrieren">Traktor</button>
+        <button id="btnFeldkarteAlle" title="Alle Felder zeigen"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>Alle Felder</button>
+        <button id="btnFeldkarteHier" title="Auf den Traktor zentrieren"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="2"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg>Traktor</button>
       </div>
       <p class="note feldkarte-hinweis" id="feldkarteHinweis" role="status" aria-atomic="true"></p>
       <div class="feldkarte-wahl" id="feldkarteWahl" hidden>
@@ -349,6 +358,11 @@
     <div class="karten">
       <section class="karte">
         <h3>Vorgabe</h3>
+        <!-- Vorschau: der Schlag mit Startkante und Fahrtrichtung, nach dem Planen alle Spuren. -->
+        <figure class="saat-vorschau-rahmen">
+          <canvas id="saatplanVorschau" class="saat-vorschau" role="img" aria-label="Vorschau des Saatplans"></canvas>
+          <figcaption class="saat-legende" id="saatplanLegende"></figcaption>
+        </figure>
         <div class="formular" id="saatplanForm">
           <label class="breit">Startecke und Fahrtrichtung
             <select name="start" id="saatplanStart"></select>

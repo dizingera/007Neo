@@ -1653,8 +1653,30 @@ function touchDistance(event) {
 
 /* -------------------------------------------------------------- Menü */
 
+/* Seitenkopf: Zeichen, Titel und die Zeile darunter kommen vom gewählten Reiter. */
+function seitenkopf(tab) {
+  el('sheetTitel').textContent = tab.querySelector('.tab-name').textContent;
+  el('sheetUntertitel').textContent = (tab.querySelector('small') || {}).textContent || '';
+  const zeichen = tab.querySelector('.tab-symbol');
+  el('sheetSymbol').replaceChildren(...(zeichen ? [zeichen.cloneNode(true)] : []));
+  menueFuss();
+}
+
+/* Fuß der Leiste: Version und Rolle dieses Geräts. */
+function menueFuss() {
+  const system = state.live && state.live.system;
+  if (!system) return;
+  const rolle = system.role === 'master' ? 'Master' : 'Arbeiter';
+  el('menueFuss').innerHTML = '<b></b><br><span></span>';
+  el('menueFuss').querySelector('b').textContent = `AgriPilot ${system.version || ''}`;
+  el('menueFuss').querySelector('span').textContent =
+    `${rolle}${system.device_name ? ' · ' + system.device_name : ''}`;
+}
+
 function menueOeffnen() {
   el('sheet').hidden = false;
+  seitenkopf(document.querySelector('.tab.active'));
+  menueFuss();
   refreshLists();
   // Fokus ins Menü: wer mit der Tastatur bedient, landet beim aktiven Reiter.
   document.querySelector('.tab.active').focus({ preventScroll: true });
@@ -1693,7 +1715,7 @@ reiter.forEach((tab, index) => {
     document.querySelectorAll('.tab-panel').forEach((panel) => {
       panel.hidden = panel.dataset.panel !== tab.dataset.tab;
     });
-    el('sheetTitel').textContent = tab.querySelector('.tab-name').textContent;
+    seitenkopf(tab);
     // Auf schmalen Geräten scrollt die Leiste: den gewählten Reiter in Sicht holen.
     tab.scrollIntoView({ block: 'nearest', inline: 'nearest' });
     refreshLists();
@@ -2040,6 +2062,7 @@ async function renderSaatplan() {
   el('saatplanFeld').textContent = `Schlag: ${feld.name}`;
   const daten = await saatplanLaden(feld.id);
   if (!daten) { el('saatplanFeld').textContent = `${feld.name}: keine Grenze – erst umfahren oder Shapefile einlesen.`; return; }
+  saat.optionen = daten.optionen;
   const wahl = el('saatplanStart');
   wahl.innerHTML = '';
   daten.optionen.forEach((o) => {
@@ -2056,7 +2079,88 @@ async function renderSaatplan() {
   zeigeSaatplan(daten.plan);
 }
 
+/* Vorschau unter „Vorgabe“: der Schlag von oben, die gewählte Startkante mit Pfeil in
+ * Fahrtrichtung; ist geplant, dazu Vorgewende-Runden, Säspuren und Fahrgassen. Norden oben. */
+function saatVorschau() {
+  const leinwand = el('saatplanVorschau');
+  const feld = state.live && state.live.field;
+  const breite = leinwand.clientWidth, hoehe = leinwand.clientHeight;
+  if (!breite || !hoehe) return;
+  const k = window.devicePixelRatio || 1;
+  leinwand.width = breite * k; leinwand.height = hoehe * k;
+  const c = leinwand.getContext('2d');
+  c.setTransform(k, 0, 0, k, 0, 0);
+  c.clearRect(0, 0, breite, hoehe);
+  const grenze = feld && feld.boundary && feld.boundary.length >= 3 ? feld.boundary : null;
+  const legende = el('saatplanLegende');
+  if (!grenze) { legende.textContent = 'Kein Feld mit Grenze geladen.'; return; }
+  const xs = grenze.map((p) => p[0]), ys = grenze.map((p) => p[1]);
+  const rand = 22;
+  const massstab = Math.min((breite - 2 * rand) / Math.max(1, Math.max(...xs) - Math.min(...xs)),
+    (hoehe - 2 * rand) / Math.max(1, Math.max(...ys) - Math.min(...ys)));
+  const mx = (Math.max(...xs) + Math.min(...xs)) / 2, my = (Math.max(...ys) + Math.min(...ys)) / 2;
+  const px = (p) => [breite / 2 + (p[0] - mx) * massstab, hoehe / 2 - (p[1] - my) * massstab];
+  const zug = (punkte, zu) => {
+    c.beginPath();
+    punkte.forEach((p, i) => { const [x, y] = px(p); i ? c.lineTo(x, y) : c.moveTo(x, y); });
+    if (zu) c.closePath();
+  };
+  c.lineJoin = 'round'; c.lineCap = 'round';
+  zug(grenze, true);
+  c.fillStyle = 'rgba(72, 204, 119, 0.10)'; c.fill();
+  c.strokeStyle = F.grenze; c.lineWidth = 2.5; c.stroke();
+  const plan = saat.plan;
+  const teile = [['Grenze', F.grenze]];
+  if (plan) {
+    plan.ringe.forEach((r) => {
+      zug(r.punkte, true);
+      c.setLineDash(r.fahrgasse ? [6, 4] : []);
+      c.strokeStyle = r.fahrgasse ? F.fahrgasse : 'rgba(150, 165, 155, 0.55)';
+      c.lineWidth = r.fahrgasse ? 1.8 : 0.8; c.stroke();
+    });
+    c.setLineDash([]);
+    plan.spuren.forEach((s) => {
+      s.stuecke.forEach(([a, b]) => {
+        const [x0, y0] = px(a), [x1, y1] = px(b);
+        c.beginPath(); c.moveTo(x0, y0); c.lineTo(x1, y1);
+        c.strokeStyle = s.fahrgasse ? F.fahrgasse : s.von_b ? '#48cc77' : 'rgba(255, 176, 32, 0.75)';
+        c.lineWidth = s.fahrgasse ? 2.2 : 0.9; c.stroke();
+      });
+    });
+    teile.push(['Säspuren', 'rgba(255, 176, 32, 0.9)'], ['von B', '#48cc77'], ['Fahrgassen', F.fahrgasse],
+      ['Vorgewende', 'rgba(150, 165, 155, 0.9)']);
+  }
+  // Startkante und Richtung der ersten Spur.
+  const wahl = (saat.optionen || []).find((o) => o.id === el('saatplanStart').value);
+  if (wahl && wahl.von && wahl.nach) {
+    const [x0, y0] = px(wahl.von), [x1, y1] = px(wahl.nach);
+    c.beginPath(); c.moveTo(x0, y0); c.lineTo(x1, y1);
+    c.strokeStyle = '#4b9dff'; c.lineWidth = 5; c.stroke();
+    const l = Math.hypot(x1 - x0, y1 - y0) || 1, ux = (x1 - x0) / l, uy = (y1 - y0) / l;
+    const pl = Math.min(46, l * 0.45);
+    const sx = x0 + ux * pl, sy = y0 + uy * pl;
+    c.beginPath();
+    c.moveTo(sx + ux * 2, sy + uy * 2);
+    c.lineTo(sx - ux * 12 - uy * 8, sy - uy * 12 + ux * 8);
+    c.lineTo(sx - ux * 12 + uy * 8, sy - uy * 12 - ux * 8);
+    c.closePath(); c.fillStyle = '#4b9dff'; c.fill();
+    c.beginPath(); c.arc(x0, y0, 7, 0, Math.PI * 2);
+    c.fillStyle = '#fff'; c.fill(); c.lineWidth = 3; c.strokeStyle = '#4b9dff'; c.stroke();
+    teile.unshift(['Startkante', '#4b9dff']);
+  }
+  legende.replaceChildren(...teile.map(([text, farbe]) => {
+    const eintrag = document.createElement('span');
+    const strich = document.createElement('i');
+    strich.style.background = farbe;
+    eintrag.append(strich, text);
+    return eintrag;
+  }));
+}
+el('saatplanStart').addEventListener('change', saatVorschau);
+window.addEventListener('resize', () => { if (!el('saatplanVorschau').closest('[hidden]')) saatVorschau(); });
+
 function zeigeSaatplan(plan) {
+  saatVorschau();
   el('saatplanErgebnis').hidden = !plan;
   if (!plan) return;
   const zahl = (x) => Number(x).toLocaleString('de-DE');
@@ -3141,12 +3245,23 @@ function feldkarteZeichnen() {
   c.fillStyle = F.boden; c.fillRect(0, 0, breite, hoehe);
   const K = window.Feldkarte, a = feldkarte.ansicht, proj = feldkarte.proj;
   const px = (p) => K.nachBild(a, breite, hoehe, p);
-  Object.values(feldkarte.bilder).forEach(({ bild, box }) => {
-    if (!bild.complete || !bild.naturalWidth) return;
+  // Luftbilder: rundherum gedämpft, in den Feldern voll - so treten die Schläge hervor
+  // und die harten Bildkanten der einzelnen Ausschnitte fallen weniger auf.
+  const bilder = Object.values(feldkarte.bilder).filter(({ bild }) => bild.complete && bild.naturalWidth);
+  const bilderMalen = () => bilder.forEach(({ bild, box }) => {
     const [x0, y0] = px(proj.nachMetern([box[2], box[1]]));    // Nordwest
     const [x1, y1] = px(proj.nachMetern([box[0], box[3]]));    // Südost
     c.drawImage(bild, x0, y0, x1 - x0, y1 - y0);
   });
+  c.globalAlpha = 0.38; bilderMalen(); c.globalAlpha = 1;
+  if (bilder.length) {
+    c.save();
+    c.beginPath();
+    feldkarte.felder.forEach((f) => f.xy.forEach((p, i) => { const [x, y] = px(p); i ? c.lineTo(x, y) : c.moveTo(x, y); }));
+    c.clip('evenodd');
+    bilderMalen();
+    c.restore();
+  }
   c.lineJoin = 'round';
   feldkarte.felder.forEach((f) => {
     c.beginPath();
@@ -3161,16 +3276,19 @@ function feldkarteZeichnen() {
   });
   // Namen nur, wo das Feld groß genug für die Schrift ist. Zu klein für die Hand
   // (weit herausgezoomt): ein Punkt zum Antippen, wie eine Stecknadel.
-  c.font = '600 13px system-ui, sans-serif'; c.textAlign = 'center'; c.textBaseline = 'middle';
+  c.font = '600 13px "IBM Plex Sans", system-ui, sans-serif'; c.textAlign = 'center'; c.textBaseline = 'middle';
   // Namen, die sich überdecken würden, bleiben weg - das gewählte Feld zuerst, dann die großen.
   const belegt = [];
+  // Namen als Schildchen: ruhiger zu lesen als umrandete Schrift, auch auf hellem Luftbild.
   const beschriften = (text, x, y, farbe) => {
-    const w = c.measureText(text).width + 6, h = 16;
+    const w = c.measureText(text).width + 16, h = 22;
     const kasten = [x - w / 2, y - h / 2, x + w / 2, y + h / 2];
-    if (belegt.some((b) => kasten[0] < b[2] && kasten[2] > b[0] && kasten[1] < b[3] && kasten[3] > b[1])) return;
+    if (belegt.some((b) => kasten[0] < b[2] + 2 && kasten[2] > b[0] - 2 && kasten[1] < b[3] + 2 && kasten[3] > b[1] - 2)) return;
     belegt.push(kasten);
-    c.lineWidth = 4; c.strokeStyle = 'rgba(0,0,0,0.75)'; c.strokeText(text, x, y);
-    c.fillStyle = farbe; c.fillText(text, x, y);
+    c.beginPath();
+    if (c.roundRect) c.roundRect(kasten[0], kasten[1], w, h, h / 2); else c.rect(kasten[0], kasten[1], w, h);
+    c.fillStyle = farbe === '#ffd84a' ? 'rgba(255, 216, 74, 0.95)' : 'rgba(12, 20, 16, 0.82)'; c.fill();
+    c.fillStyle = farbe === '#ffd84a' ? '#1a1400' : '#fff'; c.fillText(text, x, y + 0.5);
   };
   const reihe = [...feldkarte.felder].sort((a, b) =>
     (b.id === feldkarte.wahl) - (a.id === feldkarte.wahl) || K.flaeche(b.xy) - K.flaeche(a.xy));
@@ -3181,8 +3299,10 @@ function feldkarteZeichnen() {
     if (Math.max(...xs) - Math.min(...xs) < FELDKARTE_PUNKT_PX) {
       c.beginPath(); c.arc(x, y, 7, 0, Math.PI * 2);
       c.fillStyle = f.id === feldkarte.wahl ? '#ffd84a' : f.id === feldkarte.geladen ? '#48cc77' : F.grenze;
-      c.fill(); c.lineWidth = 2; c.strokeStyle = 'rgba(0,0,0,0.7)'; c.stroke();
-      beschriften(name, x, y - 16, f.id === feldkarte.wahl ? '#ffd84a' : '#fff');
+      c.shadowColor = 'rgba(0,0,0,0.45)'; c.shadowBlur = 4; c.shadowOffsetY = 1;
+      c.fill(); c.shadowColor = 'transparent';
+      c.lineWidth = 2.5; c.strokeStyle = '#fff'; c.stroke();
+      beschriften(name, x, y - 20, f.id === feldkarte.wahl ? '#ffd84a' : '#fff');
       return;
     }
     if (Math.max(...xs) - Math.min(...xs) < c.measureText(name).width + 8) return;

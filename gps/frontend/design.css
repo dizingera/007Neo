@@ -346,3 +346,75 @@ body.tag { --f-flaeche: rgba(23, 140, 70, .38); --f-doppelt: rgba(200, 104, 12, 
   .sheet .menue-suche { order: 3; flex: 1 1 100%; }
   .sheet .tab small { display: none; }
 }
+/* ===== Menü 1.5.67: Leiste mit Symbolen, Seitenkopf, Saatplan-Vorschau, Feldkarte =====
+   Eine Leiste wie ein Instrument: Gruppen deutlich, jede Seite mit eigenem Zeichen,
+   der aktive Eintrag gefüllt. Alles auf Handschuhgröße (mind. 48 px). */
+.sheet .tabs { width: 272px; padding: 12px 12px 10px; gap: 1px; }
+.sheet .tab-gruppe { display: flex; align-items: center; gap: 10px; margin: 14px 8px 7px;
+  font-size: 13px; font-weight: 700; letter-spacing: .12em; line-height: 1;
+  color: color-mix(in srgb, var(--text) 66%, transparent); }
+.sheet .tab-gruppe::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+.sheet .tab-gruppe:first-child { margin-top: 4px; }
+.sheet .tab { flex-direction: row; align-items: center; justify-content: flex-start; gap: 12px;
+  min-height: 47px; padding: 5px 10px 5px 8px; border-radius: 12px; border: 1px solid transparent;
+  transition: background-color .15s ease-out, color .15s ease-out; }
+.sheet .tab .tab-symbol { flex: none; width: 32px; height: 32px; padding: 6px; border-radius: 9px;
+  fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round;
+  background: color-mix(in srgb, var(--text) 8%, transparent); color: color-mix(in srgb, var(--text) 85%, transparent); }
+.sheet .tab .tab-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.sheet .tab .tab-name { font-size: 15.5px; font-weight: 600; line-height: 1.2; }
+.sheet .tab small { font-size: 12.5px; line-height: 1.25; }
+.sheet .tab.active { background: var(--blue-solid); color: #fff; }
+.sheet .tab.active .tab-symbol { background: rgba(255, 255, 255, .2); color: #fff; }
+.sheet .tab.active small { color: rgba(255, 255, 255, .88); }
+.sheet .tabs-fuss { margin-top: auto; padding: 14px 8px 2px; border-top: 1px solid var(--line);
+  font-size: 12.5px; line-height: 1.4; color: var(--muted); }
+.sheet .tabs-fuss b { color: var(--text); font-weight: 600; }
+@media (max-height: 860px) { .sheet .tabs-fuss { display: none; } }
+
+/* Seitenkopf: Zeichen der Seite in Blau, Titel, eine Zeile Inhalt. */
+.sheet .sheet-titelblock { flex: 1; min-width: 0; display: flex; align-items: center; gap: 14px; }
+.sheet .sheet-titeltext { min-width: 0; }
+.sheet .sheet-symbol { flex: none; width: 44px; height: 44px; border-radius: 12px; display: grid; place-items: center;
+  background: color-mix(in srgb, var(--blue-solid) 18%, transparent); color: var(--blue-solid); }
+.sheet .sheet-symbol svg { width: 24px; height: 24px; fill: none; stroke: currentColor; stroke-width: 1.9;
+  stroke-linecap: round; stroke-linejoin: round; }
+.sheet .sheet-titel { flex: none; }
+.sheet .sheet-untertitel { margin: 2px 0 0; font-size: 14px; color: var(--muted); white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis; }
+.sheet .sheet-untertitel:empty { display: none; }
+
+/* Saatplan-Vorschau unter „Vorgabe“. */
+.sheet .saat-vorschau-rahmen { margin: 2px 0 18px; }
+.sheet .saat-vorschau { display: block; width: 100%; height: 250px; border-radius: 14px;
+  border: 1px solid var(--line); background: color-mix(in srgb, var(--panel-2) 70%, var(--f-boden, #1b221c)); }
+.sheet .saat-legende { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 8px; font-size: 13px; color: var(--muted); }
+.sheet .saat-legende span { display: inline-flex; align-items: center; gap: 6px; }
+.sheet .saat-legende i { width: 18px; height: 3px; border-radius: 2px; display: inline-block; }
+
+/* Feldkarte: ein Umschalter aus einem Stück, Karte und Bedienung rund. */
+.sheet .feld-ansicht { display: inline-flex; padding: 4px; gap: 4px; margin-bottom: 14px; border-radius: 14px;
+  background: color-mix(in srgb, var(--text) 7%, transparent); border: 1px solid var(--line); }
+.sheet .feld-ansicht button { display: inline-flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 18px;
+  border: 0; border-radius: 10px; background: transparent; color: var(--text); }
+.sheet .feld-ansicht button svg, .sheet .feldkarte-knoepfe svg { width: 18px; height: 18px; fill: none; stroke: currentColor;
+  stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.sheet .feld-ansicht button.an { background: var(--blue-solid); color: #fff; box-shadow: 0 1px 3px rgba(0, 0, 0, .25); }
+.sheet .feldkarte canvas { border-radius: 18px; border: 1px solid var(--line);
+  box-shadow: 0 6px 22px rgba(0, 0, 0, .22), inset 0 0 0 1px rgba(255, 255, 255, .03); }
+.sheet .feldkarte-knoepfe { top: 12px; right: 12px; gap: 8px; }
+.sheet .feldkarte-knoepfe button { display: inline-flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 14px;
+  border-radius: 12px; border: 1px solid color-mix(in srgb, var(--text) 18%, transparent);
+  background: color-mix(in srgb, var(--panel) 88%, transparent); box-shadow: 0 2px 8px rgba(0, 0, 0, .25); }
+.sheet .feldkarte-hinweis { top: 12px; left: 12px; border-radius: 999px; padding: 6px 12px; font-size: 13px;
+  background: color-mix(in srgb, var(--panel) 85%, transparent); border: 1px solid var(--line); }
+.sheet .feldkarte-wahl { border-radius: 16px; padding: 14px 16px; box-shadow: 0 4px 14px rgba(0, 0, 0, .18); }
+.sheet .feldkarte-text b { font-size: 17px; }
+
+@media (max-width: 760px) {
+  .sheet .tab .tab-symbol, .sheet .tabs-fuss, .sheet .tab small { display: none; }
+  .sheet .tab { min-height: 44px; padding: 0 14px; }
+  .sheet .sheet-symbol { display: none; }
+  .sheet .sheet-untertitel { display: none; }
+  .sheet .saat-vorschau { height: 200px; }
+}

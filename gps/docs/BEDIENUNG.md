@@ -1025,6 +1025,17 @@ regelt der Motor nicht nach.
 
 ## Das Menü
 
+**Neu aufgebaut ab 1.5.67:** links die Leiste mit drei Gruppen (Im Feld, Maschine,
+Werkstatt) – größere Überschriften, jede Seite mit eigenem Zeichen und einer Zeile, was
+darin steht; die gewählte Seite ist blau gefüllt. Oben steht neben dem Seitentitel
+dasselbe Zeichen und die Zeile darunter. Auf hohen Bildschirmen zeigt der Fuß der Leiste
+Version und Rolle (Master/Arbeiter). Im **Saatplan** zeigt unter *Vorgabe* ein
+**Vorschaubild** den Schlag mit der gewählten Startkante und einem Pfeil in Fahrtrichtung;
+nach dem Planen dazu alle Säspuren (bernstein), die Spuren von B (grün), die Fahrgassen
+(rot) und die Vorgewende-Runden – mit Legende. Ein anderes Startfeld in der Auswahl zeigt
+sich sofort im Bild. Die **Feldkarte** hat einen Umschalter aus einem Stück, runde Ecken,
+Namen als Schildchen und dämpft das Luftbild außerhalb der Felder.
+
 **Suchen (ab 1.5.59):** oben im Menü steht ein Suchfeld. Ein Wort genügt –
 *Teilbreiten*, *NTRIP*, *Mitte*, *Update*, *löschen*. Die Treffer zeigen, auf welcher
 Seite und in welchem Abschnitt etwas steht; ein Tipp öffnet die Seite, klappt den

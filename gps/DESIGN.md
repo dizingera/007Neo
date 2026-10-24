@@ -60,3 +60,14 @@ Tablet-Abgleich, die sofortige Lenkabschaltung bei ungültigem GPS-Fix, eine ern
 Stillstandsprüfung nach dem Online-Download und den Zugriffsschutz der externen
 Live-Verbindung. Gerätenamen werden ausschließlich als Text angezeigt.
 Prüfungen am echten Traktor und an noch nicht gewählter Teilbreitenhardware stehen aus.
+
+## Menü ab 1.5.67
+
+Leiste 272 px: Gruppenüberschriften 13 px fett, Versalien mit Haarlinie bis zum Rand;
+Einträge mindestens 47 px mit eigenem Linien-Symbol (24er Raster, Strich 1,8) in einer
+9-px-Kachel, Name 15,5 px, Inhaltszeile 12,5 px. Aktiv: blau gefüllt, Kachel weiß getönt.
+Fuß mit Version/Rolle nur ab 860 px Höhe – 1280×800 bleibt ohne Rollen. Seitenkopf:
+Symbol in blau getönter 44-px-Kachel, Titel, Inhaltszeile. Saatplan: Vorschaubild 250 px,
+14 px Radius, Norden oben, Startkante blau mit Pfeil, Legende darunter. Feldkarte: 18 px
+Radius, Segment-Umschalter, schwebende Knöpfe mit Symbol, Feldnamen als Schildchen,
+Luftbild außerhalb der Felder gedämpft. Unter 760 px: Reiterzeile ohne Symbole.
