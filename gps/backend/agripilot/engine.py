@@ -1250,23 +1250,42 @@ class Engine:
         self.grenze_abgleichen()
         return neu
 
-    def feldgrenze_speichern(self, feld_id, werte, geprueft):
-        """Die Feldgrenze selbst ändern (Editor: Rundung gerade ziehen).
+    GRENZ_VERLAUF = 10   # so viele frühere Feldgrenzen bleiben je Feld gesichert
 
-        Die bisherige Grenze bleibt unter ``grenze_vorher:<feld>`` gesichert. Die
-        Arbeitsgrenze fällt weg - sie bezog sich auf die alte Grenze. Fläche neu.
+    def feldgrenze_speichern(self, feld_id, werte, geprueft):
+        """Die bearbeitete Grenze wird die Feldgrenze (Editor: Gerade ziehen, Abrunden …).
+
+        Die bisherige wandert in den Verlauf (``grenze_verlauf:<feld>``, die letzten zehn) -
+        sichtbar ist sie nicht mehr, zurückholen lässt sie sich im Editor. Eine Arbeitsgrenze
+        fällt weg, die Fläche wird neu gerechnet, und ein gerechneter Saatplan wird verworfen
+        (seine Vorgaben bleiben): er gehörte zur alten Form.
         """
         feld = self.store.get_field(feld_id)
         if feld is None or feld["deleted"]: raise ValueError("Feld nicht gefunden")
         self._werkzeug_stillstand()
         if werte.get("stand") != feld["updated_at"]:
             raise RuntimeError("Die Feldgrenze wurde inzwischen geändert. Entwurf verwerfen und neu öffnen.")
-        self.store.set_setting(f"grenze_vorher:{feld_id}", {"zeit": time.time(), "boundary": feld["boundary"]})
+        verlauf = self.grenz_verlauf(feld_id)
+        verlauf.insert(0, {"zeit": time.time(), "boundary": feld["boundary"],
+                           "working_boundary": feld.get("working_boundary") or [],
+                           "area_ha": feld.get("area_ha", 0.0)})
+        self.store.set_setting(f"grenze_verlauf:{feld_id}", verlauf[:self.GRENZ_VERLAUF])
         neu = self.store.save_field({**feld, "boundary": [list(p) for p in geprueft], "working_boundary": [],
                                      "area_ha": round(geo.polygon_area([tuple(p) for p in geprueft]) / 10000.0, 4)})
-        self.note(f"Feldgrenze geändert: {feld['name']} ({neu['area_ha']:.2f} ha)")
+        plan = self.store.get_setting(f"saatplan:{feld_id}") or {}
+        if plan.get("plan"):
+            self.store.set_setting(f"saatplan:{feld_id}", {**plan, "plan": None})
+        self.note(f"Feldgrenze geändert: {feld['name']} ({neu['area_ha']:.2f} ha) – die alte ist gesichert")
         self.grenze_abgleichen()
         return neu
+
+    def grenz_verlauf(self, feld_id) -> list:
+        """Die früheren Feldgrenzen, die neueste zuerst (aus 1.5.71 auch ``grenze_vorher``)."""
+        verlauf = list(self.store.get_setting(f"grenze_verlauf:{feld_id}") or [])
+        vorher = self.store.get_setting(f"grenze_vorher:{feld_id}")
+        if vorher and not any(v.get("boundary") == vorher.get("boundary") for v in verlauf):
+            verlauf.append({"zeit": vorher.get("zeit", 0), "boundary": vorher["boundary"], "working_boundary": []})
+        return verlauf
 
     def grenze_abgleichen(self):
         if self.field is None: return

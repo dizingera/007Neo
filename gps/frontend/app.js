@@ -137,6 +137,12 @@ function onState(data) {
   const before = previous && previous.field ? previous.field.id : null;
   const now = data.field ? data.field.id : null;
   if (previous && before !== now) refreshLists();
+  // Neue Grenze desselben Feldes (Editor): der gerechnete Saatplan gehörte zur alten Form -
+  // neu laden, statt ihn auf der Karte weiter zu zeigen.
+  if (previous && before === now && now && JSON.stringify(previous.field.boundary) !== JSON.stringify(data.field.boundary)) {
+    saat.feld = null;
+    refreshLists();
+  }
   // Erstes Bild bei offenem Menü (Aufruf über #menu=…): die Listen wurden vor
   // dem Zustand gefüllt und wussten noch nichts vom geladenen Feld.
   if (!previous && !el('sheet').hidden) refreshLists();
@@ -2109,7 +2115,9 @@ function saatVorschau() {
   const leinwand = el('saatplanVorschau');
   const feld = state.live && state.live.field;
   const legende = el('saatplanLegende');
-  const grenze = feld && feld.boundary && feld.boundary.length >= 3 ? feld.boundary : null;
+  // Dieselbe Grenze, mit der geplant wird: eine Arbeitsgrenze geht vor.
+  const umriss = feld && (feld.working_boundary && feld.working_boundary.length >= 3 ? feld.working_boundary : feld.boundary);
+  const grenze = umriss && umriss.length >= 3 ? umriss : null;
   const breite = leinwand.clientWidth;
   if (!breite) return;
   if (!grenze) { leinwand.style.height = '120px'; legende.textContent = 'Kein Feld mit Grenze geladen.'; return; }
@@ -3127,7 +3135,7 @@ function renderFields(fields, lines) {
           if (offen) aufgeklappt.delete(field.id); else aufgeklappt.add(field.id);
           refreshLists();
         }],
-        ...(field.boundary.length >= 3 ? [['Arbeitsgrenze bearbeiten',()=>feldwerkzeuge.grenze(field)]] : []),
+        ...(field.boundary.length >= 3 ? [['Grenze bearbeiten',()=>feldwerkzeuge.grenze(field)]] : []),
         ...(field.boundary.length >= 3 ? [['Randspuren anlegen', async () => {
           const antwort = await api('POST', `/api/fields/${field.id}/randspuren`);
           if (antwort) {

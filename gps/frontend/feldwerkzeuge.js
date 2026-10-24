@@ -270,12 +270,26 @@
           ? `Ecke abgerundet – mit ${echt.toFixed(1).replace('.', ',')} m Radius, mehr lassen die Kanten nicht zu.`
           : `Ecke mit ${r.toLocaleString('de-DE')} m Radius abgerundet.`);
       };
+      // Frühere Grenze laden: jeder Druck holt den nächstälteren gesicherten Stand in den Entwurf.
+      el('fwVerlauf').onclick = async () => {
+        if (this.busy || !this.feld) return;
+        const r = await this.api('GET', `/api/fields/${this.feld.id}/grenzverlauf`);
+        const verlauf = (r.ok && r.data && r.data.verlauf) || [];
+        if (!verlauf.length) { this.status('Noch keine frühere Grenze gesichert.'); return; }
+        const stand = verlauf[this.verlaufStelle % verlauf.length];
+        this.entwurf.ersetzen(stand.working_boundary?.length ? stand.working_boundary : stand.boundary);
+        this.geaendert();
+        const wann = new Date(stand.zeit * 1000).toLocaleString('de-DE', { dateStyle: 'short', timeStyle: 'short' });
+        this.status(`Grenze vom ${wann} geladen (${this.verlaufStelle % verlauf.length + 1} von ${verlauf.length}) – `
+          + 'speichern übernimmt sie, nochmal drücken holt die davor.');
+        this.verlaufStelle++;
+      };
       el('fwZiel').onchange = () => {
         // Noch nichts bearbeitet und eine Arbeitsgrenze da: bei der Feldgrenze von ihr ausgehen.
         if (el('fwZiel').checked && !this.entwurf.verlauf.length && this.feld.working_boundary?.length)
           this.entwurf = new Grenzentwurf(this.feld.boundary);
         this.dirty = true;
-        el('fwSpeichern').textContent = el('fwZiel').checked ? 'Feldgrenze speichern' : 'Arbeitsgrenze speichern';
+        el('fwSpeichern').textContent = el('fwZiel').checked ? 'Als Feldgrenze übernehmen' : 'Arbeitsgrenze speichern';
         this.zeichnen();
       };
     }
@@ -296,8 +310,8 @@
       this.el('fwBeschreibung').textContent = beschreibung;
       this.el('fwGrenze').hidden = this.modus !== 'grenze';
       this.el('fwSpur').hidden = this.modus !== 'spur';
-      this.el('fwSpeichern').textContent =
-        this.modus === 'grenze' ? 'Arbeitsgrenze speichern' : 'Als neue Referenz speichern';
+      this.el('fwSpeichern').textContent = this.modus !== 'grenze' ? 'Als neue Referenz speichern'
+        : this.el('fwZiel').checked ? 'Als Feldgrenze übernehmen' : 'Arbeitsgrenze speichern';
       this.status('');
       if (!this.dialog.open) this.dialog.showModal();
       this.el('fwSchliessen').focus();
@@ -306,16 +320,17 @@
       this.folge++;
       this.modus = 'grenze';
       this.gerade = null;
-      this.el('fwZiel').checked = false;
-      this.el('fwSpeichern').textContent = 'Arbeitsgrenze speichern';
+      this.verlaufStelle = 0;
+      // Voreinstellung: die bearbeitete Grenze wird die Feldgrenze, die alte wird gesichert.
+      this.el('fwZiel').checked = true;
       this.feld = structuredClone(feld);
       this.entwurf = new Grenzentwurf(feld.working_boundary?.length ? feld.working_boundary : feld.boundary);
       this.rahmen(feld.boundary);
       this.luftbild = null;
       this.luftbildLaden(feld.id, this.folge);
       this.oeffnen(
-        'Arbeitsgrenze · ' + feld.name,
-        'Gestrichelt: ursprüngliche Feldgrenze. Durchgezogen: Arbeitsgrenze. Punkt auf der Karte oder in der Liste wählen und mit den Pfeilen verschieben. Die ursprüngliche Grenze bleibt gespeichert.',
+        'Feldgrenze bearbeiten · ' + feld.name,
+        'Gestrichelt: bisherige Feldgrenze. Durchgezogen: deine neue. Punkt antippen und verschieben, Rundungen gerade ziehen oder Ecken abrunden. Beim Übernehmen wird die alte im Hintergrund gesichert.',
       );
       this.zeichnen();
     }
@@ -527,8 +542,9 @@
         url = `/api/fields/${this.feld.id}/arbeitsgrenze`;
         const punkte = this.entwurf.punkte;
         const feldgrenze = this.el('fwZiel').checked;
-        if (feldgrenze && !confirm('Die Feldgrenze selbst ändern? Die bisherige wird gesichert; '
-          + 'Fläche, Vorgewende und neue Spuren richten sich danach.')) return;
+        if (feldgrenze && !confirm('Als neue Feldgrenze übernehmen? Die alte wird im Hintergrund gesichert '
+          + '(„Frühere Grenze laden“). Fläche, Vorgewende und Saatplan richten sich danach; ein schon '
+          + 'gerechneter Saatplan wird neu geplant.')) return;
         body = {
           stand: this.feld.updated_at,
           punkte: !feldgrenze && JSON.stringify(punkte) === JSON.stringify(this.feld.boundary) ? [] : kopie(punkte),

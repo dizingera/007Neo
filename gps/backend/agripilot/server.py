@@ -741,6 +741,13 @@ def create_app(config=None) -> FastAPI:
         application.simulator_ins_feld()
         return result
 
+    @api.get("/api/fields/{field_id}/grenzverlauf")
+    async def grenzverlauf(field_id: str) -> dict:
+        """Frühere Feldgrenzen zum Zurückholen im Editor, die neueste zuerst."""
+        if store.get_field(field_id) is None:
+            raise HTTPException(404, "Feld nicht gefunden")
+        return ok({"verlauf": engine.grenz_verlauf(field_id)})
+
     @api.post("/api/fields/{field_id}/arbeitsgrenze")
     async def arbeitsgrenze(field_id: str, payload: dict = Body(...)):
         feld=store.get_field(field_id)

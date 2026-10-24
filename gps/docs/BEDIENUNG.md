@@ -1551,9 +1551,16 @@ ist nur im Stillstand, ohne laufende Arbeit, Aufnahme, Wende oder Lenkfreigabe
 möglich. Eine zwischenzeitlich andere Spur oder ein geänderter Versatz wird
 abgewiesen. Das setzt weder das Erntejahr noch die Aussaatfestlegung zurück.
 
-### Arbeitsgrenze bearbeiten
+### Feldgrenze bearbeiten
 
-**Felder → Mehr → Arbeitsgrenze bearbeiten** öffnet die Punktbearbeitung. Die gestrichelte
+**Ab 1.5.74 wird die bearbeitete Grenze die Feldgrenze** (Häkchen „Als neue Feldgrenze übernehmen“
+ist voreingestellt). Die alte ist danach nicht mehr zu sehen, wird aber im Hintergrund gesichert
+(die letzten zehn Stände): **Frühere Grenze laden** holt sie in den Entwurf, jeder weitere Druck
+den Stand davor. Die Fläche wird neu berechnet; ein schon gerechneter Saatplan des Feldes wird
+verworfen (Startkante und Breiten bleiben) – beim nächsten Planen gilt die neue Grenze. Ohne
+das Häkchen wird wie früher nur eine Arbeitsgrenze gespeichert.
+
+**Felder → Mehr → Grenze bearbeiten** öffnet die Punktbearbeitung. Die gestrichelte
 Linie ist die ursprüngliche Feldgrenze; die durchgezogene Linie ist der Entwurf.
 Punkt in Karte oder Liste wählen, Schrittweite einstellen und mit den
 Richtungstasten versetzen. Alternativ Ost/Nord als lokale Meter eingeben.

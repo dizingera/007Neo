@@ -38,7 +38,9 @@ class FeldwerkzeugeAPI(unittest.TestCase):
         self.assertEqual(feld['boundary'],pts)
         self.assertEqual(feld['working_boundary'],[])
         self.assertAlmostEqual(feld['area_ha'],geo.polygon_area([tuple(p) for p in pts])/10000,places=4)
-        self.assertEqual(self.s.get_setting('grenze_vorher:'+self.f['id'])['boundary'],self.f['boundary'])
+        verlauf=self.c.get('/api/fields/'+self.f['id']+'/grenzverlauf').json()['data']['verlauf']
+        self.assertEqual(verlauf[0]['boundary'],self.f['boundary'])          # die alte ist gesichert
+        self.assertEqual(verlauf[0]['working_boundary'],[[5,5],[95,5],[95,95],[5,95]])
         self.assertEqual(self.e.state()['field']['boundary'],pts)
         # Selbstschnitt bleibt auch hier verboten, und ohne Punkte geht nichts.
         kaputt=[[0,0],[100,100],[0,100],[100,0]]
@@ -54,6 +56,20 @@ class FeldwerkzeugeAPI(unittest.TestCase):
         self.assertEqual(r.json()['data']['working_boundary'],weit)
         self.assertEqual(r.json()['data']['boundary'],self.f['boundary'])   # die Feldgrenze bleibt
 
+
+    def test_neue_feldgrenze_verwirft_den_alten_saatplan_und_der_verlauf_haelt_zehn(self):
+        self.s.set_setting('saatplan:'+self.f['id'],{'vorgabe':{'start':'0a','breite_m':3},'plan':{'spuren':[]}})
+        stand=self.f['updated_at']
+        for k in range(12):
+            pts=[[0,0],[100+k,0],[100,100],[0,100]]
+            r=self.c.post(self.url,json=dict(stand=stand,punkte=pts,ziel='feldgrenze'))
+            self.assertEqual(r.status_code,200,r.text); stand=r.json()['data']['updated_at']
+        gespeichert=self.s.get_setting('saatplan:'+self.f['id'])
+        self.assertIsNone(gespeichert['plan'])                                  # alte Form, neu planen
+        self.assertEqual(gespeichert['vorgabe']['start'],'0a')                  # Vorgaben bleiben
+        verlauf=self.c.get('/api/fields/'+self.f['id']+'/grenzverlauf').json()['data']['verlauf']
+        self.assertEqual(len(verlauf),10)
+        self.assertEqual(verlauf[0]['boundary'],[[0,0],[110,0],[100,100],[0,100]])   # der vorletzte Stand
 
     def test_ungueltiger_ring_veraendert_nichts(self):
         r=self.c.post(self.url,json=dict(stand=self.f['updated_at'],punkte=[[0,0],[100,100],[0,100],[100,0]]))
