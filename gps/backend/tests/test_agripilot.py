@@ -794,13 +794,31 @@ class SteeringTest(unittest.TestCase):
         self.assertFalse(command.engaged)
         self.assertFalse(self.controller.armed)      # bleibt aus, bis neu geschärft
 
-    def test_reversing_disarms(self):
+    def test_a_speed_spike_does_not_drop_the_steering_only_a_lasting_one_pauses_it(self):
+        self.controller.arm()
+        jetzt = time.time()
+        self.assertTrue(self.controller.update(self._guidance(), self._fix(), now=jetzt).engaged)
+        spitze = self._fix(speed=self.config.max_speed_ms + 3.0)
+        spitze.received_at = jetzt + 0.2
+        self.assertTrue(self.controller.update(self._guidance(), spitze, now=jetzt + 0.2).engaged)
+        spitze.received_at = jetzt + 1.3
+        command = self.controller.update(self._guidance(), spitze, now=jetzt + 1.3)
+        self.assertFalse(command.engaged)
+        self.assertEqual(command.reason, "zu schnell")
+        self.assertTrue(self.controller.armed)           # pausiert, nicht aus
+        normal = self._fix()
+        normal.received_at = jetzt + 1.5
+        self.assertTrue(self.controller.update(self._guidance(), normal, now=jetzt + 1.5).engaged)
+
+    def test_reversing_pauses_and_forward_steers_again(self):
         self.controller.arm()
         self.controller.rueckwaerts = True
         command = self.controller.update(self._guidance(), self._fix())
         self.assertFalse(command.engaged)
         self.assertIn("Rückwärts", command.reason)
-        self.assertFalse(self.controller.armed)
+        self.assertTrue(self.controller.armed)          # ab 1.5.80: pausiert, nicht aus
+        self.controller.rueckwaerts = False
+        self.assertTrue(self.controller.update(self._guidance(), self._fix()).engaged)
 
     def test_config_switch_beats_everything(self):
         self.config.enabled = False
@@ -1217,7 +1235,15 @@ class EngineTest(unittest.TestCase):
         self.engine.tick()
         self.assertTrue(steering.armed)
 
+        # Ab 1.5.80: nach einer Sekunde lenkt sie nicht mehr, bleibt aber scharf ...
         self.engine.fix.received_at = time.time() - 1.3
+        self.engine.tick()
+        self.assertFalse(steering.command.engaged)
+        self.assertTrue(steering.armed)
+        self.assertIn("keine GPS-Daten", steering.command.reason)
+
+        # ... und erst nach zehn Sekunden ohne Daten ist sie aus.
+        self.engine.fix.received_at = time.time() - 10.5
         self.engine.tick()
         self.assertFalse(steering.armed)
         self.assertIn("keine GPS-Daten", steering.command.reason)

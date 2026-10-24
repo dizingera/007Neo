@@ -126,8 +126,10 @@ class CereaIntegral:
             self.i_deg, self.i2_deg = self._gemerkt.get(richtung, (0.0, 0.0))
             self._richtung = richtung
         if not lenkt or tempo_ms < 0:
-            self.i_deg = self.i2_deg = 0.0
-            return 0.0
+            # Pausiert (zu langsam, kurz kein GPS ...): nichts aufsummieren, aber auch
+            # nichts vergessen - I2 hat den Dauerversatz der Spur gelernt, und der ist
+            # nach der Pause noch derselbe.
+            return self.summe
         dt = min(max(dt, 0.0), 0.5)
         if not auf_spur or abs(abweichung_m) > 1.0:
             abbau = math.exp(-dt / 2.0)            # in der Wende, weit weg: rasch vergessen

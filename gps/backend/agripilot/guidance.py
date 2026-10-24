@@ -970,10 +970,17 @@ class HeadingFilter:
     _letzter_kurs: Optional[float] = None
     _passt: float = 0.0                # gleitender Mittelwert: +1 gleiche, -1 gegenläufige Drehung
     _proben: int = 0
+    # Drehrichtung des Gyros: +1 = Rechtsdrehung positiv. Lernt das Filter selbst
+    # (_pruefe_vorzeichen); die Engine merkt sich das Ergebnis über den Neustart.
+    gier_vorzeichen: float = 1.0
+    gier_bestaetigt: bool = False
+    _gier_umgedreht: bool = False
 
     def update(self, course: Optional[float], true_heading: Optional[float],
                speed_ms: float, yaw_rate_deg_s: Optional[float] = None,
                dt: float = 0.0) -> Optional[float]:
+        if yaw_rate_deg_s is not None:
+            yaw_rate_deg_s *= self.gier_vorzeichen
         if true_heading is not None:
             self.value = true_heading
             self.rueckwaerts = False         # ein echter Kurs kennt keine Umkehr
@@ -1080,7 +1087,21 @@ class HeadingFilter:
         gleich = 1.0 if gyro * bewegung > 0 else -1.0
         self._proben += 1
         self._passt += 0.1 * (gleich - self._passt)
+        if self._proben >= 20 and self._passt > 0.3:
+            self.gier_bestaetigt = True
         if self._proben >= 20 and self._passt < -0.3:
+            if not self._gier_umgedreht:
+                # Tinkerforge zählt die Drehung um die Hochachse gegen den Uhrzeigersinn
+                # positiv (Rechte-Hand-Regel), AgriPilot im Uhrzeigersinn wie den Kurs;
+                # kopfüber eingebaut dreht es sich nochmals um. Statt den Sensor dann
+                # abzuschalten, wird das Vorzeichen einmal umgedreht und neu geprüft.
+                self.gier_vorzeichen = -self.gier_vorzeichen
+                self._gier_umgedreht = True
+                self.gier_bestaetigt = False
+                self._proben, self._passt, self.bias_deg_s = 0, 0.0, 0.0
+                self.warnung = ("Drehrate des Neigungssensors lief gegen die Fahrtrichtung - "
+                                "Vorzeichen umgedreht (Einbaurichtung). Wird neu geprüft.")
+                return
             self.fusion_aktiv = False
             self.warnung = ("Drehrate und Fahrtrichtung laufen gegeneinander - "
                             "Vorzeichen des Neigungssensors prüfen (Einbaurichtung). "
@@ -1129,7 +1150,11 @@ class HeadingFilter:
         self._letzter_kurs = None
         self._passt = 0.0
         self._proben = 0
+        # Das gelernte Vorzeichen bleibt (Einbaulage ändert sich nicht); geprüft wird neu.
+        self.gier_bestaetigt = False
+        self._gier_umgedreht = False
 
     def status(self) -> dict:
         return {"gekoppelt": self.fusion_aktiv, "rueckwaerts": self.rueckwaerts, "gyro_fehler_deg_s": round(self.bias_deg_s, 3),
-                "warnung": self.warnung}
+                "warnung": self.warnung, "gier_vorzeichen": self.gier_vorzeichen,
+                "gier_bestaetigt": self.gier_bestaetigt}

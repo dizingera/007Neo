@@ -54,11 +54,13 @@ class Gesamtpruefung144(unittest.TestCase):
                 self.assertTrue(e.steering.command.engaged)
                 e.turn=object()
                 e.on_fix(Fix(lat=48,lon=11,course_deg=0,speed_ms=2,fix_quality=0,received_at=now+.1))
-                self.assertFalse(e.steering.command.engaged);self.assertFalse(e.steering.armed)
+                # Ab 1.5.80 pausiert ein ungültiger Fix nur: sofort kein Lenken, scharf bleibt sie.
+                self.assertFalse(e.steering.command.engaged);self.assertTrue(e.steering.armed)
+                self.assertIn('ungültig',e.steering.command.reason)
                 self.assertIsNone(e.turn);self.assertEqual(e.state()['fix']['fix_quality'],0)
                 self.assertIsNone(e.implement_position)
                 e.on_fix(Fix(lat=48,lon=11,course_deg=0,speed_ms=2,fix_quality=4,received_at=now+.2))
-                self.assertFalse(e.steering.armed)
+                self.assertTrue(e.steering.armed)
             finally:s.close()
 
     def test_online_update_prueft_fahrt_und_lenkung_nach_download_erneut(self):

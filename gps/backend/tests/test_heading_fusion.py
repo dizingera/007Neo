@@ -50,11 +50,23 @@ class FusionTests(unittest.TestCase):
         fehler = fahre(HeadingFilter(), 0.0, 600, bias=1.0)
         self.assertLess(abs(fehler), 0.3)
 
-    def test_wrong_gyro_sign_switches_fusion_off_and_warns(self):
+    def test_a_gyro_counting_the_other_way_is_turned_round_and_used(self):
+        # Tinkerforge zählt gegen den Uhrzeigersinn positiv: ab 1.5.80 wird das
+        # Vorzeichen gelernt statt die Kopplung abzuschalten.
         filt = HeadingFilter()
         fehler = fahre(filt, 12.0, 400, gyro_vorzeichen=-1.0)
+        self.assertTrue(filt.fusion_aktiv)
+        self.assertEqual(filt.gier_vorzeichen, -1.0)
+        self.assertTrue(filt.gier_bestaetigt)
+        self.assertIn("umgedreht", filt.warnung)
+        self.assertLess(abs(fehler), 0.5)
+
+    def test_a_gyro_that_contradicts_both_ways_is_switched_off(self):
+        filt = HeadingFilter()
+        fahre(filt, 12.0, 400, gyro_vorzeichen=-1.0)      # lernt -1
+        fehler = fahre(filt, 12.0, 400, gyro_vorzeichen=1.0)  # und dann wieder andersherum
         self.assertFalse(filt.fusion_aktiv)
-        self.assertIn("Vorzeichen", filt.warnung)
+        self.assertIn("prüfen", filt.warnung)
         # Danach gilt wieder der Kurs allein: nur noch der Nachlauf der Glättung.
         self.assertLess(abs(fehler), 4.0)
 
@@ -157,6 +169,7 @@ class ReviewFixTests(unittest.TestCase):
     def test_slow_branch_ignores_a_gyro_that_failed_the_sign_check(self):
         filt = HeadingFilter()
         fahre(filt, 12.0, 400, gyro_vorzeichen=-1.0)
+        fahre(filt, 12.0, 400, gyro_vorzeichen=1.0)
         self.assertFalse(filt.fusion_aktiv)
         vorher = filt.value
         filt.update(None, None, 0.1, yaw_rate_deg_s=30.0, dt=0.5)

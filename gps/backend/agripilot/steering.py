@@ -50,6 +50,14 @@ class SteerCommand:
 GEWOLLTE_GRUENDE = frozenset({"vom Fahrer ausgeschaltet", "zu langsam", "keine Spur aktiv",
                               "Rückwärtsfahrt", "System wird beendet", "nicht scharf", "Aktualisierung"})
 
+# Pausieren statt Rausfliegen (Andy, 24.10.2026: „einmal bin ich zu schnell, dann zu
+# langsam, dann das … ich möchte nicht immer rausfliegen“). Wie bei Cerea bleibt die
+# Lenkung bei allem, was von selbst vorbeigeht, scharf und greift danach wieder:
+# Tempo außerhalb des Fensters, kurz kein RTK/GPS, ein Ausreißer, zu weit neben der
+# Spur, Rückwärtsfahrt. Ganz aus - neu scharf schalten - nur, wenn der Fahrer
+# eingreift oder ausschaltet, der Lenkausgang gestört ist oder das GPS länger weg ist.
+TEMPO_ENTPRELLUNG_S = 1.0   # so lange darf das Tempo kurz aus dem Fenster springen (GPS-Rauschen)
+
 
 def tempo_grenze_deg(tempo_ms: float, radstand_m: float, max_quer_ms2: float) -> Optional[float]:
     """Größter Einschlag (Grad), der bei diesem Tempo höchstens ``max_quer_ms2`` Querbeschleunigung
@@ -85,6 +93,7 @@ class SteeringController:
         self.disengage_count = 0
         self._last_angle = 0.0
         self._last_angle_at = 0.0
+        self._tempo_aus_seit: Optional[float] = None
 
     # -- Bedienung durch den Fahrer ---------------------------------------
 
@@ -112,6 +121,16 @@ class SteeringController:
                 self.abgaben += 1
         self.armed = False
         self.command = SteerCommand(reason=reason)
+        self.output.command(False, 0.0, SteerContext())
+
+    def pausieren(self, reason: str) -> None:
+        """Jetzt nicht lenken, aber scharf bleiben: geht es wieder, lenkt sie von selbst."""
+        if self.command.engaged:
+            self.disengage_count += 1
+            if reason not in GEWOLLTE_GRUENDE:
+                self.abgaben += 1
+        self.command = SteerCommand(reason=reason if self.armed else self.command.reason)
+        self._last_angle, self._last_angle_at = 0.0, 0.0
         self.output.command(False, 0.0, SteerContext())
 
     # -- Hauptschleife ----------------------------------------------------
@@ -187,9 +206,9 @@ class SteeringController:
             return "Fahrer hat eingegriffen"
         if self.rueckwaerts:
             # Die Regelung ist für Vorwärtsfahrt gerechnet: rückwärts kehrt sich
-            # die Wirkung des Einschlags um. Wie beim Eingriff des Fahrers bleibt
-            # sie aus, bis neu geschärft wird.
-            self.armed = False
+            # die Wirkung des Einschlags um - also nicht lenken. Seit 1.5.80 bleibt
+            # sie dabei scharf: vorwärts, nah an der Spur und im Tempofenster greift
+            # sie wieder (vorher musste nach jedem Zurücksetzen neu geschärft werden).
             return "Rückwärtsfahrt"
         if not guidance.active:
             return "keine Spur aktiv"
@@ -200,10 +219,18 @@ class SteeringController:
             return f"GPS-Daten veraltet ({age:.1f} s)"
         if cfg.require_rtk and fix.rank < 4 and not self.rtk_ueberbrueckt:
             return f"RTK nötig, aktuell: {fix.fix_label}"
-        if fix.speed_ms < cfg.min_speed_ms:
-            return "zu langsam"
-        if fix.speed_ms > cfg.max_speed_ms:
-            return "zu schnell"
+        tempo = ("zu langsam" if fix.speed_ms < cfg.min_speed_ms
+                 else "zu schnell" if fix.speed_ms > cfg.max_speed_ms else None)
+        if tempo is None:
+            self._tempo_aus_seit = None
+        else:
+            # Ein Tempo-Sprung im GPS (Ausreißer, Schlupf) soll nicht abschalten:
+            # erst, wenn es eine Sekunde lang außerhalb bleibt. Wer nicht lenkt,
+            # fängt gar nicht erst an.
+            if self._tempo_aus_seit is None:
+                self._tempo_aus_seit = now
+            if not self.command.engaged or now - self._tempo_aus_seit >= TEMPO_ENTPRELLUNG_S:
+                return tempo
         if abs(guidance.cross_track_m) > cfg.max_cross_track_m:
             return f"zu weit von der Spur ({guidance.cross_track_m:.2f} m)"
         return None

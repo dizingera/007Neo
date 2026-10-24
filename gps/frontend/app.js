@@ -376,7 +376,10 @@ function updateHud(s) {
     lenkText('aktiv', 'aktiv · tippen schaltet ab');
   } else if (steering.armed) {
     steer.classList.add('scharf'); steer.setAttribute('aria-checked', 'true');
-    lenkText(`scharf · ${steering.command.reason}`, `scharf · ${steering.command.reason}`);
+    // Scharf, lenkt aber gerade nicht: sie wartet und greift von selbst wieder.
+    const warten = steering.command.reason && steering.command.reason !== 'nicht scharf';
+    lenkText(warten ? `wartet · ${steering.command.reason}` : 'scharf',
+      warten ? `wartet · ${steering.command.reason} · greift von selbst wieder` : 'scharf');
   } else {
     steer.setAttribute('aria-checked', 'false');
     lenkText('aus', 'aus · tippen schaltet scharf');
@@ -3061,6 +3064,19 @@ el('btnLevel').onclick = async () => {
   const result = await api('POST', '/api/imu/level');
   if (result) toast('Neigungssensor genullt');
 };
+el('btnImuM1').onclick = async () => {
+  const r = await api('POST', '/api/imu/kalibrieren/m1');
+  if (r) el('imuKalibInfo').textContent = `M1: ${r.data.roll_deg.toLocaleString('de-DE')}° quer – jetzt auf derselben Stelle um 180° wenden, dann M2.`;
+};
+el('btnImuM2').onclick = async () => {
+  const r = await api('POST', '/api/imu/kalibrieren/m2');
+  if (r) {
+    const zahl = (x) => Number(x).toLocaleString('de-DE', { maximumFractionDigits: 1 });
+    el('imuKalibInfo').textContent = `Kalibriert: Montagefehler ${zahl(r.data.roll_offset)}° quer, ` +
+      `Boden hier ${zahl(r.data.boden_quer_deg)}° geneigt.`;
+    toast('Neigungssensor kalibriert');
+  }
+};
 el('compensation').onchange = (event) =>
   api('POST', '/api/imu/compensation', { enabled: event.target.checked });
 
@@ -3960,6 +3976,8 @@ function renderSystem() {
   const imu = state.live.imu;
   el('imuRow').hidden = !imu;
   el('imuNote').hidden = !imu;
+  el('imuKalibRow').hidden = !imu;
+  el('imuKalibNote').hidden = !imu;
   if (imu) el('compensation').checked = !!imu.compensation;
 
   const steering = state.live.steering;

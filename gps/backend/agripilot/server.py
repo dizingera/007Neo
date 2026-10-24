@@ -1201,6 +1201,24 @@ def create_app(config=None) -> FastAPI:
         engine.note("Neigungssensor genullt")
         return ok(result)
 
+    @api.post("/api/imu/kalibrieren/{schritt}")
+    async def imu_kalibrieren(schritt: str):
+        """Wie bei Cerea: M1 messen, Traktor auf derselben Stelle um 180° wenden, M2.
+        Geht auch auf schiefem Boden - der Montagefehler ist der Mittelwert."""
+        if application.imu is None:
+            raise HTTPException(400, "Kein Neigungssensor eingerichtet")
+        if schritt == "m1":
+            return guard(application.imu.messpunkt_m1)
+        if schritt != "m2":
+            raise HTTPException(404, "Schritt m1 oder m2")
+        def fertig():
+            result = application.imu.messpunkt_m2()
+            store.set_setting("imu_offsets", {"roll_offset": result["roll_offset"],
+                                              "pitch_offset": result["pitch_offset"]})
+            engine.note(f"Neigungssensor kalibriert (M1/M2): Boden quer {result['boden_quer_deg']:+.1f}°")
+            return result
+        return guard(fertig)
+
     @api.post("/api/imu/compensation")
     async def set_compensation(payload: dict = Body(...)):
         config.imu.terrain_compensation = bool(payload.get("enabled", True))

@@ -1,5 +1,50 @@
 # Bedienung im Feld
 
+## Nicht mehr rausfliegen, IMU-Drehrichtung, Neigung kalibrieren (ab 1.5.80)
+
+Andy, 24.10.2026: „Es wird auch sehr oft die Lenkung ausgeschaltet, einmal bin ich
+zu schnell, dann zu langsam, dann das … ich möchte nicht immer rausfliegen.“
+
+**Wartet statt aus.** Wie bei Cerea bleibt die Lenkung bei allem, was von selbst
+vorbeigeht, scharf und **greift danach von selbst wieder**. Der Knopf zeigt dann
+„wartet · Grund“:
+
+| Grund | bisher | ab 1.5.80 |
+|---|---|---|
+| zu langsam / zu schnell | Pause, aber Alarm | Pause; ein Tempo-Sprung unter 1 s zählt gar nicht; „zu langsam“ ganz ohne Ton |
+| kein GPS-Fix, GPS-Ausreißer im Positionsfilter | **aus**, neu scharf schalten | Pause |
+| keine GPS-Daten | nach 1 s **aus** | Pause, erst nach 10 s aus |
+| Rückwärtsfahrt | **aus** | Pause, vorwärts greift sie wieder |
+| zu weit von der Spur, kein RTK | Pause, aber Alarm | Pause, kurzer Ton „Lenkung wartet“ |
+
+**Ganz aus** (neu scharf schalten) nur noch, wenn der Fahrer eingreift oder
+ausschaltet, der Lenkausgang gestört ist, eine Wende abbricht oder das GPS länger
+als 10 s weg ist. Greift sie nach einer Pause wieder, sagt sie „Lenkung wieder an“.
+Beim Cerea-Regler bleiben I und I2 in der Pause stehen statt auf null zu fallen.
+
+**Neigungssensor (IMU) geprüft:**
+
+* **Drehrichtung der Drehrate:** Tinkerforge zählt die Drehung um die Hochachse
+  gegen den Uhrzeigersinn positiv, AgriPilot im Uhrzeigersinn. Bisher hat der
+  Kursfilter das erkannt und den Gyro dann ganz abgeschaltet. Bis dahin, und am
+  Vorgewende im Schritttempo, drehte der Kurs in die falsche Richtung. Jetzt wird
+  das Vorzeichen **einmal umgedreht und gemerkt** (auch über den Neustart); erst
+  wenn es auch andersherum nicht passt, wird der Gyro abgeschaltet. Auch die
+  Lenkmotor-Rückmeldung „Drehrate“ bekommt das richtige Vorzeichen.
+* **Hangausgleich und Hang-Vorsteuerung** nehmen dieselbe Richtung (+ = rechts
+  tiefer) – das passt zusammen; geprüft wird es wie bisher mit *roll_sign*.
+* **Neu: Kalibrieren wie bei Cerea** (Lenkung → Am Stand → Neigungssensor):
+  **M1 messen**, Traktor so wenden, dass er auf **derselben Stelle** in
+  Gegenrichtung steht, **M2 messen**. Der Montagefehler ist der Mittelwert, der
+  Boden muss nicht eben sein. Angezeigt wird auch, wie schief der Boden dort war.
+* **Nicht geprüft:** das Vorzeichen der **Längsneigung** (pitch) beim
+  Hangausgleich längs. Es verschiebt nur entlang der Spur (Teilbreiten,
+  Vorgewende), nicht quer. Am Hang längs prüfen, ob die Markierung vorn/hinten
+  stimmt.
+
+Nicht am Traktor geprüft. Im Simulator: anhalten → „wartet · zu langsam“, losfahren
+→ lenkt wieder, ohne neu scharf zu schalten.
+
 ## Lenkregler wie bei Cerea (ab 1.5.79)
 
 Andy, 24.10.2026: „Er schwankt immer um die 30 cm hin und her, schau bei Cerea wie

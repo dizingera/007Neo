@@ -81,3 +81,21 @@ test('every warning has something to say; lane and RTK return are only spoken', 
   assert.strictEqual(nachId.vorgewende.ansage, 'Vorgewende in 20 Metern');
   e.forEach((x) => assert.ok(x.ansage, x.id));
 });
+
+const wartet = (grund) => ({ steering: { armed: true, command: { engaged: false, reason: grund } },
+                             fix: { rank: 4, fix_label: 'RTK fix' } });
+test('Lenkung pausiert nur (bleibt scharf): kein Alarm, kurzer Hinweis', () => {
+  const e = ereignisse(lenkt, wartet('zu schnell'));
+  assert.strictEqual(e.length, 1);
+  assert.strictEqual(e[0].stufe, 'info');
+  assert.match(e[0].text, /wartet/);
+});
+test('Langsam am Vorgewende: still, auch beim Wiedergreifen', () => {
+  assert.deepStrictEqual(ereignisse(lenkt, wartet('zu langsam')), []);
+  assert.deepStrictEqual(ereignisse(wartet('zu langsam'), lenkt), []);
+});
+test('Nach einer Pause greift sie wieder: nur angesagt', () => {
+  const e = ereignisse(wartet('keine GPS-Daten'), lenkt);
+  assert.strictEqual(e.length, 1);
+  assert.strictEqual(e[0].stufe, 'still');
+});

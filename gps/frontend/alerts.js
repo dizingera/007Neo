@@ -23,7 +23,14 @@
     if (vorSteuer && vorSteuer.command && vorSteuer.command.engaged &&
         jetztSteuer && jetztSteuer.command && !jetztSteuer.command.engaged) {
       const grund = jetztSteuer.command.reason || '';
-      if (grund !== 'vom Fahrer ausgeschaltet') {
+      if (jetztSteuer.armed) {
+        // Nur pausiert (ab 1.5.80): sie greift von selbst wieder. Kein Alarm -
+        // ein kurzer Ton mit Grund; langsam am Vorgewende ist gewollt und bleibt still.
+        if (grund !== 'zu langsam') {
+          liste.push({ id: 'lenkung-pause', stufe: 'info', text: `Lenkung wartet: ${grund}`,
+            ansage: `Lenkung wartet. ${grund}` });
+        }
+      } else if (grund !== 'vom Fahrer ausgeschaltet') {
         liste.push({
           id: 'lenkung-aus',
           stufe: grund === 'Fahrer hat eingegriffen' ? 'info'
@@ -32,6 +39,12 @@
           ansage: `Lenkung aus. ${grund}`,
         });
       }
+    }
+    // Nach einer Pause greift sie wieder: nur angesagt (am Vorgewende nach dem Wenden still).
+    if (vorSteuer && vorSteuer.armed && vorSteuer.command && !vorSteuer.command.engaged &&
+        vorSteuer.command.reason && vorSteuer.command.reason !== 'zu langsam' &&
+        jetztSteuer && jetztSteuer.command && jetztSteuer.command.engaged) {
+      liste.push({ id: 'lenkung-wieder', stufe: 'still', text: 'Lenkung lenkt wieder', ansage: 'Lenkung wieder an' });
     }
 
     // Fix schlechter als RTK-fix, während es auf Genauigkeit ankommt.

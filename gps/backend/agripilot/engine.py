@@ -75,6 +75,10 @@ FELDER_NEU_LADEN_S = 30.0
 # Dauerlauf zeigte: mit zwei Sekunden stand die Anzeige noch doppelt so lange
 # auf "lenkt", obwohl keine neue Position mehr kam.
 GPS_STILLSTAND_S = 1.0
+# So lange wartet die Lenkung ohne GPS-Daten scharf (pausiert); erst danach ist sie aus
+# und muss neu scharf geschaltet werden. Ein kurzer Hänger der Schnittstelle soll den
+# Fahrer nicht aus der Lenkung werfen.
+GPS_ABGABE_S = 10.0
 
 SESSION_KEY = "session"
 CHECKPOINT_S = 30.0
@@ -104,6 +108,10 @@ class Engine:
             self.profile.width_m, self.profile.sections
         )
         self.heading_filter = HeadingFilter()
+        # Gelerntes Vorzeichen der Drehrate (Einbaulage des Neigungssensors) - über den Neustart.
+        self._gier_gemerkt = self.store.get_setting("imu_gier_vorzeichen")
+        if self._gier_gemerkt in (-1, -1.0):
+            self.heading_filter.gier_vorzeichen = -1.0
 
         self.field: Optional[dict] = None
         self.plane: Optional[geo.LocalPlane] = None
@@ -1963,7 +1971,7 @@ class Engine:
             self._last_update_at = None
             self.tool_position = None
             self.implement_position = None
-            if self.steering is not None:self.steering.disarm("GNSS-Position ungültig")
+            if self.steering is not None:self.steering.pausieren("GNSS-Position ungültig")
             if self.turn is not None:self.turn = None
             if self.teilbreiten is not None:self.teilbreiten.wunsch(0,min(32,len(self.sections)))
             return
@@ -2001,6 +2009,10 @@ class Engine:
         if warnung and warnung != self._kurs_warnung:
             self._kurs_warnung = warnung
             self.note(warnung)
+        if (self.heading_filter.gier_bestaetigt
+                and self._gier_gemerkt != self.heading_filter.gier_vorzeichen):
+            self._gier_gemerkt = self.heading_filter.gier_vorzeichen
+            self.store.set_setting("imu_gier_vorzeichen", self._gier_gemerkt)
         if heading is None:
             return
 
@@ -2012,7 +2024,7 @@ class Engine:
                 self.config.gnss.kalman_acceleration_ms2)
             if not self.positionsfilter.akzeptiert:
                 if self.teilbreiten is not None:self.teilbreiten.wunsch(0,min(32,len(self.sections)))
-                if self.steering is not None:self.steering.disarm("GNSS-Ausreißer im Positionsfilter")
+                if self.steering is not None:self.steering.pausieren("GNSS-Ausreißer im Positionsfilter")
                 return  # keine Fläche oder Lenkbefehle aus verworfenen Messungen
         else:
             self.positionsfilter.reset()
@@ -2372,7 +2384,7 @@ class Engine:
         context = SteerContext(
             speed_ms=fix.speed_ms,
             wheelbase_m=self.profile.wheelbase_m,
-            yaw_rate_deg_s=(attitude.yaw_rate_deg_s
+            yaw_rate_deg_s=(attitude.yaw_rate_deg_s * self.heading_filter.gier_vorzeichen
                             if attitude and attitude.fresh else None),
             cross_track_m=self.guidance.cross_track_m,
         )
@@ -2464,9 +2476,11 @@ class Engine:
             self.stop_turn("keine GPS-Daten")
         if self.steering is None or not self.steering.armed:
             return
-        if age > GPS_STILLSTAND_S:
+        if age > GPS_ABGABE_S:
             self.steering.disarm("keine GPS-Daten mehr")
-            self.note("Lenkung abgeschaltet: keine GPS-Daten")
+            self.note(f"Lenkung abgeschaltet: {GPS_ABGABE_S:.0f} s keine GPS-Daten")
+        elif age > GPS_STILLSTAND_S and self.steering.command.reason != "keine GPS-Daten":
+            self.steering.pausieren("keine GPS-Daten")
 
     # -- output -----------------------------------------------------------
 

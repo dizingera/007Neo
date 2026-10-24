@@ -839,6 +839,14 @@
     </div>
     <p class="note" id="imuNote" hidden>Zum Nullen auf ebenem Boden stehen – ein Grad
       Montagefehler sind bei 3 m Antennenhöhe schon 5 cm Dauerversatz.</p>
+    <div class="row" id="imuKalibRow" hidden>
+      <button id="btnImuM1">M1 messen</button>
+      <button id="btnImuM2">M2 messen (nach 180° wenden)</button>
+      <span class="note" id="imuKalibInfo" role="status"></span>
+    </div>
+    <p class="note" id="imuKalibNote" hidden>Ohne ebenen Boden, wie bei Cerea: M1 messen, den
+      Traktor so wenden, dass er auf <b>derselben Stelle</b> in Gegenrichtung steht, M2 messen.
+      Der Montagefehler ist der Mittelwert beider Messungen.</p>
     <div class="row" id="motorTestRow" hidden>
       <button id="btnMotorLinks">◀ Motor links</button>
       <button id="btnMotorRechts">Motor rechts ▶</button>

@@ -91,6 +91,37 @@ class ImuSource:
         self.pitch_offset += self.attitude.pitch_deg
         return {"roll_offset": self.roll_offset, "pitch_offset": self.pitch_offset}
 
+    # -- Kalibrieren wie bei Cerea: M1, um 180° wenden, M2 --------------------
+    # Nullen braucht ebenen Boden, den es im Hof selten gibt. Steht der Traktor
+    # einmal so und einmal um 180° gedreht auf derselben Stelle, kehrt sich die
+    # Neigung des Bodens um, der Montagefehler des Sensors nicht: Der Mittelwert
+    # beider Messungen ist der Montagefehler, die halbe Differenz die Bodenneigung.
+
+    def roh(self) -> tuple[float, float]:
+        """Lage, wie der Sensor sie misst - ohne die gemerkte Nullung."""
+        return (self.attitude.roll_deg + self.roll_offset,
+                self.attitude.pitch_deg + self.pitch_offset)
+
+    def messpunkt_m1(self) -> dict:
+        if not self.attitude.fresh:
+            raise RuntimeError("Der Neigungssensor liefert gerade nichts")
+        self._m1 = self.roh()
+        return {"roll_deg": round(self._m1[0], 2), "pitch_deg": round(self._m1[1], 2)}
+
+    def messpunkt_m2(self) -> dict:
+        m1 = getattr(self, "_m1", None)
+        if m1 is None:
+            raise RuntimeError("Erst M1 messen, dann den Traktor auf derselben Stelle um 180° wenden")
+        if not self.attitude.fresh:
+            raise RuntimeError("Der Neigungssensor liefert gerade nichts")
+        m2 = self.roh()
+        self.roll_offset = (m1[0] + m2[0]) / 2.0
+        self.pitch_offset = (m1[1] + m2[1]) / 2.0
+        self._m1 = None
+        return {"roll_offset": self.roll_offset, "pitch_offset": self.pitch_offset,
+                "boden_quer_deg": round((m1[0] - m2[0]) / 2.0, 2),
+                "boden_laengs_deg": round((m1[1] - m2[1]) / 2.0, 2)}
+
     def _publish(self, roll: float, pitch: float, yaw: Optional[float],
                  yaw_rate: float, calibration: int = 3) -> None:
         self.attitude = Attitude(
