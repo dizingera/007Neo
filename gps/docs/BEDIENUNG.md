@@ -1,5 +1,47 @@
 # Bedienung im Feld
 
+## Lenkregler wie bei Cerea (ab 1.5.79)
+
+Andy, 24.10.2026: „Er schwankt immer um die 30 cm hin und her, schau bei Cerea wie
+der das macht.“ Dazu ein Foto seines Cerea-Dialogs (Lenkaggressivität 100,
+Auffahraggressivität 100, L 0,10, I 0,09, I2 0,06, D 0,45), die
+„Grundsätze Cerea 300.40“ und das englische Handbuch 300.40.
+
+**Neue Seite: Menü → Lenkregler.** Dieselben sechs Werte wie in Cerea, groß mit
+− und +, die beiden Aggressivitäten zusätzlich als Schieber. **OK** schaltet beim
+gewählten Traktor die Regelart **Cerea** ein; **Zurück zu Stanley** wieder aus.
+Oben live: Abweichung, Tempo, wie weit voraus der angepeilte Punkt liegt, und
+was I + I2 gerade gegenlenken. Grundwerte = Andys Cerea-Werte.
+
+**Wie er lenkt:** Er peilt einen **Punkt auf der Spur voraus** an. Abstand =
+L ab der Antenne (mindestens ein Radstand ab Hinterachse) + 1,2 s Fahrweg geteilt
+durch die Lenkaggressivität + 2 × Abweichung geteilt durch die
+Auffahraggressivität. **D** dämpft wie ein Stoßdämpfer, **I** nimmt Versatz am
+Hang weg (vergisst nach rund 10 s), **I2** das Driften parallel zur Spur
+(vergisst nicht). Der Dauerversatz-Ausgleich der anderen Regelarten ist dabei aus.
+
+**Warum das ruhiger ist:** Stanley lenkt auf die Hinterachse und ist bei 7 km/h
+nur schwach gedämpft. Mit einem trägen Lenkmotor schaukelt er sich auf.
+Simulator, Motor mit 1 s Trägheit, 0,6 s Totzeit, 6 °/s, 7,2 km/h, Spur um 50 cm
+versetzt:
+
+| | Überschwingen | unter 10 cm nach | danach |
+|---|---|---|---|
+| Stanley | 21 cm | über 45 s | pendelt weiter ±17 cm |
+| Cerea | 13 cm | 20 s | ±6 cm (davon 5 cm GPS-Rauschen) |
+
+**Einstellen (wie in Cerea):** Schaukelt er sich bei Tempo auf →
+Lenkaggressivität runter (80, 60). Lenkt er neben der Spur zu stark ein →
+Auffahraggressivität runter. Schwingt er über die Spur → D höher (0,1–0,5,
+hinter dem Grubber bis 0,7). Bleibt er daneben → I (0,05–0,2), für langsames
+Driften I2 (0,02–0,10, höchstens halb so viel wie I). L nach Tempo: 7 km/h 0,2 ·
+10 km/h 0,3 · 15 km/h 0,4 · 20 km/h 0,5.
+
+Der **Lenk-Assistent** dreht bei dieser Regelart nur die Lenkaggressivität (pendelt
+→ ×0,85, zu träge → ×1,15, 30–200) und schaltet die Regelart nie um.
+
+**Nicht am Traktor geprüft.** Im Simulator und am Traktormodell gemessen.
+
 ## Schnellerer Lenkmotor: Feinabstimmung verlangt Tempo (ab 1.5.78)
 
 Andy, 24.10.2026: „Der Motor muss noch viel schneller reagieren.“ Gebremst haben
