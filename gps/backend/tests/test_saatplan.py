@@ -165,8 +165,14 @@ class FastGeradeKanten(unittest.TestCase):
         self.assertTrue(optionen[0]['id'].startswith('k'))
         self.assertAlmostEqual(optionen[0]['laenge_m'], 400.0)
 
-    def test_a_real_bend_stays_out(self):
-        self.assertFalse(any('Süd' in o['kante'] and '400' in o['kante'] for o in saatplan.startkanten(self.grenze(12.0))))
+    def test_a_real_bend_is_offered_last_and_never_preselected(self):
+        optionen = saatplan.startkanten(self.grenze(12.0))
+        boegen = [o for o in optionen if o['bogen']]
+        self.assertEqual([o['id'] for o in boegen], ['k0a', 'k0b'])
+        self.assertIn('(Bogen, Stich 12 m)', boegen[0]['text'])
+        self.assertEqual(optionen[-2:], boegen)                 # ganz hinten
+        self.assertFalse(optionen[0]['bogen'])                   # vorgewählt ist eine Gerade
+        self.assertFalse(any(o.get('laengste') for o in boegen))
 
     def test_ids_of_straight_edges_do_not_move(self):
         # Mit und ohne den fast geraden Bogen: die geraden Kanten behalten ihre Kennung.

@@ -2098,97 +2098,117 @@ async function renderSaatplan() {
   zeigeSaatplan(daten.plan);
 }
 
-/* Vorschau unter „Vorgabe“: der Schlag von oben, die gewählte Startkante mit Pfeil in
- * Fahrtrichtung; ist geplant, dazu Vorgewende-Runden, Säspuren und Fahrgassen. Gedreht, bis
- * die Startkante waagrecht liegt und die lange Seite die Breite füllt - ein langer, schmaler
- * Schlag war mit Norden oben nur ein Strich. Ein Nordpfeil zeigt die Lage. */
+/* Vorschau unter „Vorgabe“: der Schlag von oben, gedreht bis die Startkante waagrecht liegt
+ * und die lange Seite die Breite füllt. Eigene, feste Farben - nicht die Kartenfarben: war die
+ * Grenze dort blau, verschwand die blaue Startkante darin (24.10.2026). Die Startecke trägt
+ * ein „A“, die Gegenseite ein „B“; das Vorgewende ist ein getöntes Band. */
+const VORSCHAU = { start: '#1f6fff', a: 'rgba(214, 140, 20, 0.9)', b: '#2fae63', gasse: '#e5484d',
+                   band: 'rgba(255, 176, 32, 0.16)', feld: 'rgba(72, 204, 119, 0.12)' };
+
 function saatVorschau() {
   const leinwand = el('saatplanVorschau');
   const feld = state.live && state.live.field;
-  const breite = leinwand.clientWidth, hoehe = leinwand.clientHeight;
-  if (!breite || !hoehe) return;
-  const k = window.devicePixelRatio || 1;
-  leinwand.width = breite * k; leinwand.height = hoehe * k;
-  const c = leinwand.getContext('2d');
-  c.setTransform(k, 0, 0, k, 0, 0);
-  c.clearRect(0, 0, breite, hoehe);
-  const grenze = feld && feld.boundary && feld.boundary.length >= 3 ? feld.boundary : null;
   const legende = el('saatplanLegende');
-  if (!grenze) { legende.textContent = 'Kein Feld mit Grenze geladen.'; return; }
+  const grenze = feld && feld.boundary && feld.boundary.length >= 3 ? feld.boundary : null;
+  const breite = leinwand.clientWidth;
+  if (!breite) return;
+  if (!grenze) { leinwand.style.height = '120px'; legende.textContent = 'Kein Feld mit Grenze geladen.'; return; }
   const wahl = (saat.optionen || []).find((o) => o.id === el('saatplanStart').value);
-  // Drehwinkel: die Startkante waagrecht; liegt das Feld dann hochkant, eine Vierteldrehung dazu.
-  let winkel = wahl && wahl.von && wahl.nach ? Math.atan2(wahl.nach[1] - wahl.von[1], wahl.nach[0] - wahl.von[0]) : 0;
   const drehen = (p, w) => [p[0] * Math.cos(w) + p[1] * Math.sin(w), -p[0] * Math.sin(w) + p[1] * Math.cos(w)];
   const ausdehnung = (w) => {
     const q = grenze.map((p) => drehen(p, w));
     return [Math.max(...q.map((p) => p[0])) - Math.min(...q.map((p) => p[0])),
       Math.max(...q.map((p) => p[1])) - Math.min(...q.map((p) => p[1]))];
   };
-  const [w0, h0] = ausdehnung(winkel);
-  if (h0 > w0 * (hoehe / breite) * 1.15) winkel += Math.PI / 2;
+  // Startkante waagrecht; liegt der Schlag dann hochkant, eine Vierteldrehung dazu.
+  let winkel = wahl && wahl.von && wahl.nach ? Math.atan2(wahl.nach[1] - wahl.von[1], wahl.nach[0] - wahl.von[0]) : 0;
+  let [w0, h0] = ausdehnung(winkel);
+  if (h0 > w0) { winkel += Math.PI / 2; [w0, h0] = [h0, w0]; }
+  // Die Höhe folgt der Form: ein langer Schlag bekommt kein leeres Feld darüber und darunter.
+  const rand = 26;
+  const hoehe = Math.round(Math.max(170, Math.min(320, (breite - 2 * rand) * (h0 / Math.max(1, w0)) + 2 * rand)));
+  leinwand.style.height = `${hoehe}px`;
+  const k = window.devicePixelRatio || 1;
+  leinwand.width = breite * k; leinwand.height = hoehe * k;
+  const c = leinwand.getContext('2d');
+  c.setTransform(k, 0, 0, k, 0, 0);
+  c.clearRect(0, 0, breite, hoehe);
   const gedreht = grenze.map((p) => drehen(p, winkel));
   const xs = gedreht.map((p) => p[0]), ys = gedreht.map((p) => p[1]);
-  const rand = 22;
-  const massstab = Math.min((breite - 2 * rand) / Math.max(1, Math.max(...xs) - Math.min(...xs)),
-    (hoehe - 2 * rand) / Math.max(1, Math.max(...ys) - Math.min(...ys)));
+  const massstab = Math.min((breite - 2 * rand) / Math.max(1, w0), (hoehe - 2 * rand) / Math.max(1, h0));
   const mx = (Math.max(...xs) + Math.min(...xs)) / 2, my = (Math.max(...ys) + Math.min(...ys)) / 2;
   const px = (p) => { const [u, v] = drehen(p, winkel); return [breite / 2 + (u - mx) * massstab, hoehe / 2 - (v - my) * massstab]; };
-  const zug = (punkte, zu) => {
-    c.beginPath();
+  const pfad = (punkte, zu) => {
     punkte.forEach((p, i) => { const [x, y] = px(p); i ? c.lineTo(x, y) : c.moveTo(x, y); });
     if (zu) c.closePath();
   };
+  const tinte = getComputedStyle(document.body).getPropertyValue('--text').trim() || '#e8efe9';
   c.lineJoin = 'round'; c.lineCap = 'round';
-  zug(grenze, true);
-  c.fillStyle = 'rgba(72, 204, 119, 0.10)'; c.fill();
-  c.strokeStyle = F.grenze; c.lineWidth = 2.5; c.stroke();
+  c.beginPath(); pfad(grenze, true); c.fillStyle = VORSCHAU.feld; c.fill();
   const plan = saat.plan;
-  const teile = [['Grenze', F.grenze]];
+  const teile = [];
   if (plan) {
-    plan.ringe.forEach((r) => {
-      zug(r.punkte, true);
-      c.setLineDash(r.fahrgasse ? [6, 4] : []);
-      c.strokeStyle = r.fahrgasse ? F.fahrgasse : 'rgba(150, 165, 155, 0.55)';
-      c.lineWidth = r.fahrgasse ? 1.8 : 0.8; c.stroke();
+    // Vorgewende als Band: zwischen Grenze und innerster Runde getönt.
+    const innerste = Math.max(0, ...plan.ringe.map((r) => r.runde));
+    c.beginPath(); pfad(grenze, true);
+    plan.ringe.filter((r) => r.runde === innerste).forEach((r) => pfad(r.punkte, true));
+    c.fillStyle = VORSCHAU.band; c.fill('evenodd');
+    plan.ringe.filter((r) => r.fahrgasse).forEach((r) => {
+      c.beginPath(); pfad(r.punkte, true);
+      c.setLineDash([6, 4]); c.strokeStyle = VORSCHAU.gasse; c.lineWidth = 1.6; c.stroke(); c.setLineDash([]);
     });
-    c.setLineDash([]);
-    plan.spuren.forEach((s) => {
-      s.stuecke.forEach(([a, b]) => {
-        const [x0, y0] = px(a), [x1, y1] = px(b);
-        c.beginPath(); c.moveTo(x0, y0); c.lineTo(x1, y1);
-        c.strokeStyle = s.fahrgasse ? F.fahrgasse : s.von_b ? '#48cc77' : 'rgba(255, 176, 32, 0.75)';
-        c.lineWidth = s.fahrgasse ? 2.2 : 0.9; c.stroke();
-      });
-    });
-    teile.push(['Säspuren', 'rgba(255, 176, 32, 0.9)'], ['von B', '#48cc77'], ['Fahrgassen', F.fahrgasse],
-      ['Vorgewende', 'rgba(150, 165, 155, 0.9)']);
+    plan.spuren.forEach((sp) => sp.stuecke.forEach(([p0, p1]) => {
+      const [x0, y0] = px(p0), [x1, y1] = px(p1);
+      c.beginPath(); c.moveTo(x0, y0); c.lineTo(x1, y1);
+      c.strokeStyle = sp.fahrgasse ? VORSCHAU.gasse : sp.von_b ? VORSCHAU.b : VORSCHAU.a;
+      c.lineWidth = sp.fahrgasse ? 2.2 : 1; c.stroke();
+    }));
+    teile.push(['Säspuren', VORSCHAU.a], ['Fahrgassen', VORSCHAU.gasse]);
+    if (plan.spuren.some((sp) => sp.von_b)) teile.push(['von B', VORSCHAU.b]);
+    teile.push(['Vorgewende', 'rgba(255, 176, 32, 0.55)']);
   }
-  // Nordpfeil oben links: zeigt, wohin Norden nach dem Drehen liegt.
-  const [nx, ny] = drehen([0, 1], winkel);
-  const schrift = getComputedStyle(document.body).getPropertyValue('--text').trim() || '#e8efe9';
-  c.save(); c.translate(22, 20); c.rotate(Math.atan2(nx, ny));
-  c.beginPath(); c.moveTo(0, -11); c.lineTo(6, 7); c.lineTo(0, 3); c.lineTo(-6, 7); c.closePath();
-  c.fillStyle = schrift; c.globalAlpha = 0.85; c.fill(); c.globalAlpha = 1;
-  c.restore();
-  c.font = '700 11px "IBM Plex Sans", sans-serif'; c.textAlign = 'center'; c.textBaseline = 'middle';
-  c.fillStyle = schrift; c.fillText('N', 22, 40);
-  // Startkante und Richtung der ersten Spur.
+  c.beginPath(); pfad(grenze, true);
+  c.strokeStyle = tinte; c.globalAlpha = 0.8; c.lineWidth = 2; c.stroke(); c.globalAlpha = 1;
+  teile.unshift(['Grenze', tinte]);
+  const marke = (x, y, text, farbe) => {
+    c.beginPath(); c.arc(x, y, 11, 0, Math.PI * 2);
+    c.fillStyle = farbe; c.fill(); c.lineWidth = 2.5; c.strokeStyle = '#fff'; c.stroke();
+    c.font = '700 12px "IBM Plex Sans", sans-serif'; c.textAlign = 'center'; c.textBaseline = 'middle';
+    c.fillStyle = '#fff'; c.fillText(text, x, y + 0.5);
+  };
+  if (plan && plan.fuellstreifen && plan.fuellstreifen.punkte && plan.fuellstreifen.punkte.length >= 2) {
+    const q = plan.fuellstreifen.punkte;
+    const [x, y] = px([(q[0][0] + q[q.length - 1][0]) / 2, (q[0][1] + q[q.length - 1][1]) / 2]);
+    marke(x, y, 'B', VORSCHAU.b);
+  }
+  // Startkante: hell unterlegt, kräftig blau, Pfeile in Fahrtrichtung, „A“ an der Startecke.
   if (wahl && wahl.von && wahl.nach) {
     const [x0, y0] = px(wahl.von), [x1, y1] = px(wahl.nach);
     c.beginPath(); c.moveTo(x0, y0); c.lineTo(x1, y1);
-    c.strokeStyle = '#4b9dff'; c.lineWidth = 5; c.stroke();
+    c.strokeStyle = 'rgba(255, 255, 255, 0.9)'; c.lineWidth = 9; c.stroke();
+    c.strokeStyle = VORSCHAU.start; c.lineWidth = 5; c.stroke();
     const l = Math.hypot(x1 - x0, y1 - y0) || 1, ux = (x1 - x0) / l, uy = (y1 - y0) / l;
-    const pl = Math.min(46, l * 0.45);
-    const sx = x0 + ux * pl, sy = y0 + uy * pl;
-    c.beginPath();
-    c.moveTo(sx + ux * 2, sy + uy * 2);
-    c.lineTo(sx - ux * 12 - uy * 8, sy - uy * 12 + ux * 8);
-    c.lineTo(sx - ux * 12 + uy * 8, sy - uy * 12 - ux * 8);
-    c.closePath(); c.fillStyle = '#4b9dff'; c.fill();
-    c.beginPath(); c.arc(x0, y0, 7, 0, Math.PI * 2);
-    c.fillStyle = '#fff'; c.fill(); c.lineWidth = 3; c.strokeStyle = '#4b9dff'; c.stroke();
-    teile.unshift(['Startkante', '#4b9dff']);
+    for (let t = 34; t < l - 14; t += 46) {
+      const sx = x0 + ux * t, sy = y0 + uy * t;
+      c.beginPath();
+      c.moveTo(sx - ux * 4 - uy * 4, sy - uy * 4 + ux * 4); c.lineTo(sx + ux * 2, sy + uy * 2);
+      c.lineTo(sx - ux * 4 + uy * 4, sy - uy * 4 - ux * 4);
+      c.strokeStyle = '#fff'; c.lineWidth = 2; c.stroke();
+    }
+    marke(x0, y0, 'A', VORSCHAU.start);
+    teile.unshift(['Startkante', VORSCHAU.start]);
   }
+  // Nordpfeil unten rechts in einem kleinen Kreis - dort liegt selten eine Kante.
+  const [nx, ny] = drehen([0, 1], winkel);
+  c.save(); c.translate(breite - 20, hoehe - 20);
+  c.beginPath(); c.arc(0, 0, 14, 0, Math.PI * 2);
+  c.fillStyle = 'rgba(0, 0, 0, 0.18)'; c.fill();
+  c.rotate(Math.atan2(nx, ny));
+  c.beginPath(); c.moveTo(0, -10); c.lineTo(5, 4); c.lineTo(0, 1); c.lineTo(-5, 4); c.closePath();
+  c.fillStyle = VORSCHAU.gasse; c.fill();
+  c.restore();
+  c.font = '700 10px "IBM Plex Sans", sans-serif'; c.textAlign = 'center'; c.textBaseline = 'middle';
+  c.fillStyle = tinte; c.fillText('N', breite - 42, hoehe - 20);
   legende.replaceChildren(...teile.map(([text, farbe]) => {
     const eintrag = document.createElement('span');
     const strich = document.createElement('i');

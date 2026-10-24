@@ -406,6 +406,10 @@ Kante“) – an ihr fängt man beim Säen an. **Fast gerade Bögen zählen mit*
 weicht eine „Kurve“ höchstens 1,5 m oder 1 % ihrer Länge von der Geraden zwischen ihren
 Enden ab, steht sie als „(fast gerade)“ in der Auswahl; gesät wird parallel zu dieser
 Geraden. So ist auf Höllochweg die 406-m-Südostkante (2,9 m Stich) wählbar und vorgewählt.
+**Ab 1.5.69 ist jede Kante ab 20 m wählbar:** „fast gerade“ gilt bis 3 m oder 2 % Stich; stärker
+gebogene stehen am Ende der Auswahl als „(Bogen, Stich x m)“ – vorgewählt wird nie ein Bogen.
+Die Vorschau hat eigene Farben (nicht die Kartenfarben): Grenze dunkel, Startkante kräftig
+blau mit Pfeilen und „A“ an der Startecke, „B“ an der Gegenseite, Vorgewende als getöntes Band.
 Weitere Eingaben: **Sämaschine** (z. B. 3 m), **Fahrgassenweite** (21 m) und
 **Säspuren am Rand vor der Fahrgasse** (3) – sie bleiben beim Feld gespeichert.
 
