@@ -27,6 +27,26 @@ class FeldwerkzeugeAPI(unittest.TestCase):
         self.assertEqual(self.c.post(self.url,json=dict(stand=self.f['updated_at'],punkte=[])).status_code,409)
         self.assertEqual(self.c.post(self.url,json=dict(stand=neu['updated_at'],punkte=[])).status_code,200)
         self.assertEqual(self.s.get_field(self.f['id'])['boundary'],self.f['boundary'])
+    def test_feldgrenze_selbst_aendern_darf_ueber_die_alte_hinaus_und_sichert_sie(self):
+        # Erst eine Arbeitsgrenze - sie fällt mit der neuen Feldgrenze weg.
+        neu=self.c.post(self.url,json=dict(stand=self.f['updated_at'],punkte=[[5,5],[95,5],[95,95],[5,95]])).json()['data']
+        # Die Südostecke 5 m nach außen gezogen: als Arbeitsgrenze verboten, als Feldgrenze erlaubt.
+        pts=[[0,0],[105,-5],[100,100],[0,100]]
+        self.assertEqual(self.c.post(self.url,json=dict(stand=neu['updated_at'],punkte=pts)).status_code,400)
+        r=self.c.post(self.url,json=dict(stand=neu['updated_at'],punkte=pts,ziel='feldgrenze'))
+        self.assertEqual(r.status_code,200,r.text)
+        feld=r.json()['data']
+        self.assertEqual(feld['boundary'],pts)
+        self.assertEqual(feld['working_boundary'],[])
+        self.assertAlmostEqual(feld['area_ha'],geo.polygon_area([tuple(p) for p in pts])/10000,places=4)
+        self.assertEqual(self.s.get_setting('grenze_vorher:'+self.f['id'])['boundary'],self.f['boundary'])
+        self.assertEqual(self.e.state()['field']['boundary'],pts)
+        # Selbstschnitt bleibt auch hier verboten, und ohne Punkte geht nichts.
+        kaputt=[[0,0],[100,100],[0,100],[100,0]]
+        self.assertEqual(self.c.post(self.url,json=dict(stand=feld['updated_at'],punkte=kaputt,ziel='feldgrenze')).status_code,400)
+        self.assertEqual(self.c.post(self.url,json=dict(stand=feld['updated_at'],punkte=[],ziel='feldgrenze')).status_code,400)
+        self.assertEqual(self.s.get_field(self.f['id'])['boundary'],pts)
+
     def test_ungueltiger_ring_veraendert_nichts(self):
         r=self.c.post(self.url,json=dict(stand=self.f['updated_at'],punkte=[[0,0],[100,100],[0,100],[100,0]]))
         self.assertEqual(r.status_code,400,r.text);self.assertEqual(self.s.get_field(self.f['id']),self.f)

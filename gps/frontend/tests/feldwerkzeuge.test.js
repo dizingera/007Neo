@@ -27,3 +27,31 @@ test('Ungültige sichtbare Koordinaten verhindern jeden Speicheraufruf',async()=
  await Feldwerkzeuge.prototype.speichern.call(u);
  assert.equal(aufrufe,0);assert.match(meldung,/gültige Koordinaten/);
 });
+test('Gerade ziehen nimmt die Punkte der Rundung weg, nicht den Rest des Feldes',()=>{
+ // Rechteck 100 x 60, die Südostecke als Rundung aus drei Punkten.
+ const e=new Grenzentwurf([[0,0],[90,0],[97,3],[100,10],[100,60],[0,60]]);
+ assert.equal(e.geradeZiehen(1,4),2);
+ assert.deepEqual(e.punkte,[[0,0],[90,0],[100,60],[0,60]]);
+ assert.equal(e.auswahl,1);
+ // Andersherum angetippt: dieselbe (kürzere) Strecke.
+ const f=new Grenzentwurf([[0,0],[90,0],[97,3],[100,10],[100,60],[0,60]]);
+ assert.equal(f.geradeZiehen(4,1),2);
+ assert.equal(f.punkte.length,4);
+ assert.equal(f.geradeZiehen(0,1),0);                      // Nachbarn: nichts dazwischen
+ f.zurueck(); assert.equal(f.punkte.length,6);             // rücknehmbar
+});
+test('Ecke abrunden legt einen Bogen an, der beide Kanten berührt',()=>{
+ const e=new Grenzentwurf([[0,0],[100,0],[100,60],[0,60]]);
+ const r=e.abrunden(1,10);
+ assert.ok(Math.abs(r-10)<1e-9);
+ const bogen=e.punkte.slice(1,e.punkte.length-2);
+ assert.deepEqual(bogen[0].map(v=>Math.round(v*1e6)/1e6),[90,0]);        // Anfang auf der Südkante
+ assert.deepEqual(bogen.at(-1).map(v=>Math.round(v*1e6)/1e6),[100,10]);  // Ende auf der Ostkante
+ for(const p of bogen) assert.ok(Math.abs(Math.hypot(p[0]-90,p[1]-10)-10)<1e-6);   // alle auf dem Kreis um (90,10)
+ // Zu großer Radius: so groß, wie die Kanten zulassen (45 % der kürzeren).
+ const g=new Grenzentwurf([[0,0],[100,0],[100,60],[0,60]]);
+ assert.ok(Math.abs(g.abrunden(1,500)-27)<1e-9);
+ // Keine Ecke (gerade durch): nichts.
+ const h=new Grenzentwurf([[0,0],[50,0],[100,0],[100,60],[0,60]]);
+ assert.equal(h.abrunden(1,10),0);
+});

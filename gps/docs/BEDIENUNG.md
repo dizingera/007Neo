@@ -1561,6 +1561,24 @@ Punkte lassen sich einfügen, entfernen und schrittweise zurücknehmen.
 **Ursprüngliche Grenze** holt den ursprünglichen Umriss in den Entwurf zurück.
 Erst **Arbeitsgrenze speichern** übernimmt ihn.
 
+**Luftbild und Zoom im Editor (ab 1.5.71):** unter der Grenze liegt das Luftbild des Feldes – so
+sieht man, wo die echte Feldkante verläuft. **＋ Näher / − Weiter** oder das Mausrad zoomen,
+Ziehen auf der Karte verschiebt, **Zum Punkt** springt nah an den gewählten Punkt, **Ganzes
+Feld** zeigt wieder alles.
+
+**Form ändern (ab 1.5.71):** **Gerade ziehen** drücken, dann den ersten und den letzten Punkt
+einer Rundung antippen – alle Punkte dazwischen fallen weg, dort verläuft die Grenze gerade
+(genommen wird immer der kürzere Weg zwischen den beiden Punkten). **Ecke abrunden** macht aus
+dem gewählten Eckpunkt einen Bogen mit dem eingetragenen **Radius**; lassen die Kanten den
+Radius nicht zu, wird er so groß wie möglich und die Meldung sagt, wie groß. Beides lässt sich
+mit **Rückgängig** zurücknehmen.
+
+**Feldgrenze selbst ändern:** mit dem Häkchen wird nicht die Arbeitsgrenze, sondern die
+Feldgrenze gespeichert – dann darf sie auch über die alte hinaus (eine nach innen gebogene
+Rundung gerade ziehen). Die bisherige Feldgrenze wird vorher gesichert, die Fläche neu
+berechnet, eine Arbeitsgrenze fällt weg. Geschlossen, ohne Selbstschnitt und mindestens
+100 m² muss sie auch dann sein.
+
 Der Entwurf muss ein geschlossenes, nicht selbstüberschneidendes Feld von
 mindestens 100 m² innerhalb der ursprünglichen Grenze ergeben. Ein ungültiger
 Entwurf bleibt mit verständlicher Meldung geöffnet. Die ursprüngliche Grenze

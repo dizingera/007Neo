@@ -430,3 +430,20 @@ body.tag { --f-flaeche: rgba(23, 140, 70, .38); --f-doppelt: rgba(200, 104, 12, 
 .sheet .saat-vorschau-knoepfe svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2;
   stroke-linecap: round; stroke-linejoin: round; }
 .sheet .saat-vorschau-hinweis { margin: 6px 0 0; font-size: 13px; }
+/* Grenz-Editor: Form ändern (1.5.71). */
+.feldwerkzeug .fw-form { align-items: flex-end; }
+.feldwerkzeug .fw-form button.an { background: var(--blue-solid); color: #fff; border-color: var(--blue-solid); }
+.feldwerkzeug .fw-radius { display: flex; flex-direction: column; gap: 4px; font-size: 14px; }
+.feldwerkzeug .fw-radius input { width: 110px; }
+.feldwerkzeug .fw-ziel { margin: 4px 0 12px; }
+.feldwerkzeug .fw-punkt.fw-erster { fill: #ffd84a; stroke: #1a1400; }
+/* Luftbild unter der Grenze im Editor: Linien mit hellem Rand, Fläche nur leicht getönt. */
+.sheet #fwKarte .fw-luftbild { opacity: .95; }
+.sheet #fwKarte .fw-entwurf { paint-order: stroke; }
+.sheet #fwKarte:has(.fw-luftbild) .fw-entwurf { fill: rgba(72, 204, 119, .14); stroke: #4b9dff; stroke-width: 3;
+  filter: drop-shadow(0 0 1.5px rgba(255, 255, 255, .9)); }
+.sheet #fwKarte:has(.fw-luftbild) .fw-original { filter: drop-shadow(0 0 1.5px rgba(0, 0, 0, .8)); }
+.sheet #fwKarte:has(.fw-luftbild) .fw-punkt { fill: #fff; }
+.sheet #fwKarte:has(.fw-luftbild) .fw-nord { paint-order: stroke; stroke: rgba(0, 0, 0, .7); stroke-width: 3px; fill: #fff; }
+.sheet #fwKarte { touch-action: none; cursor: grab; }
+.feldwerkzeug .fw-zoom { margin-top: -4px; }

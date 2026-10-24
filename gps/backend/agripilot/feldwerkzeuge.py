@@ -55,7 +55,7 @@ def flaeche_enthalten(punkte,ring,abstand=0.):
     return all(strecke_enthalten(a,punkte[(i+1)%len(punkte)],ring,abstand) for i,a in enumerate(punkte))
 
 
-def grenze_pruefen(punkte,original):
+def grenze_pruefen(punkte,original,innerhalb=True):
     if not isinstance(punkte,list) or not 3<=len(punkte)<=2000:
         raise ValueError("Eine Arbeitsgrenze braucht 3 bis 2000 Punkte")
     try:
@@ -73,7 +73,8 @@ def grenze_pruefen(punkte,original):
             if j==i+1 or (i==0 and j==len(ring)-1): continue
             if _schneiden(a,b,ring[j],ring[(j+1)%len(ring)]):
                 raise ValueError("Die Arbeitsgrenze überschneidet oder berührt sich selbst")
-    if not flaeche_enthalten(ring,original):
+    # Eine geänderte Feldgrenze selbst (innerhalb=False) darf über die alte hinaus.
+    if innerhalb and not flaeche_enthalten(ring,original):
         raise ValueError("Die Arbeitsgrenze muss vollständig innerhalb der ursprünglichen Feldgrenze liegen")
     return ring
 

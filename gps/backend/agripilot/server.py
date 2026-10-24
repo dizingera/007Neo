@@ -748,6 +748,12 @@ def create_app(config=None) -> FastAPI:
         guard(engine._werkzeug_stillstand)
         if payload.get("stand")!=feld["updated_at"]: raise HTTPException(409,"Feld wurde inzwischen geändert – neu öffnen")
         punkte=payload.get("punkte")
+        if payload.get("ziel")=="feldgrenze":
+            # Die Feldgrenze selbst ändern (Rundung glatt ziehen): ohne die Bedingung "innerhalb
+            # der alten Grenze", aber geschlossen, ohne Selbstschnitt, mindestens 100 m².
+            if not punkte: raise HTTPException(400,"Eine Feldgrenze braucht Punkte")
+            geprueft=await im_hintergrund(feldwerkzeuge.grenze_pruefen,punkte,feld["boundary"],False)
+            return guard(engine.feldgrenze_speichern, field_id, payload, geprueft)
         geprueft=[] if punkte==[] else await im_hintergrund(feldwerkzeuge.grenze_pruefen,punkte,feld["boundary"])
         return guard(engine.arbeitsgrenze_speichern, field_id, payload, geprueft)
 

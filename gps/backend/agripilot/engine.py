@@ -1250,6 +1250,24 @@ class Engine:
         self.grenze_abgleichen()
         return neu
 
+    def feldgrenze_speichern(self, feld_id, werte, geprueft):
+        """Die Feldgrenze selbst ändern (Editor: Rundung gerade ziehen).
+
+        Die bisherige Grenze bleibt unter ``grenze_vorher:<feld>`` gesichert. Die
+        Arbeitsgrenze fällt weg - sie bezog sich auf die alte Grenze. Fläche neu.
+        """
+        feld = self.store.get_field(feld_id)
+        if feld is None or feld["deleted"]: raise ValueError("Feld nicht gefunden")
+        self._werkzeug_stillstand()
+        if werte.get("stand") != feld["updated_at"]:
+            raise RuntimeError("Die Feldgrenze wurde inzwischen geändert. Entwurf verwerfen und neu öffnen.")
+        self.store.set_setting(f"grenze_vorher:{feld_id}", {"zeit": time.time(), "boundary": feld["boundary"]})
+        neu = self.store.save_field({**feld, "boundary": [list(p) for p in geprueft], "working_boundary": [],
+                                     "area_ha": round(geo.polygon_area([tuple(p) for p in geprueft]) / 10000.0, 4)})
+        self.note(f"Feldgrenze geändert: {feld['name']} ({neu['area_ha']:.2f} ha)")
+        self.grenze_abgleichen()
+        return neu
+
     def grenze_abgleichen(self):
         if self.field is None: return
         neu=self.store.get_field(self.field["id"])

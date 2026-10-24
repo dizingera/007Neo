@@ -82,6 +82,63 @@
       this.punkte = kopie(p);
       this.auswahl = 0;
     }
+    /* Gerade ziehen: alle Punkte zwischen i und j fallen weg - auf dem kürzeren Weg
+     * um das Feld, also die Rundung, nicht der Rest. Gibt die Zahl der entfernten zurück. */
+    geradeZiehen(i, j) {
+      const n = this.punkte.length;
+      if (i === j || i < 0 || j < 0 || i >= n || j >= n) return 0;
+      const strecke = (von, bis) => {
+        let summe = 0;
+        for (let k = von; k !== bis; k = (k + 1) % n) {
+          const a = this.punkte[k], b = this.punkte[(k + 1) % n];
+          summe += Math.hypot(b[0] - a[0], b[1] - a[1]);
+        }
+        return summe;
+      };
+      const [von, bis] = strecke(i, j) <= strecke(j, i) ? [i, j] : [j, i];
+      const weg = new Set();
+      for (let k = (von + 1) % n; k !== bis; k = (k + 1) % n) weg.add(k);
+      if (!weg.size || n - weg.size < 3) return 0;
+      this.merken();
+      const anfang = this.punkte[von];
+      this.punkte = this.punkte.filter((_, k) => !weg.has(k));
+      this.auswahl = this.punkte.indexOf(anfang);
+      return weg.size;
+    }
+    /* Ecke abrunden: der Punkt i wird ein Kreisbogen mit Radius r, der beide Kanten
+     * berührt. Passt r nicht (Kanten zu kurz), wird er verkleinert. Gibt den echten
+     * Radius zurück oder 0, wenn dort keine Ecke ist. */
+    abrunden(i, r) {
+      const n = this.punkte.length;
+      if (!(r > 0) || n < 3) return 0;
+      const p = this.punkte[i], a = this.punkte[(i - 1 + n) % n], b = this.punkte[(i + 1) % n];
+      const la = Math.hypot(a[0] - p[0], a[1] - p[1]), lb = Math.hypot(b[0] - p[0], b[1] - p[1]);
+      if (la < 0.5 || lb < 0.5) return 0;
+      const u = [(a[0] - p[0]) / la, (a[1] - p[1]) / la], v = [(b[0] - p[0]) / lb, (b[1] - p[1]) / lb];
+      const winkel = Math.acos(Math.max(-1, Math.min(1, u[0] * v[0] + u[1] * v[1])));
+      if (winkel > (175 * Math.PI) / 180 || winkel < (3 * Math.PI) / 180) return 0;   // gerade oder Spitze
+      let t = r / Math.tan(winkel / 2);
+      t = Math.min(t, 0.45 * la, 0.45 * lb);
+      const radius = t * Math.tan(winkel / 2);
+      const t1 = [p[0] + u[0] * t, p[1] + u[1] * t], t2 = [p[0] + v[0] * t, p[1] + v[1] * t];
+      const hb = Math.hypot(u[0] + v[0], u[1] + v[1]);
+      const mitte = [p[0] + ((u[0] + v[0]) / hb) * (radius / Math.sin(winkel / 2)),
+        p[1] + ((u[1] + v[1]) / hb) * (radius / Math.sin(winkel / 2))];
+      const w1 = Math.atan2(t1[1] - mitte[1], t1[0] - mitte[0]);
+      let schwenk = Math.atan2(t2[1] - mitte[1], t2[0] - mitte[0]) - w1;
+      while (schwenk > Math.PI) schwenk -= 2 * Math.PI;
+      while (schwenk < -Math.PI) schwenk += 2 * Math.PI;
+      const schritte = Math.max(2, Math.ceil(Math.abs(schwenk) / ((8 * Math.PI) / 180)));
+      const bogen = [];
+      for (let k = 0; k <= schritte; k++) {
+        const w = w1 + (schwenk * k) / schritte;
+        bogen.push([mitte[0] + Math.cos(w) * radius, mitte[1] + Math.sin(w) * radius]);
+      }
+      this.merken();
+      this.punkte.splice(i, 1, ...bogen);
+      this.auswahl = i + Math.floor(bogen.length / 2);
+      return radius;
+    }
   }
   class Feldwerkzeuge {
     constructor({ el, api, aktualisieren, profil }) {
@@ -159,6 +216,68 @@
           this.zeichnen();
         };
       el('fwSpeichern').onclick = () => this.speichern();
+      // Zoomen und verschieben: kleine Rundungen sieht man im ganzen Feld nicht.
+      const karte = el('fwKarte');
+      const svgPunkt = (e) => {
+        const r = karte.getBoundingClientRect();
+        const s = Math.min(r.width / 640, r.height / 360);
+        return [(e.clientX - r.left - (r.width - 640 * s) / 2) / s, (e.clientY - r.top - (r.height - 360 * s) / 2) / s];
+      };
+      el('fwNaeher').onclick = () => this.zoomen(1.6);
+      el('fwWeiter').onclick = () => this.zoomen(1 / 1.6);
+      el('fwGanz').onclick = () => { this.mass = this.ganz.mass; this.mitte = [...this.ganz.mitte]; this.zeichnen(); };
+      el('fwZumPunkt').onclick = () => {
+        const p = this.entwurf && this.entwurf.punkte[this.entwurf.auswahl];
+        if (!p) return;
+        this.mitte = [...p];
+        this.mass = Math.max(this.mass, this.ganz.mass * 6);
+        this.zeichnen();
+      };
+      karte.addEventListener('wheel', (e) => {
+        e.preventDefault();
+        this.zoomen(Math.exp(-e.deltaY * 0.0015), svgPunkt(e));
+      }, { passive: false });
+      let ziehen = null;
+      karte.addEventListener('pointerdown', (e) => {
+        if (e.target.tagName === 'circle') return;      // Punkte wählen, nicht verschieben
+        ziehen = { p: svgPunkt(e), mitte: [...this.mitte] };
+        karte.setPointerCapture(e.pointerId);
+      });
+      karte.addEventListener('pointermove', (e) => {
+        if (!ziehen) return;
+        const q = svgPunkt(e);
+        this.mitte = [ziehen.mitte[0] - (q[0] - ziehen.p[0]) / this.mass, ziehen.mitte[1] + (q[1] - ziehen.p[1]) / this.mass];
+        this.zeichnen();
+      });
+      const los = () => { ziehen = null; };
+      karte.addEventListener('pointerup', los);
+      karte.addEventListener('pointercancel', los);
+      // Gerade ziehen: Knopf, dann zwei Punkte antippen. Ecke abrunden: am gewählten Punkt.
+      el('fwGerade').onclick = () => {
+        if (this.busy) return;
+        this.gerade = this.gerade ? null : { erster: null };
+        this.status(this.gerade ? 'Gerade ziehen: ersten Punkt antippen (Anfang der Rundung).' : '');
+        this.zeichnen();
+      };
+      el('fwAbrunden').onclick = () => {
+        if (this.busy) return;
+        const r = el('fwRadius').valueAsNumber;
+        if (!(r >= 1 && r <= 200)) { this.status('Radius zwischen 1 und 200 m wählen.'); return; }
+        const echt = this.entwurf.abrunden(this.entwurf.auswahl, r);
+        if (!echt) { this.status('Hier ist keine Ecke zum Abrunden – einen Eckpunkt wählen.'); return; }
+        this.geaendert();
+        this.status(Math.abs(echt - r) > 0.05
+          ? `Ecke abgerundet – mit ${echt.toFixed(1).replace('.', ',')} m Radius, mehr lassen die Kanten nicht zu.`
+          : `Ecke mit ${r.toLocaleString('de-DE')} m Radius abgerundet.`);
+      };
+      el('fwZiel').onchange = () => {
+        // Noch nichts bearbeitet und eine Arbeitsgrenze da: bei der Feldgrenze von ihr ausgehen.
+        if (el('fwZiel').checked && !this.entwurf.verlauf.length && this.feld.working_boundary?.length)
+          this.entwurf = new Grenzentwurf(this.feld.boundary);
+        this.dirty = true;
+        el('fwSpeichern').textContent = el('fwZiel').checked ? 'Feldgrenze speichern' : 'Arbeitsgrenze speichern';
+        this.zeichnen();
+      };
     }
     status(text) {
       this.el('fwStatus').textContent = text;
@@ -186,14 +305,34 @@
     grenze(feld) {
       this.folge++;
       this.modus = 'grenze';
+      this.gerade = null;
+      this.el('fwZiel').checked = false;
+      this.el('fwSpeichern').textContent = 'Arbeitsgrenze speichern';
       this.feld = structuredClone(feld);
       this.entwurf = new Grenzentwurf(feld.working_boundary?.length ? feld.working_boundary : feld.boundary);
       this.rahmen(feld.boundary);
+      this.luftbild = null;
+      this.luftbildLaden(feld.id, this.folge);
       this.oeffnen(
         'Arbeitsgrenze · ' + feld.name,
         'Gestrichelt: ursprüngliche Feldgrenze. Durchgezogen: Arbeitsgrenze. Punkt auf der Karte oder in der Liste wählen und mit den Pfeilen verschieben. Die ursprüngliche Grenze bleibt gespeichert.',
       );
       this.zeichnen();
+    }
+    /* Luftbild unter der Grenze: ohne sieht man nicht, wo die echte Feldkante verläuft.
+     * Dasselbe Bild wie auf der Karte (nach einmal Holen ohne Netz). Fehlt es, bleibt der
+     * Editor ohne - er funktioniert auch so. */
+    async luftbildLaden(feldId, folge) {
+      try {
+        const antwort = await fetch(`/api/luftbild/${feldId}`);
+        if (!antwort.ok) return;
+        const info = await antwort.json();
+        if (folge !== this.folge || !info.rechteck) return;
+        this.luftbild = info;
+        this.zeichnen();
+      } catch (fehler) {
+        /* ohne Netz und ohne gespeichertes Bild: nichts */
+      }
     }
     async referenz(job) {
       const folge = ++this.folge;
@@ -256,9 +395,18 @@
       }
       this.mass = Math.min(560 / Math.max(1, xmax - xmin), 280 / Math.max(1, ymax - ymin));
       this.mitte = [(xmin + xmax) / 2, (ymin + ymax) / 2];
+      this.ganz = { mass: this.mass, mitte: [...this.mitte] };
     }
     bild(p) {
       return [320 + (p[0] - this.mitte[0]) * this.mass, 180 - (p[1] - this.mitte[1]) * this.mass];
+    }
+    /* Zoomen um einen Punkt der Karte (SVG-Koordinaten): er bleibt, wo er ist. */
+    zoomen(faktor, um = [320, 180]) {
+      const neu = Math.max(this.ganz.mass * 0.5, Math.min(this.ganz.mass * 60, this.mass * faktor));
+      const welt = [this.mitte[0] + (um[0] - 320) / this.mass, this.mitte[1] - (um[1] - 180) / this.mass];
+      this.mass = neu;
+      this.mitte = [welt[0] - (um[0] - 320) / neu, welt[1] + (um[1] - 180) / neu];
+      this.zeichnen();
     }
     geaendert() {
       this.koordinatenUngueltig = false;
@@ -283,6 +431,12 @@
           class: cls,
         });
       };
+      if (this.modus === 'grenze' && this.luftbild) {
+        const [x0, y0, x1, y1] = this.luftbild.rechteck;
+        const [ax, ay] = this.bild([x0, y1]), [bx, by] = this.bild([x1, y0]);
+        erstellen('image', { href: this.luftbild.bild, x: ax, y: ay, width: bx - ax, height: by - ay,
+          preserveAspectRatio: 'none', class: 'fw-luftbild' });
+      }
       const nord = erstellen('text', { x: 20, y: 25, class: 'fw-nord' });
       nord.textContent = 'N ↑';
       if (this.modus === 'grenze') {
@@ -294,14 +448,34 @@
           select.add(new Option(`Punkt ${i + 1}`, String(i)));
           const [cx, cy] = this.bild(p);
           const an = i === this.entwurf.auswahl;
+          const erster = this.gerade && this.gerade.erster === i;
           const kreis = erstellen('circle', {
             cx,
             cy,
-            r: an ? 9 : 5,
-            class: an ? 'fw-punkt an' : 'fw-punkt',
+            r: an || erster ? 9 : 6,
+            class: erster ? 'fw-punkt an fw-erster' : an ? 'fw-punkt an' : 'fw-punkt',
           });
           kreis.addEventListener('click', () => {
             if (this.busy) return;
+            if (this.gerade) {
+              if (this.gerade.erster === null) {
+                this.gerade.erster = i;
+                this.entwurf.auswahl = i;
+                this.status('Gerade ziehen: zweiten Punkt antippen (Ende der Rundung).');
+                this.zeichnen();
+                return;
+              }
+              const weg = this.entwurf.geradeZiehen(this.gerade.erster, i);
+              this.gerade = null;
+              if (weg) {
+                this.geaendert();
+                this.status(`Gerade gezogen – ${weg} Punkt${weg === 1 ? '' : 'e'} dazwischen entfernt.`);
+              } else {
+                this.status('Dazwischen liegt kein Punkt – nichts zu begradigen.');
+                this.zeichnen();
+              }
+              return;
+            }
             this.entwurf.auswahl = i;
             this.koordinatenUngueltig = false;
             this.zeichnen();
@@ -319,6 +493,8 @@
         this.el('fwEntfernen').disabled = this.busy || this.entwurf.punkte.length <= 3;
         this.el('fwEinfuegen').disabled = this.busy || this.entwurf.punkte.length >= 2000;
         this.el('fwSpeichern').disabled = this.busy || !this.dirty || this.koordinatenUngueltig;
+        this.el('fwGerade').classList.toggle('an', !!this.gerade);
+        this.el('fwGerade').setAttribute('aria-pressed', String(!!this.gerade));
       } else {
         linie(this.plan.grenze, 'fw-original', true);
         const index = Number(this.el('fwSegment').value),
@@ -350,9 +526,13 @@
         }
         url = `/api/fields/${this.feld.id}/arbeitsgrenze`;
         const punkte = this.entwurf.punkte;
+        const feldgrenze = this.el('fwZiel').checked;
+        if (feldgrenze && !confirm('Die Feldgrenze selbst ändern? Die bisherige wird gesichert; '
+          + 'Fläche, Vorgewende und neue Spuren richten sich danach.')) return;
         body = {
           stand: this.feld.updated_at,
-          punkte: JSON.stringify(punkte) === JSON.stringify(this.feld.boundary) ? [] : kopie(punkte),
+          punkte: !feldgrenze && JSON.stringify(punkte) === JSON.stringify(this.feld.boundary) ? [] : kopie(punkte),
+          ...(feldgrenze ? { ziel: 'feldgrenze' } : {}),
         };
       } else {
         if (!this.el('fwName').value.trim() || !this.el('fwAbstand').checkValidity()) {

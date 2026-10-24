@@ -996,13 +996,18 @@
   <div class="fw-kopf"><div><p class="fw-kicker">AGRIPILOT · FELDWERKZEUGE</p><h2 id="fwTitel"></h2></div><button type="button" id="fwSchliessen" aria-label="Feldwerkzeug schließen">Schließen</button></div>
   <p id="fwBeschreibung" class="note"></p>
   <svg id="fwKarte" viewBox="0 0 640 360" aria-label="Vorschau der Feldgeometrie"></svg>
+  <!-- Näher heran für kleine Rundungen; Ziehen auf der Karte verschiebt, das Mausrad zoomt. -->
+  <div class="row fw-zoom"><button type="button" id="fwNaeher">＋ Näher</button><button type="button" id="fwWeiter">− Weiter</button><button type="button" id="fwGanz">Ganzes Feld</button><button type="button" id="fwZumPunkt">Zum Punkt</button></div>
   <div id="fwGrenze"><div class="formular">
     <label>Grenzpunkt<select id="fwPunkt"></select></label>
     <label>Schrittweite (m)<input id="fwSchritt" type="number" value="0.5" step="0.1" min="0.05" max="20"></label>
     <label>Ost (m zum Feldbezug)<input id="fwOst" type="number" step="0.01"></label>
     <label>Nord (m zum Feldbezug)<input id="fwNord" type="number" step="0.01"></label>
   </div><div class="row fw-richtungen"><button data-fw-richtung="n">↑ Nord</button><button data-fw-richtung="w">← West</button><button data-fw-richtung="o">Ost →</button><button data-fw-richtung="s">↓ Süd</button></div>
-  <div class="row"><button id="fwEinfuegen">Punkt dahinter einfügen</button><button id="fwEntfernen">Punkt entfernen</button><button id="fwUndo">Rückgängig</button><button id="fwOriginal">Ursprüngliche Grenze verwenden</button></div></div>
+  <div class="row"><button id="fwEinfuegen">Punkt dahinter einfügen</button><button id="fwEntfernen">Punkt entfernen</button><button id="fwUndo">Rückgängig</button><button id="fwOriginal">Ursprüngliche Grenze verwenden</button></div>
+  <!-- Form ändern: Rundung gerade ziehen, Ecke abrunden. -->
+  <div class="row fw-form"><button id="fwGerade" aria-pressed="false">Gerade ziehen</button><button id="fwAbrunden">Ecke abrunden</button><label class="fw-radius">Radius (m)<input id="fwRadius" type="number" value="15" step="1" min="1" max="200"></label></div>
+  <label class="switch fw-ziel"><input type="checkbox" id="fwZiel"> Feldgrenze selbst ändern (nicht nur die Arbeitsgrenze) – die bisherige wird gesichert</label></div>
   <div id="fwSpur" hidden><div class="formular"><label>Geeigneter Abschnitt<select id="fwSegment"></select></label><label>Am Anfang kürzen (m)<input id="fwAnfang" type="number" step="0.5" min="0" value="0"></label><label>Am Ende kürzen (m)<input id="fwEnde" type="number" step="0.5" min="0" value="0"></label><label>Name der neuen Spur<input id="fwName" maxlength="120"></label><label>Abstand der Folgespuren (m)<input id="fwAbstand" type="number" step="0.01" min="0.1" max="100"></label></div><label id="fwAltHinweis" class="switch"><input id="fwAlt" type="checkbox">Ich habe die Antennenspur geprüft. Geräteversatz und Arbeitszustand dieser Altaufzeichnung sind unbekannt.</label><p class="note">Wenden und Datenlücken werden getrennt. Vorschau prüfen: Die neue Referenz erhält keine Aussaatzuordnung. Diese legst du bei Bedarf anschließend unter „Spuren“ fest.</p></div>
   <p id="fwStatus" class="note" role="status" aria-live="polite"></p>
   <div class="row"><button id="fwSpeichern" class="primary">Arbeitsgrenze speichern</button></div>
