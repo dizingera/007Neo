@@ -1866,10 +1866,17 @@ def create_app(config=None) -> FastAPI:
         """Wo das Luftbild des Feldes liegt - holt es, wenn es noch fehlt."""
         feld = luftbild_feld(field_id)
         try:
-            _, info = await asyncio.to_thread(luftbild_holen, feld)
+            pfad, info = await asyncio.to_thread(luftbild_holen, feld)
         except luftbild_module.LuftbildFehler as exc:
             raise HTTPException(503, str(exc)) from exc
-        return {**info, "bild": f"/api/luftbild/{field_id}/bild"}
+        return {**info, "bild": luftbild_adresse(field_id, pfad, info)}
+
+    def luftbild_adresse(field_id: str, pfad: Path, info: dict) -> str:
+        # Grobes und scharfes Bild liegen unter derselben Adresse, und der Browser hält
+        # Bilder einen Tag vor: ohne diese Kennung zeigte das Tablet das grobe Ersatzbild
+        # noch, als das scharfe längst da war (24.10.2026).
+        stand = f"{int(pfad.stat().st_mtime)}{'g' if info.get('grob') else 's'}"
+        return f"/api/luftbild/{field_id}/bild?v={stand}"
 
     @api.get("/api/luftbild/{field_id}/bild")
     async def luftbild_bild(field_id: str):
@@ -1979,6 +1986,12 @@ def create_app(config=None) -> FastAPI:
 
     # -- Feldkarte: Schlagauswahl auf der Karte ----------------------------
 
+    def _scharf_versuchen(feld: dict) -> None:
+        try:
+            luftbild_holen(feld)
+        except Exception:  # noqa: BLE001 - dann bleibt das grobe, beim nächsten Mal wieder
+            pass
+
     @api.get("/api/feldkarte")
     async def feldkarte() -> dict:
         """Alle Felder in WGS84 für die Kartenauswahl, dazu wo der Traktor steht.
@@ -1988,7 +2001,7 @@ def create_app(config=None) -> FastAPI:
         Dafür gibt es "Luftbilder aller Felder laden".
         """
         s = config.server
-        felder = []
+        felder, grob = [], []
         for feld in store.list_fields():
             if len(feld.get("boundary") or []) < 3:
                 continue
@@ -1997,11 +2010,17 @@ def create_app(config=None) -> FastAPI:
                        "grenze": [[round(v, 7) for v in ebene.to_wgs(*p)] for p in feld["boundary"]],
                        "luftbild": None}
             box = luftbild_module.ausschnitt(feld)
-            if box is not None and luftbild_module.vorhanden(feld, luftbild_ordner(), s.luftbild_wms,
-                                                             s.luftbild_ebene) is not None:
-                eintrag["luftbild"] = {"bild": f"/api/luftbild/{feld['id']}/bild",
+            da = luftbild_module.vorhanden(feld, luftbild_ordner(), s.luftbild_wms, s.luftbild_ebene)                 if box is not None else None
+            if da is not None:
+                eintrag["luftbild"] = {"bild": luftbild_adresse(feld["id"], da[0], da[1]),
                                        "box": [round(v, 7) for v in box]}
+                if da[1].get("grob"):
+                    grob.append(feld)
             felder.append(eintrag)
+        if grob:
+            # Nur ein grobes Ersatzbild da: im Hintergrund das scharfe holen (vom Master
+            # zuerst) - beim nächsten Öffnen der Karte ist es da.
+            asyncio.get_running_loop().run_in_executor(None, lambda: [_scharf_versuchen(f) for f in grob])
         position = None
         if engine.fix is not None and engine.fix.valid:
             position = {"lat": engine.fix.lat, "lon": engine.fix.lon, "kurs": engine.heading}

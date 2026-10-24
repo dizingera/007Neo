@@ -679,7 +679,12 @@ function luftbildLaden() {
       bild.src = info.bild;
       el('luftbildQuelle').textContent = info.quelle || '';
       el('luftbildQuelle').hidden = !luftbild.an;
-      if (info.grob) toast('Luftbild gerade nicht erreichbar – grobes Satellitenbild, später wird es nachgeholt');
+      if (info.grob) {
+        toast('Luftbild gerade nicht erreichbar – grobes Satellitenbild, später wird es nachgeholt');
+        // In zehn Minuten noch einmal fragen: hat der Master oder der Dienst das scharfe
+        // Bild, kommt es unter einer neuen Adresse (?v=…) und ersetzt das grobe.
+        setTimeout(() => { if (luftbild.feld === info.feld_id) luftbild.feld = null; }, 10 * 60 * 1000);
+      }
     })
     .catch((fehler) => toast(`Luftbild: ${fehler.message}`))
     .finally(() => { luftbild.laedt = false; });
@@ -789,12 +794,24 @@ async function saatplanLaden(feldId) {
   }
 }
 
-function weltText(text, x, y, farbe) {
+/* Schrift an einem Weltpunkt. Mit ``belegt`` (Liste der schon beschrifteten Kästen in
+ * Bildpunkten) bleibt weg, was eine andere Schrift überdecken würde - übereinander
+ * liegende Fahrgassen-Beschriftungen rutschten bei jeder Bewegung gegeneinander. */
+function weltText(text, x, y, farbe, belegt = null) {
   const p = ctx.getTransform().transformPoint(new DOMPoint(x, y));
   const k = window.devicePixelRatio || 1;
   ctx.save();
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.font = `700 ${Math.round(13 * k)}px system-ui, sans-serif`;
+  if (belegt) {
+    const w = ctx.measureText(text).width + 8 * k, h = 18 * k;
+    const kasten = [p.x - w / 2, p.y - h / 2, p.x + w / 2, p.y + h / 2];
+    if (belegt.some((b) => kasten[0] < b[2] && kasten[2] > b[0] && kasten[1] < b[3] && kasten[3] > b[1])) {
+      ctx.restore();
+      return;
+    }
+    belegt.push(kasten);
+  }
   ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
   ctx.lineWidth = 3 * k; ctx.strokeStyle = F.boden; ctx.strokeText(text, p.x, p.y);
   ctx.fillStyle = farbe; ctx.fillText(text, p.x, p.y);
@@ -838,19 +855,20 @@ function drawSaatplan() {
   // Weit herausgezoomt lägen die Schriften übereinander: dann nur die Linien.
   const gassen = plan.spuren.filter((s) => s.fahrgasse && !s.rest);
   if (plan.fahrgasse_m * state.view.scale < 44) { ctx.restore(); return; }
+  const belegt = [];
   gassen.forEach((gasse, i) => {
     const naechste = gassen[i + 1];
     const [a, b] = gasse.stuecke.reduce((l, s) =>
       Math.hypot(s[1][0] - s[0][0], s[1][1] - s[0][1]) > Math.hypot(l[1][0] - l[0][0], l[1][1] - l[0][1]) ? s : l);
     const mx = (a[0] + b[0]) / 2, my = (a[1] + b[1]) / 2;
-    weltText(`FG ${i + 1}`, mx, my, F.fahrgasse);
+    weltText(`FG ${i + 1}`, mx, my, F.fahrgasse, belegt);
     if (naechste) {
       const d = naechste.versatz_m - gasse.versatz_m;
       const ex = b[0] - a[0], ey = b[1] - a[1], l = Math.hypot(ex, ey) || 1;
       // Normale zur Spur, in Richtung der nächsten Fahrgasse.
       const nx = -ey / l, ny = ex / l;
       const vz = (naechste.stuecke[0][0][0] - a[0]) * nx + (naechste.stuecke[0][0][1] - a[1]) * ny > 0 ? 1 : -1;
-      weltText(`${d.toLocaleString('de-DE')} m`, mx + nx * vz * d / 2 + ex / l * 25, my + ny * vz * d / 2 + ey / l * 25, F.fahrgasse);
+      weltText(`${d.toLocaleString('de-DE')} m`, mx + nx * vz * d / 2 + ex / l * 25, my + ny * vz * d / 2 + ey / l * 25, F.fahrgasse, belegt);
     }
   });
   ctx.restore();
@@ -2057,6 +2075,7 @@ el('btnSaveHeadland').onclick = async () => {
 /* Reiter Saatplan: Vorgabe wählen, planen, Ergebnis und Konflikte lesen. */
 async function renderSaatplan() {
   const feld = state.live && state.live.field;
+  saat.seiteFeld = feld ? feld.id : null;   // für welches Feld die Seite gefüllt ist
   el('saatplanErgebnis').hidden = true;
   if (!feld) { el('saatplanFeld').textContent = 'Kein Feld geladen – erst unter Felder ein Feld laden.'; return; }
   el('saatplanFeld').textContent = `Schlag: ${feld.name}`;
@@ -2080,7 +2099,9 @@ async function renderSaatplan() {
 }
 
 /* Vorschau unter „Vorgabe“: der Schlag von oben, die gewählte Startkante mit Pfeil in
- * Fahrtrichtung; ist geplant, dazu Vorgewende-Runden, Säspuren und Fahrgassen. Norden oben. */
+ * Fahrtrichtung; ist geplant, dazu Vorgewende-Runden, Säspuren und Fahrgassen. Gedreht, bis
+ * die Startkante waagrecht liegt und die lange Seite die Breite füllt - ein langer, schmaler
+ * Schlag war mit Norden oben nur ein Strich. Ein Nordpfeil zeigt die Lage. */
 function saatVorschau() {
   const leinwand = el('saatplanVorschau');
   const feld = state.live && state.live.field;
@@ -2094,12 +2115,24 @@ function saatVorschau() {
   const grenze = feld && feld.boundary && feld.boundary.length >= 3 ? feld.boundary : null;
   const legende = el('saatplanLegende');
   if (!grenze) { legende.textContent = 'Kein Feld mit Grenze geladen.'; return; }
-  const xs = grenze.map((p) => p[0]), ys = grenze.map((p) => p[1]);
+  const wahl = (saat.optionen || []).find((o) => o.id === el('saatplanStart').value);
+  // Drehwinkel: die Startkante waagrecht; liegt das Feld dann hochkant, eine Vierteldrehung dazu.
+  let winkel = wahl && wahl.von && wahl.nach ? Math.atan2(wahl.nach[1] - wahl.von[1], wahl.nach[0] - wahl.von[0]) : 0;
+  const drehen = (p, w) => [p[0] * Math.cos(w) + p[1] * Math.sin(w), -p[0] * Math.sin(w) + p[1] * Math.cos(w)];
+  const ausdehnung = (w) => {
+    const q = grenze.map((p) => drehen(p, w));
+    return [Math.max(...q.map((p) => p[0])) - Math.min(...q.map((p) => p[0])),
+      Math.max(...q.map((p) => p[1])) - Math.min(...q.map((p) => p[1]))];
+  };
+  const [w0, h0] = ausdehnung(winkel);
+  if (h0 > w0 * (hoehe / breite) * 1.15) winkel += Math.PI / 2;
+  const gedreht = grenze.map((p) => drehen(p, winkel));
+  const xs = gedreht.map((p) => p[0]), ys = gedreht.map((p) => p[1]);
   const rand = 22;
   const massstab = Math.min((breite - 2 * rand) / Math.max(1, Math.max(...xs) - Math.min(...xs)),
     (hoehe - 2 * rand) / Math.max(1, Math.max(...ys) - Math.min(...ys)));
   const mx = (Math.max(...xs) + Math.min(...xs)) / 2, my = (Math.max(...ys) + Math.min(...ys)) / 2;
-  const px = (p) => [breite / 2 + (p[0] - mx) * massstab, hoehe / 2 - (p[1] - my) * massstab];
+  const px = (p) => { const [u, v] = drehen(p, winkel); return [breite / 2 + (u - mx) * massstab, hoehe / 2 - (v - my) * massstab]; };
   const zug = (punkte, zu) => {
     c.beginPath();
     punkte.forEach((p, i) => { const [x, y] = px(p); i ? c.lineTo(x, y) : c.moveTo(x, y); });
@@ -2130,8 +2163,16 @@ function saatVorschau() {
     teile.push(['Säspuren', 'rgba(255, 176, 32, 0.9)'], ['von B', '#48cc77'], ['Fahrgassen', F.fahrgasse],
       ['Vorgewende', 'rgba(150, 165, 155, 0.9)']);
   }
+  // Nordpfeil oben links: zeigt, wohin Norden nach dem Drehen liegt.
+  const [nx, ny] = drehen([0, 1], winkel);
+  const schrift = getComputedStyle(document.body).getPropertyValue('--text').trim() || '#e8efe9';
+  c.save(); c.translate(22, 20); c.rotate(Math.atan2(nx, ny));
+  c.beginPath(); c.moveTo(0, -11); c.lineTo(6, 7); c.lineTo(0, 3); c.lineTo(-6, 7); c.closePath();
+  c.fillStyle = schrift; c.globalAlpha = 0.85; c.fill(); c.globalAlpha = 1;
+  c.restore();
+  c.font = '700 11px "IBM Plex Sans", sans-serif'; c.textAlign = 'center'; c.textBaseline = 'middle';
+  c.fillStyle = schrift; c.fillText('N', 22, 40);
   // Startkante und Richtung der ersten Spur.
-  const wahl = (saat.optionen || []).find((o) => o.id === el('saatplanStart').value);
   if (wahl && wahl.von && wahl.nach) {
     const [x0, y0] = px(wahl.von), [x1, y1] = px(wahl.nach);
     c.beginPath(); c.moveTo(x0, y0); c.lineTo(x1, y1);
@@ -2840,7 +2881,9 @@ document.querySelectorAll('.fahrgassen-taste').forEach((b) => {
   };
 });
 
-async function refreshLists() {
+/* Seiten neu füllen. ``takt``: der Aufruf alle 5 s - Listen werden aufgefrischt,
+ * Eingabeseiten nicht: der Saatplan setzte sonst jede Eingabe zurück und flackerte. */
+async function refreshLists(takt = false) {
   if (el('sheet').hidden) return;
   const active = document.querySelector('.tab.active').dataset.tab;
   if (active === 'fields' || active === 'lines') ladeFahrgassenWeite();
@@ -2868,7 +2911,10 @@ async function refreshLists() {
     renderTraktoren();
   }
   if (active === 'headland') fillHeadland();
-  if (active === 'saatplan') renderSaatplan();
+  if (active === 'saatplan') {
+    const feldId = state.live && state.live.field ? state.live.field.id : null;
+    if (!takt || saat.seiteFeld !== feldId) renderSaatplan();
+  }
   if (active === 'system') { renderSystem(); renderRohdaten(); renderUpdate(); }
   if (active === 'lenkung') {
     renderGenauigkeit();
@@ -4447,4 +4493,4 @@ connect();
 bildschirmWachhalten();
 requestAnimationFrame(render);
 menueAusAdresse();
-setInterval(() => { if (!el('sheet').hidden) refreshLists(); }, 5000);
+setInterval(() => { if (!el('sheet').hidden) refreshLists(true); }, 5000);

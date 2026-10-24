@@ -935,6 +935,12 @@ ohne Netz. Ein- und ausschalten mit dem **Lautsprecher-Knopf rechts auf der Kart
 
 ## Luftbild (Knopf rechts auf der Karte, ab 1.5.48)
 
+**Grobes Bild (ab 1.5.68):** War der Luftbilddienst bei einem Feld ausgefallen, kam ein grobes
+Satellitenbild (10 m). Das scharfe wird jetzt alle zehn Minuten wieder versucht, und die
+Bildadresse ändert sich mit dem Bild – vorher zeigte der Browser das grobe noch bis zu einen
+Tag lang, obwohl der Master das scharfe längst hatte. Die Feldkarte holt für grobe Bilder im
+Hintergrund das scharfe nach.
+
 Der Knopf mit dem Bild-Symbol (zwischen Ansicht und Tag/Nacht) blendet unter dem
 geladenen Feld ein **Luftbild** ein und wieder aus. Es zeigt Wege, Gräben, Bäume und
 Gebäude wirklich, statt nur das Raster. Nachts ist es gedämpft.
@@ -1033,7 +1039,7 @@ Version und Rolle (Master/Arbeiter). Im **Saatplan** zeigt unter *Vorgabe* ein
 **Vorschaubild** den Schlag mit der gewählten Startkante und einem Pfeil in Fahrtrichtung;
 nach dem Planen dazu alle Säspuren (bernstein), die Spuren von B (grün), die Fahrgassen
 (rot) und die Vorgewende-Runden – mit Legende. Ein anderes Startfeld in der Auswahl zeigt
-sich sofort im Bild. Die **Feldkarte** hat einen Umschalter aus einem Stück, runde Ecken,
+sich sofort im Bild. Ab 1.5.68 ist das Bild so gedreht, dass die Startkante waagrecht liegt und die lange Seite die Breite füllt (ein Nordpfeil oben links zeigt die Lage) – lange, schmale Schläge waren mit Norden oben nur ein Strich. Eingaben im Saatplan bleiben stehen; vorher setzte das Auffrischen alle 5 Sekunden sie zurück und ließ die Seite flackern. Die **Feldkarte** hat einen Umschalter aus einem Stück, runde Ecken,
 Namen als Schildchen und dämpft das Luftbild außerhalb der Felder.
 
 **Suchen (ab 1.5.59):** oben im Menü steht ein Suchfeld. Ein Wort genügt –
