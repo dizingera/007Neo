@@ -13,6 +13,11 @@ Restfehler deshalb langsam aufsummiert und als zusätzlicher Einschlag gegengele
   anderen Seite), baut er sich dreimal so schnell ab - kein Aufschaukeln;
 * ist es nur unruhig (Rauschen, Bodenwelle), pausiert er; weit weg von der Spur
   oder in der Wende klingt er rasch ab; aus und rückwärts ist er null;
+* pendelt die Maschine um die Spur (die geglättete Abweichung wechselt in
+  ``PENDEL_FENSTER_S`` mehrmals die Seite), summiert er nicht weiter und baut
+  sich langsam ab: Bei einem trägen Lenkmotor ist das Aufsummieren selbst das,
+  was die Lenkung aufschaukelt (Simulator, 1,3 s Nachlauf: mit Ausgleich 18 cm,
+  ohne 1 cm);
 * begrenzt auf ``GRENZE_DEG``;
 * gemerkt **je Fahrtrichtung**: am Seitenhang drückt der Hang auf der Hinspur
   nach rechts, auf der Rückspur nach links. Nach der Wende geht es mit dem Wert
@@ -26,6 +31,7 @@ Seitenneigung dagegen, statt zu warten, bis die Maschine abgedriftet ist.
 from __future__ import annotations
 
 import math
+from collections import deque
 
 NAHE_M = 0.25            # nur so nah an der Spur wird aufsummiert
 RUHIG_M_S = 0.3          # schnelleres Wandern ist Einlenken, kein Dauerversatz
@@ -34,6 +40,11 @@ MIN_TEMPO_MS = 1.0
 GRENZE_DEG = 6.0
 ABKLINGEN_JE_S = 0.03    # außerhalb: in einer Sekunde auf 3 % (AgOpenGPS: 0,7 je Takt)
 FALSCH_FAKTOR = 3.0
+PENDEL_FENSTER_S = 10.0
+PENDEL_SPANNE_M = 0.10   # so weit (Spitze zu Spitze) muss es pendeln
+PENDEL_WECHSEL = 2       # so oft wechselt die Abweichung im Fenster die Seite
+PENDEL_HYSTERESE_M = 0.02
+PENDEL_ABKLINGEN_JE_S = 0.93   # pendelt es: in 10 s auf rund die Hälfte
 
 
 class SpurIntegral:
@@ -43,11 +54,16 @@ class SpurIntegral:
         self._glatt: float | None = None
         self._richtung = ""
         self.gemerkt: dict[str, float] = {}
+        self._zeit = 0.0
+        self._verlauf: deque = deque()     # (Zeit, geglättete Abweichung)
+        self.pendelt = False
 
     def zuruecksetzen(self, alles: bool = True) -> None:
         self.wert_deg = 0.0
         self._vorher_quer = None
         self._glatt = None
+        self._verlauf.clear()
+        self.pendelt = False
         if alles:
             self.gemerkt = {}
             self._richtung = ""
@@ -77,6 +93,8 @@ class SpurIntegral:
             self.wert_deg = self.gemerkt.get(richtung, 0.0)
             self._vorher_quer = None
             self._glatt = None
+            self._verlauf.clear()
+            self.pendelt = False
         if not (0.0 < dt < 1.0):
             self._vorher_quer = self._glatt = quer_m
             return self.wert_deg
@@ -86,8 +104,11 @@ class SpurIntegral:
         self._glatt = vorher + (quer_m - vorher) * min(1.0, dt / GLAETTUNG_S)
         wandern = abs(self._glatt - vorher) / dt
         self._vorher_quer = quer_m
+        self.pendelt = self._pendeln_merken(dt)
         nahe = auf_spur and tempo_ms > MIN_TEMPO_MS and abs(quer_m) < NAHE_M
-        if nahe and wandern < RUHIG_M_S:
+        if self.pendelt:
+            self.wert_deg *= PENDEL_ABKLINGEN_JE_S ** dt
+        elif nahe and wandern < RUHIG_M_S:
             schritt = -staerke * quer_m * dt
             # Zeigt der Ausgleich in dieselbe Richtung wie die Abweichung, drückt er die
             # Maschine weiter weg: dann schneller zurücknehmen.
@@ -98,6 +119,27 @@ class SpurIntegral:
         elif not nahe:
             self.wert_deg *= ABKLINGEN_JE_S ** dt
         return self.wert_deg
+
+    def _pendeln_merken(self, dt: float) -> bool:
+        self._zeit += dt
+        self._verlauf.append((self._zeit, self._glatt))
+        while self._verlauf and self._zeit - self._verlauf[0][0] > PENDEL_FENSTER_S:
+            self._verlauf.popleft()
+        if len(self._verlauf) < 10 or self._zeit - self._verlauf[0][0] < PENDEL_FENSTER_S / 2:
+            return False
+        werte = [w for _, w in self._verlauf]
+        if max(werte) - min(werte) < PENDEL_SPANNE_M:
+            return False
+        mittel = sum(werte) / len(werte)
+        wechsel, seite = 0, 0
+        for w in werte:
+            if w - mittel > PENDEL_HYSTERESE_M:
+                wechsel += seite == -1
+                seite = 1
+            elif w - mittel < -PENDEL_HYSTERESE_M:
+                wechsel += seite == 1
+                seite = -1
+        return wechsel >= PENDEL_WECHSEL
 
 
 def hang_vorsteuerung(neigung_deg: float, faktor: float) -> float:

@@ -77,3 +77,13 @@ test('the buffer forgets what is older than three minutes', () => {
   }
   assert.ok(a.punkte[a.punkte.length - 1].t - a.punkte[0].t <= 180);
 });
+
+test('a slow wheel points Stanley to the predictive mode, and the predictive mode to its inertia', () => {
+  const k = { genug: true, durchgaenge: 0, amplitude: 0, mittel: 0, effektiv: 1, max: 2, nachlauf: 1.2, vollAnteil: 0 };
+  assert.match(befund(k, 'stanley').tipps.join(' '), /Vorausschauend.*1,2 s/);
+  assert.match(befund(k, 'voraus').tipps.join(' '), /Trägheit der Lenkung auf 1,2 s/);
+  assert.match(befund({ ...k, nachlauf: 0.4 }, 'stanley').tipps.join(' '), /Latenz auf 400 ms/);
+  const { schrittKurz } = require('../lenklive.js');
+  assert.strictEqual(schrittKurz({ was: 'regelart', von: 'stanley', nach: 'voraus' }), 'Regelart Vorausschauend');
+  assert.strictEqual(schrittKurz({ was: 'lenk_traegheit_s', von: 0.3, nach: 1.2 }), 'Trägheit 0,30→1,20');
+});

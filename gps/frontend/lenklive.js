@@ -27,6 +27,8 @@
   const TRAEGE_CM = 5;
   const NACHLAUF_MAX_S = 2;
   const NACHLAUF_MELDEN_S = 0.3;
+  // Ab so viel Nachlauf schaukelt sich Stanley auf, egal wie sanft (abstimmung.py).
+  const NACHLAUF_VORAUS_S = 0.6;
   const VOLLE_LEISTUNG = 0.95;
 
   /* Ein Messpunkt aus dem Zustand des Servers - oder null, wenn nichts zu messen ist. */
@@ -176,8 +178,15 @@
       text = `Gut: ${zahl(k.effektiv, 1)} cm effektiv, höchstens ${zahl(k.max)} cm.`;
     }
     if (k.nachlauf != null && k.nachlauf >= NACHLAUF_MELDEN_S) {
-      tipps.push(`Das Rad folgt dem Befehl ${zahl(k.nachlauf, 1)} s später – ` +
-        (regelart === 'voraus' ? 'Trägheit der Lenkung' : 'Latenz') + ' entsprechend erhöhen.');
+      const s = zahl(k.nachlauf, 1);
+      if (regelart === 'voraus') {
+        tipps.push(`Das Rad folgt dem Befehl ${s} s später – Trägheit der Lenkung auf ${s} s stellen.`);
+      } else if (k.nachlauf >= NACHLAUF_VORAUS_S) {
+        tipps.push(`Das Rad folgt dem Befehl erst ${s} s später – dafür ist Stanley zu träge: Regelart ` +
+          `„Vorausschauend“ mit Trägheit ${s} s (Traktor & Gerät), oder den Lenk-Assistenten „Stellt selbst nach“ machen lassen.`);
+      } else {
+        tipps.push(`Das Rad folgt dem Befehl ${s} s später – Latenz auf ${zahl(k.nachlauf * 1000)} ms stellen.`);
+      }
     }
     if (k.vollAnteil >= 0.2) {
       tipps.push(`Motor ${zahl(k.vollAnteil * 100)} % der Zeit bei voller Leistung – er kommt nicht hinterher (Motorregler, Mindestleistung).`);
@@ -316,7 +325,9 @@
   }
 
   function schrittKurz(s) {
-    const was = { steer_gain: 'Schärfe', actuator_latency_ms: 'Latenz' }[s.was] || s.was;
+    const was = { steer_gain: 'Schärfe', actuator_latency_ms: 'Latenz', lenk_traegheit_s: 'Trägheit',
+      regelart: 'Regelart' }[s.was] || s.was;
+    if (typeof s.nach === 'string') return `${was} ${{ voraus: 'Vorausschauend', stanley: 'Stanley' }[s.nach] || s.nach}`;
     return s.von || s.nach ? `${was} ${zahl(s.von, 2)}→${zahl(s.nach, 2)}` : was;
   }
 

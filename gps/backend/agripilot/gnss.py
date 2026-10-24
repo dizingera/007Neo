@@ -16,6 +16,7 @@ import asyncio
 import math
 import random
 import time
+from collections import deque
 from typing import Awaitable, Callable, Optional
 
 from .geo import LocalPlane
@@ -241,6 +242,13 @@ class SimulatorSource(GnssSource):
         self.rad_deg = 0.0
         self.lenk_traegheit_s = 0.3
         self.lenk_rate_deg_s = 30.0
+        # Totzeit: so lange, bis das Rad überhaupt auf einen Befehl reagiert (USB,
+        # Anlaufen des Motors, Spiel). Ein langsamer Lenkmotor lässt sich damit am
+        # Schreibtisch nachstellen.
+        self.lenk_totzeit_s = 0.0
+        self._sim_zeit = 0.0
+        self._befehle: deque = deque()       # (Zeit, Befehl), noch nicht beim Rad angekommen
+        self._geliefert = 0.0                # der Befehl, nach dem sich das Rad gerade richtet
         self.wheelbase = 2.6
         # east/north ist die Mitte der Hinterachse - dort gilt das Einspurmodell.
         # Gemeldet wird aber die Antenne, die beim echten Traktor auf dem
@@ -294,6 +302,8 @@ class SimulatorSource(GnssSource):
         self.heading = heading
         self.steer_deg = 0.0
         self.rad_deg = 0.0
+        self._befehle.clear()
+        self._geliefert = 0.0
 
     async def run(self) -> None:
         self.running = True
@@ -312,8 +322,21 @@ class SimulatorSource(GnssSource):
             await self.handle_line(self._rmc(lat, lon))
             await asyncio.sleep(dt)
 
+    def _verzoegerter_befehl(self, dt: float) -> float:
+        self._sim_zeit += dt
+        if self.lenk_totzeit_s <= 0:
+            self._befehle.clear()
+            self._geliefert = self.steer_deg
+            return self.steer_deg
+        self._befehle.append((self._sim_zeit, self.steer_deg))
+        frist = self._sim_zeit - self.lenk_totzeit_s
+        while self._befehle and self._befehle[0][0] <= frist + 1e-9:
+            self._geliefert = self._befehle.popleft()[1]
+        return self._geliefert
+
     def _step(self, dt: float) -> None:
-        schritt = (self.steer_deg - self.rad_deg) * min(1.0, dt / max(0.01, self.lenk_traegheit_s))
+        ziel = self._verzoegerter_befehl(dt)
+        schritt = (ziel - self.rad_deg) * min(1.0, dt / max(0.01, self.lenk_traegheit_s))
         grenze = self.lenk_rate_deg_s * dt
         self.rad_deg += max(-grenze, min(grenze, schritt))
         steer = math.radians(self.rad_deg + self.rad_versatz_deg)

@@ -2789,6 +2789,9 @@ function renderLenkLive() {
       state.live && state.live.genauigkeit ? `Laufende Arbeit: ${genauigkeitText(state.live.genauigkeit)}` : '',
       ausgleich && (ausgleich.integral_deg || ausgleich.hang_deg)
         ? `Ausgleich Dauerversatz ${grad(ausgleich.integral_deg)} · Hang ${grad(ausgleich.hang_deg)}` : '',
+      ausgleich && ausgleich.pausiert ? 'Ausgleich Dauerversatz pausiert: die Maschine pendelt.' : '',
+      state.live && state.live.nachlauf && state.live.nachlauf.sicher
+        ? `Rad folgt dem Befehl ${Number(state.live.nachlauf.nachlauf_s).toLocaleString('de-DE', { maximumFractionDigits: 2 })} s später (gemessen)` : '',
     ].filter(Boolean).join('\n');
   }
   if (aufKarte) {
@@ -2820,15 +2823,19 @@ function renderAbstimmung() {
     return;
   }
   const zeilen = [`Verstärkung ${zahl(a.steer_gain)} · Vorhalt ${a.actuator_latency_ms} ms` +
+    (a.regelart === 'voraus' ? ` · Vorausschauend, Trägheit ${zahl(a.lenk_traegheit_s)} s` : '') +
     (a.ausgangswerte ? ` (Ausgang: ${zahl(a.ausgangswerte.steer_gain)} / ${a.ausgangswerte.actuator_latency_ms} ms)` : '')];
+  if (a.nachlauf_s != null) zeilen.push(`Gemessen: Das Rad folgt dem Befehl ${zahl(a.nachlauf_s, 1)} s später.`);
   zeilen.push(a.befund
     ? `Letzte Bewertung: ${{ schwingt: 'pendelt', traege: 'zu träge', gut: 'gut' }[a.befund.art] || a.befund.art}` +
       ` (${zahl(a.befund.effektiv_m * 100, 0)} cm effektiv)`
     : `Sammelt Messwerte … ${zahl(a.sammelt_s, 0)} von ${a.fenster_s} s ruhige Geradeausfahrt`);
   if (a.hinweis) zeilen.push(a.hinweis);
+  const name = { steer_gain: 'Verstärkung', actuator_latency_ms: 'Vorhalt', lenk_traegheit_s: 'Trägheit',
+    regelart: 'Regelart' };
+  const wert = (x) => (typeof x === 'number' ? zahl(x) : { voraus: 'Vorausschauend', stanley: 'Stanley' }[x] || x);
   (a.schritte || []).slice(-3).forEach((s) => zeilen.push(
-    `${s.was === 'steer_gain' ? 'Verstärkung' : s.was === 'actuator_latency_ms' ? 'Vorhalt' : s.was}` +
-    ` ${s.von ? zahl(s.von) + ' → ' + zahl(s.nach) : ''} ${s.grund}`));
+    `${name[s.was] || s.was} ${s.von ? wert(s.von) + ' → ' + wert(s.nach) : ''} ${s.grund}`));
   el('abstInfo').textContent = zeilen.join('\n');
 }
 setInterval(() => {
@@ -4200,7 +4207,7 @@ const EINRICHTEN_TEXT = {
   feinabstimmung: 'Der Motorregler fährt aus der Mitte 6° nach rechts und zurück, mehrmals, und stellt P/I/D nach, bis der Radwinkel schnell und ohne Überschwingen sitzt (bis etwa 40 Sekunden). Motor des Traktors läuft (Servolenkung), Räder in der Mitte.',
   notaus: 'Not-Aus einbauen und prüfen, dann unten in der Liste „Lenkmotor anbauen“ abhaken.',
   freigabe: 'Erst jetzt darf die Automatik lenken. Scharf geschaltet wird weiterhin von dir, mit geraden Rädern.',
-  probefahrt: 'Die Feinabstimmung der Spurregelung: auf einer AB-Spur mit 5–8 km/h geradeaus, Lenkung scharf. Der Lenk-Assistent stellt Verstärkung und Vorhalt nach – erst nur als Vorschlag, dann auf Wunsch selbst. Erledigt, sobald er „gut“ meldet.',
+  probefahrt: 'Die Feinabstimmung der Spurregelung: auf einer AB-Spur mit 5–8 km/h geradeaus, Lenkung scharf. Der Lenk-Assistent stellt Verstärkung und Vorhalt nach, bei trägem Motor die Regelart – erst nur als Vorschlag, dann auf Wunsch selbst. Erledigt, sobald er „gut“ meldet.',
 };
 const lenkWerkstatt = new LenkWerkstatt({el,api});
 let einrichtenStand = null;

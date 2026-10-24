@@ -1728,7 +1728,8 @@ def create_app(config=None) -> FastAPI:
             simulator_source.set_steer(float(payload["steer_deg"]))
         if "fix_quality" in payload:
             simulator_source.fix_quality = int(payload["fix_quality"])
-        for name in ("seitendrift_ms", "rad_versatz_deg", "mess_korrektur_deg"):
+        for name in ("seitendrift_ms", "rad_versatz_deg", "mess_korrektur_deg",
+                     "lenk_traegheit_s", "lenk_rate_deg_s", "lenk_totzeit_s"):
             if name in payload and hasattr(simulator_source, name):
                 setattr(simulator_source, name, float(payload[name]))
         if "east" in payload and "north" in payload:

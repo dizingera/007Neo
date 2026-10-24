@@ -16,6 +16,8 @@ from __future__ import annotations
 
 from typing import Optional
 
+FREI_NACH_RICHTUNG = ("mindestleistung", "zaehlwerte", "feinabstimmung")
+
 SCHRITTE = [
     ("verbindung", "Lenkmotor verbinden"),
     ("richtung", "Drehrichtung prüfen"),
@@ -85,10 +87,20 @@ def status(erledigt: dict, ausgang: dict, lenkung_freigegeben: bool,
         "probefahrt": bool(erledigt.get("probefahrt"))
                       or ((abstimmung or {}).get("befund") or {}).get("art") == "gut",
     }
+    # Mindestleistung, Zählwerte und Feinabstimmung brauchen nur einen verbundenen
+    # Motor mit richtiger Drehrichtung - in welcher Reihenfolge, ist egal. Wer sie
+    # hintereinander erzwingt, sperrt die Feinabstimmung, obwohl Mindestleistung
+    # und Zählwerte längst eingetragen sind. Die Freigabe wartet weiter auf alles.
+    grundlage = fertig["verbindung"] and fertig["richtung"]
     ergebnis, davor_fertig = [], True
     for kennung, titel in SCHRITTE:
-        ergebnis.append({"id": kennung, "titel": titel, "fertig": fertig[kennung],
-                         "moeglich": davor_fertig or kennung == "notaus",
+        if kennung == "notaus":
+            moeglich = True
+        elif kennung in FREI_NACH_RICHTUNG:
+            moeglich = grundlage
+        else:
+            moeglich = davor_fertig
+        ergebnis.append({"id": kennung, "titel": titel, "fertig": fertig[kennung], "moeglich": moeglich,
                          "werte": erledigt.get(kennung) if isinstance(erledigt.get(kennung), dict) else None})
         if kennung != "notaus":
             davor_fertig = davor_fertig and fertig[kennung]

@@ -1,5 +1,46 @@
 # Bedienung im Feld
 
+## Träger Lenkmotor: Nachlauf messen, Regelart danach (ab 1.5.77)
+
+Am 24.10.2026 schaukelte sich die Lenkung am John Deere 7530 auf Herrenwiesen
+auf: im Mittel 32 cm daneben, bis 1,5 m, zehnmal von selbst abgegeben. Der
+Lenk-Assistent hatte nur die Lenkschärfe gesenkt (0,9 → 0,61). Ursache ist ein
+**träger Lenkmotor**: Das Rad folgt dem Befehl erst nach einer guten Sekunde. Dann
+schaukelt sich die Regelart **Stanley** auf, egal wie sanft sie eingestellt ist,
+und der **Ausgleich Dauerversatz** schaukelt kräftig mit.
+
+Im Simulator mit so einem Motor (0,6 s Totzeit, 1 s Trägheit, 6 °/s) und Andys Werten:
+Stanley 15–34 cm im Mittel, bis 71 cm und wachsend. **„Vorausschauend“ mit der
+Trägheit = gemessenem Nachlauf: rund 2 cm.**
+
+Neu:
+
+* **AgriPilot misst den Nachlauf selbst**, solange die Lenkung lenkt: aus dem
+  Befehl und dem Radwinkel vom Drehgeber. Steht unter *Lenkung live* und beim
+  Lenk-Assistenten („Rad folgt dem Befehl 1,6 s später“).
+* **Der Lenk-Assistent stellt um:** Pendelt die Maschine und folgt das Rad 0,6 s
+  oder später, stellt er (bei „Stellt selbst nach“) die Regelart auf
+  **Vorausschauend** und die **Trägheit der Lenkung** auf den gemessenen
+  Nachlauf. Ist schon „Vorausschauend“ eingestellt, hält er die Trägheit beim
+  Messwert (zwischen dem 0,6- und 1,4-Fachen bleibt sie stehen). Bei „Nur
+  Vorschläge“ sagt er es nur. „Auf die Ausgangswerte zurück“ stellt auch die
+  Regelart zurück.
+* **Der Ausgleich Dauerversatz pausiert, solange die Maschine pendelt**, und baut
+  sich langsam ab (*Lenkung live*: „Ausgleich Dauerversatz pausiert“).
+* **Lenkung einrichten:** Mindestleistung, Zählwerte und Feinabstimmung sind
+  offen, sobald Lenkmotor verbunden und Drehrichtung geprüft sind – in beliebiger
+  Reihenfolge. Die Freigabe wartet weiter auf alle Schritte.
+* **Simulator:** Totzeit, Trägheit und Lenkgeschwindigkeit des Rads lassen sich
+  einstellen (`POST /api/simulator` mit `lenk_totzeit_s`, `lenk_traegheit_s`,
+  `lenk_rate_deg_s`).
+
+**Von Hand, ohne Assistent:** Traktor & Gerät → Lenkung → Regelart
+„Vorausschauend“, Trägheit der Lenkung = der Wert aus *Lenkung live* (sonst 1,0 s
+zum Anfangen), „Traktor übernehmen“.
+
+Nicht am Traktor geprüft. Langsamer Motor bleibt ein Hardware-Thema: Größte
+Leistung und Feinabstimmung des Lenkmotors machen ihn schneller.
+
 ## Genauere Flächenmarkierung ab 1.5.43
 
 Grün zeigt die bearbeitete Fläche, Bernstein kennzeichnet die Überlappung mit
@@ -710,8 +751,9 @@ Radeinschlag (**Drehgeber: Zählwerte je Grad**) einmal ausmessen, nicht schätz
 
 Auf der Seite Lenkung, in der **Lenkwerkstatt**, führt **„Lenkung einrichten“** in acht Schritten von der
 Verbindung bis zur Probefahrt. Jeder Schritt hat seinen Knopf und bekommt einen
-Haken, wenn er erledigt ist; spätere bleiben gesperrt, bis die früheren fertig
-sind (nur der Not-Aus-Schritt steht frei). Am Stand arbeiten: Lenkung aus, Räder
+Haken, wenn er erledigt ist. Mindestleistung, Zählwerte und Feinabstimmung sind
+offen, sobald Verbindung und Drehrichtung stimmen; Freigabe und Probefahrt warten
+auf alle früheren Schritte (der Not-Aus-Schritt steht immer frei). Am Stand arbeiten: Lenkung aus, Räder
 in der Mitte, Not-Aus griffbereit.
 
 1. **Lenkmotor verbinden** – sucht die Phidget-Steuerung (Phidget21 oder 22) und
@@ -759,7 +801,7 @@ dreht:
 | Pendelt | schwingt mit Periode und Weite um die Spur | Lenkschärfe senken (bei „Vorausschauend“ Trägheit erhöhen) |
 | Bleibt daneben | Dauerabweichung zu einer Seite | Antenne seitlich nachmessen, Spur verschieben |
 | Träge | kommt nur langsam zurück | Lenkschärfe erhöhen |
-| Rad folgt später | Rad hinkt dem Befehl hinterher | Latenz bzw. Trägheit um diesen Wert erhöhen |
+| Rad folgt später | Rad hinkt dem Befehl hinterher | ab 0,6 s: „Vorausschauend“ mit Trägheit = Nachlauf; darunter Latenz bzw. Trägheit auf diesen Wert |
 | Volle Motorleistung | Motor kommt nicht hinterher | Motorregler / Mindestleistung (Lenkung einrichten) |
 
 **Auf der Karte einblenden** legt dieselben Kurven klein neben die Zahlen unten
@@ -785,6 +827,9 @@ Spurwechsel, kein Versatz in den letzten Sekunden), in Fenstern von 20 Sekunden:
   nichts, geht der Schritt zurück, und der Assistent sagt, dass es keine Frage der
   Reglerstärke ist (Lenkmitte, Hang oder Versatz prüfen).
 * **gut:** nichts ändern.
+* **träger Motor** (ab 1.5.77): Folgt das Rad gemessen 0,6 s oder später und es
+  pendelt, kommt das vor allem anderen: Regelart „Vorausschauend“, Trägheit =
+  Nachlauf (siehe oben).
 
 Modus: **Aus**, **Nur Vorschläge** (zeigt, was er ändern würde) oder **Stellt selbst
 nach**. Es gibt höchstens einen Schritt je Fenster und zwölf je Einschalten; die

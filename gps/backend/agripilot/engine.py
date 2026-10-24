@@ -47,6 +47,7 @@ from .rtkbruecke import RtkBruecke
 from .genauigkeit import Genauigkeit
 from .spurintegral import SpurIntegral, hang_vorsteuerung
 from .radmitte import Radmitte
+from .nachlauf import Nachlauf
 import json
 from .writer import HintergrundSchreiber
 
@@ -117,6 +118,7 @@ class Engine:
         self.spurausgleich = {"integral_deg": 0.0, "hang_deg": 0.0}
         self._ausgleich_at: Optional[float] = None
         self.radmitte = Radmitte()           # Radmitte aus der Fahrt lernen
+        self.nachlauf = Nachlauf()           # wie lange das Rad dem Befehl hinterherläuft
         # Hindernisse des geladenen Feldes in lokalen Metern (hindernisse.py).
         self._hindernisse: list[dict] = []
         self._hindernisse_feld: Optional[str] = None
@@ -158,8 +160,11 @@ class Engine:
         # kleinen Schritten nach (abstimmung.py). Der Modus überlebt den Neustart.
         self.abstimmung = abstimmung_module.Lenkabstimmung(
             lesen=lambda: {"steer_gain": self.profile.steer_gain,
-                           "actuator_latency_ms": self.profile.actuator_latency_ms},
-            setzen=lambda werte: self.update_profile(werte, stempeln=False))
+                           "actuator_latency_ms": self.profile.actuator_latency_ms,
+                           "regelart": self.profile.regelart,
+                           "lenk_traegheit_s": self.profile.lenk_traegheit_s},
+            setzen=lambda werte: self.update_profile(werte, stempeln=False),
+            nachlauf=lambda: self.nachlauf.sicher_s())
         gespeichert = self.store.get_setting("lenkabstimmung") or {}
         if gespeichert.get("modus") in ("beobachten", "automatisch"):
             self.abstimmung.ausgangswerte = gespeichert.get("ausgangswerte")
@@ -2176,7 +2181,8 @@ class Engine:
         if lage is not None and lage.fresh and self.profile.hang_vorsteuerung and auf_spur:
             hang = hang_vorsteuerung(lage.roll_deg * self.config.imu.roll_sign,
                                      self.profile.hang_vorsteuerung)
-        self.spurausgleich = {"integral_deg": round(integral, 2), "hang_deg": round(hang, 2)}
+        self.spurausgleich = {"integral_deg": round(integral, 2), "hang_deg": round(hang, 2),
+                              "pausiert": self.spur_integral.pendelt}
         if integral or hang:
             self.guidance.steer_angle_deg = self.profile.einschlag_begrenzen(
                 self.guidance.steer_angle_deg + integral + hang)
@@ -2386,6 +2392,9 @@ class Engine:
                 self.steering.output.feedback.wheel_angle_deg = messen()
         self._steering_was_engaged = command.engaged
         ausgang = getattr(self.steering, "output", None)
+        feedback = getattr(ausgang, "feedback", None)
+        self.nachlauf.probe(fix.received_at or time.time(), command.angle_deg,
+                            getattr(feedback, "wheel_angle_deg", None), command.engaged)
         self.radmitte.probe(ausgang.feedback.wheel_angle_deg if ausgang is not None else None, command.engaged,
                             self.line is not None and self.line.mode == "ab" and self.turn is None,
                             fix.speed_ms, self.guidance.cross_track_m, self.guidance.heading_error_deg)
@@ -2546,6 +2555,7 @@ class Engine:
             "genauigkeit": self.genauigkeit.ergebnis(self.steering.abgaben if self.steering else 0)
                            if self.job else None,
             "spurausgleich": self.spurausgleich,
+            "nachlauf": self.nachlauf.ergebnis(),
             "radmitte": {"sammelt": self.radmitte.sammelt, "proben": len(self.radmitte.proben)},
             "rtk_bruecke": self.rtk_bruecke.status(time.time(), self.config.steering.rtk_ueberbrueckung_s),
             "hindernisse": [{k: h[k] for k in ("id", "name", "x", "y", "radius_m")} for h in self._hindernisse],
