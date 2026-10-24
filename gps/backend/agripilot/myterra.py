@@ -258,6 +258,9 @@ def maschinen_uebernehmen(engine, liste: list[dict], traktor: str = "") -> dict:
         engine.store.set_setting("traktoren", liste_traktoren)
     if traktoren_neu or umgestellt:
         engine.select_traktor(traktor_zuvor)
+    # War das gewählte Gerät der alte Mähdrescher (jetzt Schneidwerk) oder ist der gewählte
+    # Traktor jetzt ein Mähdrescher: Fahrzeug und Gerät wieder zusammenpassen lassen.
+    engine.geraet_zum_fahrzeug()
     engine.note(f"Aus MyTerra: {len(ergebnis['neu'])} Maschinen und {len(traktoren_neu)} "
                 f"Traktoren neu, {len(ergebnis['vorhanden'])} Maschinen schon da")
     return {**ergebnis, "traktoren": traktoren, "traktoren_neu": traktoren_neu}

@@ -241,6 +241,15 @@ class MaschinenUebernahmeTests(unittest.TestCase):
             traktoren = {t["name"]: t for t in c.get("/api/traktoren").json()}
             self.assertEqual(traktoren["Claas Dominator 98 SL"]["bauform"], "maehdrescher")
 
+    def test_when_the_chosen_implement_was_the_combine_the_tractor_gets_a_real_one(self):
+        with tempfile.TemporaryDirectory() as ordner, self._client(ordner) as c:
+            c.post("/api/profiles", json={"name": "Grubber", "werte": {"width_m": 3.0}})
+            c.post("/api/profiles", json={"name": "Claas Dominator 98 SL", "werte": {"width_m": 4.5}})
+            c.post("/api/myterra/maschinen", json={"maschinen": MYTERRA_LISTE})
+            zustand = c.get("/api/state").json()["profile"]
+            self.assertEqual(zustand["bauform"], "traktor")
+            self.assertNotEqual(zustand["geraet_art"], "schneidwerk")
+
     def test_choosing_the_combine_brings_its_header_and_back(self):
         with tempfile.TemporaryDirectory() as ordner, self._client(ordner) as c:
             c.post("/api/myterra/maschinen", json={"maschinen": MYTERRA_LISTE})

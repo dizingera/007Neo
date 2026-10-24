@@ -1102,8 +1102,14 @@ function drawVehicle() {
   ctx.globalAlpha = fahrzeugDeckkraft;
   ctx.translate(pose[0] + rahmen[0], pose[1] + rahmen[1]);
   ctx.rotate(-kurs);           // Welt ist y-oben: +y ist vorwärts, +x rechts
-  geraetZeichnen(s, profil, implement, geraetRechts, geraetVor);
-  traktorZeichnen(profil);
+  // Das Schneidwerk liegt vorn: über den Mähdrescher, den das Herauszoomen vergrößert.
+  if (profil.geraet_art === 'schneidwerk') {
+    traktorZeichnen(profil);
+    geraetZeichnen(s, profil, implement, geraetRechts, geraetVor);
+  } else {
+    geraetZeichnen(s, profil, implement, geraetRechts, geraetVor);
+    traktorZeichnen(profil);
+  }
   ctx.restore();
 }
 
@@ -3063,8 +3069,7 @@ async function refreshLists(takt = false) {
   if (active === 'machine') {
     if (!settings.geladen) loadSettings();
     fillProfile();
-    renderProfiles(await (await fetch('/api/profiles')).json());
-    renderTraktoren();
+    renderTraktoren();       // zeichnet danach auch die Geräteliste, passend zum Fahrzeug
   }
   if (active === 'headland') fillHeadland();
   if (active === 'saatplan') {
