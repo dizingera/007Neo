@@ -45,7 +45,7 @@ MOTORTEST_MAX = 0.35            # höchstens so viel der vollen Leistung im Moto
 MOTORTEST_DAUER_MAX_S = 1.0     # und höchstens so lange am Stück
 FEIN_SPRUNG_DEG = 6.0           # so weit fährt die Feinabstimmung aus der Mitte
 FEIN_HALTEN_S = 2.5             # so lange hat der Regler je Sprung Zeit
-FEIN_DURCHGAENGE = 8            # höchstens so viele Durchgänge hin und zurück
+FEIN_DURCHGAENGE = 12           # höchstens so viele Durchgänge hin und zurück
 EINMESS_IMPULS_S = 0.35         # so lang ist ein Impuls beim Einmessen
 EINMESS_REGELTAKT_S = 0.12      # Zugabe, damit der Regelkreis den Impuls sicher durchläuft
 EINMESS_AUSROLLEN_S = 0.25      # nach dem Impuls ausrollen lassen, dann ablesen
@@ -684,7 +684,8 @@ class PhidgetOutput(SteerOutput):
             raise RuntimeError("Die Feinabstimmung braucht einen Drehgeber oder Radwinkelsensor "
                                "als Rückmeldung (Menü → Lenkung → Lenkmotor → Rückmeldung)")
         cfg = self.config
-        start = {"gain_p": cfg.gain_p, "gain_i": cfg.gain_i, "gain_d": cfg.gain_d}
+        start = {"gain_p": cfg.gain_p, "gain_i": cfg.gain_i, "gain_d": cfg.gain_d,
+                 "max_duty": cfg.max_duty}
         if self.encoder is not None:
             self._encoder_centre = self.encoder.getPosition()     # hier ist die Mitte
         mitte = self.measured_angle() or 0.0
@@ -696,21 +697,33 @@ class PhidgetOutput(SteerOutput):
                 zurueck = await self.sprung(mitte, FEIN_HALTEN_S)
                 befunde = [le.bewerte_sprung(hin, mitte, mitte + sprung_deg),
                            le.bewerte_sprung(zurueck, mitte + sprung_deg, mitte)]
-                ergebnis = le.feinabstimmung_schritt(befunde, cfg.gain_p, cfg.gain_i, cfg.gain_d)
-                verlauf.append({"p": cfg.gain_p, "i": cfg.gain_i, "d": cfg.gain_d,
+                ergebnis = le.feinabstimmung_schritt(befunde, cfg.gain_p, cfg.gain_i, cfg.gain_d,
+                                                     leistung=cfg.max_duty, sprung_deg=sprung_deg)
+                verlauf.append({"p": cfg.gain_p, "i": cfg.gain_i, "d": cfg.gain_d, "leistung": cfg.max_duty,
                                 "hin": befunde[0], "zurueck": befunde[1], "text": ergebnis["text"]})
                 cfg.gain_p, cfg.gain_i, cfg.gain_d = ergebnis["p"], ergebnis["i"], ergebnis["d"]
+                cfg.max_duty = ergebnis.get("leistung") or cfg.max_duty
                 if ergebnis["fertig"]:
                     break
             else:
                 ergebnis = {**ergebnis, "gut": False,
                             "text": f"Nach {durchgaenge} Durchgängen nicht sauber - Ausgangswerte zurück."}
+            if not ergebnis.get("gut"):
+                bestes = le.bester_durchgang(verlauf)
+                if bestes is not None:
+                    cfg.gain_p, cfg.gain_i, cfg.gain_d = bestes["p"], bestes["i"], bestes["d"]
+                    cfg.max_duty = bestes["leistung"]
+                    ergebnis = {**ergebnis, "gut": True,
+                                "text": f"Schneller geht es mit diesem Motor nicht ohne Überschwingen: "
+                                        f"90 % nach {bestes['anstieg_s']:.2f} s. Diese Werte gelten."}
         finally:
             self._safe_stop()
         if not ergebnis.get("gut"):
             cfg.gain_p, cfg.gain_i, cfg.gain_d = start["gain_p"], start["gain_i"], start["gain_d"]
+            cfg.max_duty = start["max_duty"]
         return {"gut": bool(ergebnis.get("gut")), "text": ergebnis["text"], "start": start,
-                "ende": {"gain_p": cfg.gain_p, "gain_i": cfg.gain_i, "gain_d": cfg.gain_d},
+                "ende": {"gain_p": cfg.gain_p, "gain_i": cfg.gain_i, "gain_d": cfg.gain_d,
+                         "max_duty": cfg.max_duty},
                 "verlauf": verlauf}
 
     def _error(self, measured: Optional[float]) -> float:

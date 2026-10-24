@@ -4204,7 +4204,7 @@ const EINRICHTEN_TEXT = {
   richtung: 'Der Motor lenkt kurz nach rechts. Sag dann, wohin die Räder gingen - AgriPilot stellt Motor- und Drehgeberrichtung selbst richtig. Danach zur Kontrolle noch einmal.',
   mindestleistung: 'Kurze Impulse links und rechts, stufenweise stärker: ab wann läuft der Motor an? Daraus die Mindestleistung.',
   zaehlwerte: 'Starten, von Hand bis zum linken und rechten Anschlag lenken, beenden. Mit dem Gesamteinschlag der Räder am Boden ergeben sich die Zählwerte je Grad.',
-  feinabstimmung: 'Der Motorregler fährt aus der Mitte 6° nach rechts und zurück, mehrmals, und stellt P/I/D nach, bis der Radwinkel schnell und ohne Überschwingen sitzt (bis etwa 40 Sekunden). Motor des Traktors läuft (Servolenkung), Räder in der Mitte.',
+  feinabstimmung: 'Der Motorregler fährt aus der Mitte 6° nach rechts und zurück, mehrmals, und stellt P/I/D und bei Bedarf die Größte Leistung nach, bis der Radwinkel schnell und ohne Überschwingen sitzt (bis etwa 60 Sekunden). Motor des Traktors läuft (Servolenkung), Räder in der Mitte.',
   notaus: 'Not-Aus einbauen und prüfen, dann unten in der Liste „Lenkmotor anbauen“ abhaken.',
   freigabe: 'Erst jetzt darf die Automatik lenken. Scharf geschaltet wird weiterhin von dir, mit geraden Rädern.',
   probefahrt: 'Die Feinabstimmung der Spurregelung: auf einer AB-Spur mit 5–8 km/h geradeaus, Lenkung scharf. Der Lenk-Assistent stellt Verstärkung und Vorhalt nach, bei trägem Motor die Regelart – erst nur als Vorschlag, dann auf Wunsch selbst. Erledigt, sobald er „gut“ meldet.',
@@ -4380,7 +4380,7 @@ async function einrichtenProbefahrt(modus) {
 }
 
 async function einrichtenFeinabstimmung() {
-  einrichtenMelden('Feinabstimmung läuft … der Motor fährt mehrmals 6° hin und zurück (bis etwa 40 Sekunden). ' +
+  einrichtenMelden('Feinabstimmung läuft … der Motor fährt mehrmals 6° hin und zurück (bis etwa 60 Sekunden). ' +
     'Lenkrad nicht festhalten, Not-Aus in Reichweite.');
   const antwort = await api('POST', '/api/lenkung/einrichten/feinabstimmung');
   if (!antwort) { einrichtenMelden('Feinabstimmung nicht ausgeführt.'); renderEinrichten(); return; }
@@ -4388,8 +4388,11 @@ async function einrichtenFeinabstimmung() {
   const z = (x) => Number(x).toLocaleString('de-DE', { maximumFractionDigits: 3 });
   const zeilen = [e.text,
     `P ${z(e.start.gain_p)} → ${z(e.ende.gain_p)} · I ${z(e.start.gain_i)} → ${z(e.ende.gain_i)} · ` +
-    `D ${z(e.start.gain_d)} → ${z(e.ende.gain_d)}` + (e.gut ? ' (gespeichert)' : ' (Ausgangswerte bleiben)')];
-  e.verlauf.forEach((v, i) => zeilen.push(`${i + 1}. P ${z(v.p)} I ${z(v.i)} D ${z(v.d)}: ` +
+    `D ${z(e.start.gain_d)} → ${z(e.ende.gain_d)}` +
+    (e.start.max_duty !== undefined ? ` · Größte Leistung ${z(e.start.max_duty)} → ${z(e.ende.max_duty)}` : '') +
+    (e.gut ? ' (gespeichert)' : ' (Ausgangswerte bleiben)')];
+  e.verlauf.forEach((v, i) => zeilen.push(`${i + 1}. P ${z(v.p)} I ${z(v.i)} D ${z(v.d)}` +
+    (v.leistung !== undefined ? ` Leistung ${z(v.leistung)}` : '') + ': ' +
     `90 % nach ${v.hin.anstieg_s === null ? '–' : z(v.hin.anstieg_s) + ' s'}, ` +
     `Überschwingen ${Math.round(v.hin.ueberschwingen * 100)} %, Rest ${z(v.hin.rest_deg)}° – ${v.text}`));
   einrichtenMelden(zeilen.join(String.fromCharCode(10)));

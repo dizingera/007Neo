@@ -214,6 +214,37 @@ class SprungTest(unittest.TestCase):
         self.assertFalse(s["gut"])
         self.assertIn("folgen", s["text"])
 
+    def test_a_motor_running_flat_out_gets_more_power_not_more_p(self):
+        langsam = le.bewerte_sprung(sprungreihe(lambda t: 6.0 * min(1.0, t / 1.0)), 0.0, 6.0)
+        s = le.feinabstimmung_schritt([langsam], 0.09, 0.0, 0.0, leistung=0.55)
+        self.assertEqual(s["p"], 0.09)
+        self.assertAlmostEqual(s["leistung"], 0.715)
+        self.assertFalse(s["fertig"])
+        s = le.feinabstimmung_schritt([langsam], 0.05, 0.0, 0.0, leistung=0.55)   # P zu klein: erst P
+        self.assertAlmostEqual(s["p"], 0.0675)
+        self.assertEqual(s["leistung"], 0.55)
+        s = le.feinabstimmung_schritt([langsam], 0.2, 0.0, 0.0, leistung=le.FEIN_LEISTUNG[1])
+        self.assertAlmostEqual(s["p"], 0.27)                                      # oben: wieder P
+        s = le.feinabstimmung_schritt([langsam], le.FEIN_P[1], 0.0, 0.0, leistung=le.FEIN_LEISTUNG[1])
+        self.assertTrue(s["fertig"])
+        self.assertEqual(s["leistung"], le.FEIN_LEISTUNG[1])
+
+    def test_one_second_for_six_degrees_is_too_slow_now(self):
+        b = le.bewerte_sprung(sprungreihe(lambda t: 6.0 * min(1.0, t / 0.9)), 0.0, 6.0)
+        self.assertFalse(le.feinabstimmung_schritt([b, b], 0.09, 0.0, 0.0)["gut"])
+
+    def test_the_best_clean_pass_wins_only_if_it_is_quicker(self):
+        def befund(anstieg, ueber=0.0):
+            return {"gueltig": True, "bewegt": True, "schwingt": False, "anstieg_s": anstieg,
+                    "ueberschwingen": ueber, "rest_deg": 0.1, "steht": True}
+        verlauf = [{"p": 0.09, "i": 0, "d": 0, "leistung": 0.55, "hin": befund(None), "zurueck": befund(None)},
+                   {"p": 0.12, "i": 0, "d": 0, "leistung": 0.9, "hin": befund(1.1), "zurueck": befund(1.0)},
+                   {"p": 0.16, "i": 0, "d": 0, "leistung": 0.9, "hin": befund(0.9, 0.3), "zurueck": befund(0.9)}]
+        bestes = le.bester_durchgang(verlauf)
+        self.assertEqual((bestes["p"], bestes["leistung"], bestes["anstieg_s"]), (0.12, 0.9, 1.1))
+        verlauf[0]["hin"] = verlauf[0]["zurueck"] = befund(1.08)        # vorher schon so schnell
+        self.assertIsNone(le.bester_durchgang(verlauf))
+
     def test_the_gains_stay_within_their_limits(self):
         langsam = le.bewerte_sprung(sprungreihe(lambda t: 6.0 * t / 3.0), 0.0, 6.0)
         s = le.feinabstimmung_schritt([langsam], le.FEIN_P[1], 0.0, 0.0)
@@ -275,9 +306,26 @@ class FeinabstimmungTest(unittest.TestCase):
         self.assertLessEqual(e["verlauf"][-1]["hin"]["ueberschwingen"], le.FEIN_UEBERSCHWINGEN_MAX)
         self.assertEqual(dll.geschwindigkeit[0], 0.0)
 
+    def test_a_slow_motor_gets_more_power_until_it_is_quick(self):
+        dll = TraegeDLL(faktor=0.15, traegheit=0.3)                # bei 55 % rund 7 Grad je Sekunde
+        ausgang, e = self.abstimmen(dll, gain_p=0.09, gain_i=0.0, gain_d=0.0)
+        self.assertGreater(e["ende"]["max_duty"], 0.55, e["text"])
+        self.assertLessEqual(e["ende"]["max_duty"], le.FEIN_LEISTUNG[1])
+        self.assertTrue(e["gut"], e["text"])
+        self.assertLessEqual(e["verlauf"][-1]["hin"]["anstieg_s"], le.FEIN_ANSTIEG_MAX_S)
+        self.assertEqual(dll.geschwindigkeit[0], 0.0)
+
+    def test_a_motor_that_cannot_get_quick_keeps_its_best_clean_values(self):
+        dll = TraegeDLL(faktor=0.15)                                # schwer: dreht nur langsam hoch
+        ausgang, e = self.abstimmen(dll, gain_p=0.09, gain_i=0.0, gain_d=0.0)
+        self.assertTrue(e["gut"], e["text"])
+        self.assertIn("Schneller geht es", e["text"])
+        self.assertGreater(e["ende"]["max_duty"], 0.55)
+        self.assertEqual(ausgang.config.max_duty, e["ende"]["max_duty"])
+
     def test_a_motor_that_does_not_move_keeps_the_start_values(self):
         dll = TraegeDLL(losbrech=200.0)                             # läuft nie an
         ausgang, e = self.abstimmen(dll, gain_p=0.09, gain_i=0.01, gain_d=0.002)
         self.assertFalse(e["gut"])
-        self.assertEqual(e["ende"], {"gain_p": 0.09, "gain_i": 0.01, "gain_d": 0.002})
+        self.assertEqual(e["ende"], {"gain_p": 0.09, "gain_i": 0.01, "gain_d": 0.002, "max_duty": 0.55})
         self.assertEqual(len(e["verlauf"]), 1)

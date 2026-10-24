@@ -1,5 +1,29 @@
 # Bedienung im Feld
 
+## Schnellerer Lenkmotor: Feinabstimmung verlangt Tempo (ab 1.5.78)
+
+Andy, 24.10.2026: „Der Motor muss noch viel schneller reagieren.“ Gebremst haben
+ihn die Einstellungen, nicht die Platine: **Größte Leistung 0,55** (nie mehr als
+55 %) und **P 0,09** (volle Leistung erst ab 6° Abweichung, darunter kriecht er
+mit der Mindestleistung). Die Feinabstimmung hat das abgesegnet, weil ihr 6° in
+1,2 s genügten.
+
+Neu in der **Feinabstimmung des Lenkmotors** (Lenkung einrichten, Schritt 5):
+
+* Ziel sind jetzt **6° in 0,5 s** (90 % des Sprungs).
+* Läuft der Motor dabei schon an der Größten Leistung, hebt sie die **Größte
+  Leistung** in Schritten (×1,3) an, höchstens bis **0,9** – statt nur P zu drehen.
+* Schafft der Motor die 0,5 s nicht ohne Überschwingen, gilt der **schnellste
+  saubere Durchgang** (Meldung „Schneller geht es mit diesem Motor nicht …“),
+  sofern er schneller ist als vorher. Vorher wurde dann alles verworfen.
+* Bis zu 12 Durchgänge (etwa eine Minute). Am Stand, Traktormotor läuft,
+  Lenkrad nicht festhalten, **Not-Aus in Reichweite**: mit mehr Leistung zieht
+  der Motor kräftiger.
+
+**Von Hand:** Menü → Lenkung → Einstellungen **Lenkmotor** → Größte Leistung 0,9,
+Eigener Regler P 0,25 (volle Leistung ab rund 3,5°). Überschwingt das Rad, P
+etwas senken.
+
 ## Träger Lenkmotor: Nachlauf messen, Regelart danach (ab 1.5.77)
 
 Am 24.10.2026 schaukelte sich die Lenkung am John Deere 7530 auf Herrenwiesen
@@ -769,11 +793,12 @@ in der Mitte, Not-Aus griffbereit.
    Gesamteinschlag der Räder am Boden darüber eintragen.
 5. **Feinabstimmung des Lenkmotors** – am Stand, Traktormotor läuft (Servolenkung),
    Räder in der Mitte: der Motorregler fährt mehrmals 6° nach rechts und zurück und
-   bewertet jeden Sprung (Zeit bis 90 %, Überschwingen, Schwingen, Rest). Danach
-   stellt er P, I und D nach – überschwingt er: weniger P, mehr D; zu langsam: mehr P;
-   bleibt er vor dem Ziel stehen: etwas I. Höchstens acht Durchgänge, feste
-   Grenzen; gelingt es nicht, bleiben die alten Werte und der Grund steht da
-   (z. B. „auch mit größtem P zu langsam – Größte Leistung erhöhen“).
+   bewertet jeden Sprung (Zeit bis 90 % – Ziel 0,5 s –, Überschwingen, Schwingen,
+   Rest). Danach stellt er P, I und D nach – überschwingt er: weniger P, mehr D; zu
+   langsam: mehr P, und läuft der Motor schon voll, mehr **Größte Leistung** (bis
+   0,9); bleibt er vor dem Ziel stehen: etwas I. Höchstens zwölf Durchgänge, feste
+   Grenzen. Wird es nicht ganz sauber, gilt der schnellste saubere Durchgang; gibt
+   es keinen, bleiben die alten Werte und der Grund steht da.
 6. **Not-Aus und Einbau** – unten in der Einbau-Liste „Lenkmotor anbauen“ abhaken.
 7. **Lenkung freigeben** – erst jetzt darf die Automatik lenken.
 8. **Probefahrt** – die Feinabstimmung der Spurregelung: „Nur Vorschläge“ oder

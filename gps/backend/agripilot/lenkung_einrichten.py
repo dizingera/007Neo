@@ -111,11 +111,19 @@ def status(erledigt: dict, ausgang: dict, lenkung_freigegeben: bool,
 # Am Stand fährt der Regler einen kleinen Sprung (6 Grad hin, zurück auf 0) und
 # zeichnet auf, wie der Radwinkel folgt. Daraus wird P/I/D in kleinen Schritten
 # nachgestellt, bis der Sprung schnell, ohne Überschwingen und ohne Rest sitzt.
+# Läuft der Motor dabei schon an der Größten Leistung, hilft mehr P nicht: dann
+# wird die Leistung angehoben (höchstens bis FEIN_LEISTUNG[1]).
 
 FEIN_P = (0.02, 0.6)
 FEIN_I = (0.0, 0.2)
 FEIN_D = (0.0, 0.15)
-FEIN_ANSTIEG_MAX_S = 1.2       # so schnell soll der Sprung zu 90 % erreicht sein
+# So schnell soll der Sprung zu 90 % erreicht sein. Bis 1.5.77 waren es 1,2 s - damit
+# galt ein Motor als „sitzt“, der für die Spur viel zu langsam war (Andy, 24.10.2026:
+# „Der Motor muss noch viel schneller reagieren“). 0,5 s für 6° sind gut 10 °/s am Rad.
+FEIN_ANSTIEG_MAX_S = 0.5
+FEIN_LEISTUNG = (0.2, 0.9)     # Größte Leistung (max_duty), die die Feinabstimmung setzen darf
+FEIN_LEISTUNG_SCHRITT = 1.3
+FEIN_SATT = 0.9                # P x Sprung ab diesem Anteil der Größten Leistung: Motor läuft am Anschlag
 FEIN_UEBERSCHWINGEN_MAX = 0.25 # Anteil des Sprungs
 FEIN_REST_MAX_DEG = 0.6        # bleibende Abweichung am Ende
 FEIN_HYSTERESE_DEG = 0.3
@@ -157,10 +165,50 @@ def bewerte_sprung(aufzeichnung: list, start_deg: float, ziel_deg: float) -> dic
             "steht": steht}
 
 
-def feinabstimmung_schritt(befunde: list[dict], p: float, i: float, d: float) -> dict:
-    """Aus den Befunden eines Durchgangs (hin und zurück) die nächsten Werte."""
+def feinabstimmung_schritt(befunde: list[dict], p: float, i: float, d: float,
+                           leistung: Optional[float] = None, sprung_deg: float = 6.0) -> dict:
+    """Aus den Befunden eines Durchgangs (hin und zurück) die nächsten Werte.
+
+    ``leistung``: die Größte Leistung (max_duty). Ohne sie bleibt die Leistung
+    unangetastet; mit ihr steht der neue Wert unter ``"leistung"`` im Ergebnis.
+    """
     def grenze(wert, bereich):
         return round(max(bereich[0], min(bereich[1], wert)), 4)
+
+    ergebnis = _feinabstimmung_schritt(befunde, p, i, d, leistung, sprung_deg, grenze)
+    ergebnis.setdefault("leistung", leistung)
+    return ergebnis
+
+
+def _brauchbar(befunde: list[dict]) -> Optional[float]:
+    """Die langsamere 90-%-Zeit eines Durchgangs, der sauber sitzt - sonst None."""
+    for b in befunde:
+        if (not b["gueltig"] or not b["bewegt"] or b["schwingt"] or b["anstieg_s"] is None
+                or b["ueberschwingen"] > FEIN_UEBERSCHWINGEN_MAX or abs(b["rest_deg"]) > FEIN_REST_MAX_DEG):
+            return None
+    return max(b["anstieg_s"] for b in befunde)
+
+
+def bester_durchgang(verlauf: list[dict]) -> Optional[dict]:
+    """Der schnellste saubere Durchgang - wenn er schneller ist als der erste.
+
+    Ein träger Motor kommt nicht ohne Überschwingen auf FEIN_ANSTIEG_MAX_S: dann
+    pendelt die Abstimmung zwischen „zu langsam“ und „überschwingt“. Statt alles
+    zu verwerfen (auch die angehobene Leistung), gilt das Beste, was er kann.
+    ``verlauf``: [{"p", "i", "d", "leistung", "hin": Befund, "zurueck": Befund}, ...]
+    """
+    zeiten = [(_brauchbar([v["hin"], v["zurueck"]]), k) for k, v in enumerate(verlauf)]
+    sauber = [(z, k) for z, k in zeiten if z is not None]
+    if not sauber:
+        return None
+    zeit, k = min(sauber)
+    erste = zeiten[0][0]
+    if erste is not None and zeit >= erste - 0.05:
+        return None                      # nicht schneller als vorher: nichts gewonnen
+    return {**verlauf[k], "anstieg_s": round(zeit, 2)}
+
+
+def _feinabstimmung_schritt(befunde, p, i, d, leistung, sprung_deg, grenze) -> dict:
 
     if not all(b["gueltig"] for b in befunde):
         return {"p": p, "i": i, "d": d, "fertig": True, "gut": False,
@@ -180,10 +228,18 @@ def feinabstimmung_schritt(befunde: list[dict], p: float, i: float, d: float) ->
                or (b["anstieg_s"] is not None and b["anstieg_s"] > FEIN_ANSTIEG_MAX_S)
                or (abs(b["rest_deg"]) > FEIN_REST_MAX_DEG and not b["steht"])]
     if langsam:
+        # Verlangt P beim Sprung schon die volle Größte Leistung, läuft der Motor am
+        # Anschlag: dann bringt nur mehr Leistung Tempo.
+        satt = leistung is not None and p * abs(sprung_deg) >= FEIN_SATT * leistung
+        if (satt or p >= FEIN_P[1] - 1e-9) and leistung is not None and leistung < FEIN_LEISTUNG[1] - 1e-9:
+            neu = grenze(leistung * FEIN_LEISTUNG_SCHRITT, FEIN_LEISTUNG)
+            return {"p": p, "i": i, "d": d, "leistung": neu, "fertig": False, "gut": False,
+                    "text": f"Zu langsam, der Motor läuft schon voll - Größte Leistung "
+                            f"{leistung:.2f} → {neu:.2f}."}
         if p >= FEIN_P[1] - 1e-9:
             return {"p": p, "i": i, "d": d, "fertig": True, "gut": False,
-                    "text": "Auch mit größtem P zu langsam - Größte Leistung (max_duty) oder "
-                            "Beschleunigung erhöhen, Motor/Übersetzung prüfen."}
+                    "text": "Auch mit größtem P und größter Leistung zu langsam - Beschleunigung erhöhen, "
+                            "Motor/Übersetzung prüfen."}
         return {"p": grenze(p * 1.35, FEIN_P), "i": i, "d": d, "fertig": False, "gut": False,
                 "text": "Zu langsam - mehr P."}
     if any(abs(b["rest_deg"]) > FEIN_REST_MAX_DEG for b in befunde):
