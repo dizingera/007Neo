@@ -51,6 +51,7 @@ TEMPO_MAX_MS = 6.0          # 21,6 km/h
 QUER_MAX_M = 1.0            # weiter weg: noch beim Einfangen, nicht beim Halten
 
 GAIN_MIN, GAIN_MAX = 0.3, 2.0
+CEREA_AGGR_MIN, CEREA_AGGR_MAX = 30.0, 200.0   # Lenkaggressivität beim Cerea-Regler
 LATENZ_MAX_MS = 300
 SCHRITT_RUNTER = 0.85
 SCHRITT_HOCH = 1.15
@@ -265,6 +266,12 @@ class Lenkabstimmung:
             return
         self._warte = 0
 
+        # Cerea-Regler: Wer ihn gewählt hat, behält ihn. Gedreht wird, was man in
+        # Cerea selbst dreht - die Lenkaggressivität -, nie die Regelart.
+        if werte.get("regelart") == "cerea":
+            self._cerea_auswerten(befund, werte, zeit)
+            return
+
         # Ein träger Motor ist eine Frage der Regelart, nicht der Verstärkung.
         if self._an_den_nachlauf(befund, werte, zeit):
             return
@@ -299,6 +306,26 @@ class Lenkabstimmung:
                 neu = min(GAIN_MAX, gain * SCHRITT_HOCH)
                 if self._aendern("steer_gain", gain, neu, zeit, "zu träge - Versuch mit mehr Verstärkung"):
                     self._versuch = (gain, befund.effektiv_m)
+        else:
+            self.hinweis = f"Gut: {befund.effektiv_m * 100:.0f} cm Abweichung."
+
+    def _cerea_auswerten(self, befund: Befund, werte: dict, zeit: float) -> None:
+        aggr = float(werte.get("cerea_lenk_aggr") or 100.0)
+        if self._pause > 0:
+            self._pause -= 1
+        if befund.art == "schwingt":
+            self.hinweis = (f"Die Maschine pendelt ({befund.amplitude_m * 100:.0f} cm, "
+                            f"alle {befund.periode_s:.1f} s) - Lenkaggressivität runter.")
+            if aggr > CEREA_AGGR_MIN + 1e-9:
+                self._aendern("cerea_lenk_aggr", aggr, max(CEREA_AGGR_MIN, round(aggr * SCHRITT_RUNTER)),
+                              zeit, "pendelt")
+            else:
+                self.hinweis += " Schon ganz unten: D erhöhen, Spiel in der Lenkung oder GPS prüfen."
+        elif befund.art == "traege":
+            self.hinweis = f"Die Abweichung bleibt groß ({befund.effektiv_m * 100:.0f} cm) ohne zu pendeln."
+            if self._pause == 0 and aggr < CEREA_AGGR_MAX - 1e-9:
+                self._aendern("cerea_lenk_aggr", aggr, min(CEREA_AGGR_MAX, round(aggr * SCHRITT_HOCH)),
+                              zeit, "zu träge - Lenkaggressivität etwas höher")
         else:
             self.hinweis = f"Gut: {befund.effektiv_m * 100:.0f} cm Abweichung."
 
@@ -382,6 +409,7 @@ class Lenkabstimmung:
             "actuator_latency_ms": int(werte["actuator_latency_ms"]),
             "regelart": werte.get("regelart"),
             "lenk_traegheit_s": werte.get("lenk_traegheit_s"),
+            "cerea_lenk_aggr": werte.get("cerea_lenk_aggr"),
             "nachlauf_s": self.gemessener_nachlauf(),
             "ausgangswerte": self.ausgangswerte,
             "befund": self.befund.to_dict() if self.befund else None,

@@ -163,9 +163,11 @@
     if (pendelt) {
       art = 'pendelt';
       text = `Pendelt alle ${zahl(k.periode, 1)} s um ±${zahl(k.amplitude)} cm.`;
-      tipps.push(regelart === 'voraus'
-        ? 'Trägheit der Lenkung etwas erhöhen oder Lenkschärfe senken (Traktor & Gerät).'
-        : 'Lenkschärfe etwas senken (Traktor & Gerät).');
+      tipps.push(regelart === 'cerea'
+        ? 'Lenkaggressivität senken, bei Überschwingen D etwas höher (Menü Lenkregler).'
+        : regelart === 'voraus'
+          ? 'Trägheit der Lenkung etwas erhöhen oder Lenkschärfe senken (Traktor & Gerät).'
+          : 'Lenkschärfe etwas senken (Traktor & Gerät).');
     } else if (Math.abs(k.mittel) >= VERSATZ_CM && Math.abs(k.mittel) >= 0.7 * k.effektiv) {
       art = 'versatz';
       text = `Bleibt im Mittel ${zahl(Math.abs(k.mittel))} cm ${k.mittel > 0 ? 'rechts' : 'links'} der Spur.`;
@@ -173,13 +175,16 @@
     } else if (k.effektiv >= TRAEGE_CM && k.durchgaenge <= 2) {
       art = 'traege';
       text = `Kommt nur langsam zurück (${zahl(k.effektiv)} cm effektiv).`;
-      tipps.push('Lenkschärfe etwas erhöhen (Traktor & Gerät).');
+      tipps.push(regelart === 'cerea' ? 'Lenkaggressivität etwas erhöhen (Menü Lenkregler).'
+        : 'Lenkschärfe etwas erhöhen (Traktor & Gerät).');
     } else {
       text = `Gut: ${zahl(k.effektiv, 1)} cm effektiv, höchstens ${zahl(k.max)} cm.`;
     }
     if (k.nachlauf != null && k.nachlauf >= NACHLAUF_MELDEN_S) {
       const s = zahl(k.nachlauf, 1);
-      if (regelart === 'voraus') {
+      if (regelart === 'cerea') {
+        tipps.push(`Das Rad folgt dem Befehl ${s} s später – pendelt er bei Tempo, die Lenkaggressivität senken (Menü Lenkregler).`);
+      } else if (regelart === 'voraus') {
         tipps.push(`Das Rad folgt dem Befehl ${s} s später – Trägheit der Lenkung auf ${s} s stellen.`);
       } else if (k.nachlauf >= NACHLAUF_VORAUS_S) {
         tipps.push(`Das Rad folgt dem Befehl erst ${s} s später – dafür ist Stanley zu träge: Regelart ` +
@@ -326,8 +331,8 @@
 
   function schrittKurz(s) {
     const was = { steer_gain: 'Schärfe', actuator_latency_ms: 'Latenz', lenk_traegheit_s: 'Trägheit',
-      regelart: 'Regelart' }[s.was] || s.was;
-    if (typeof s.nach === 'string') return `${was} ${{ voraus: 'Vorausschauend', stanley: 'Stanley' }[s.nach] || s.nach}`;
+      regelart: 'Regelart', cerea_lenk_aggr: 'Lenkaggr.' }[s.was] || s.was;
+    if (typeof s.nach === 'string') return `${was} ${{ voraus: 'Vorausschauend', stanley: 'Stanley', cerea: 'Cerea' }[s.nach] || s.nach}`;
     return s.von || s.nach ? `${was} ${zahl(s.von, 2)}→${zahl(s.nach, 2)}` : was;
   }
 

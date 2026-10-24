@@ -447,3 +447,35 @@ body.tag { --f-flaeche: rgba(23, 140, 70, .38); --f-doppelt: rgba(200, 104, 12, 
 .sheet #fwKarte:has(.fw-luftbild) .fw-nord { paint-order: stroke; stroke: rgba(0, 0, 0, .7); stroke-width: 3px; fill: #fff; }
 .sheet #fwKarte { touch-action: none; cursor: grab; }
 .feldwerkzeug .fw-zoom { margin-top: -4px; }
+
+/* Lenkregler (Cerea-Werte): große Werte mit − und +, wie der Dialog in Cerea.
+   Bedienbar mit Handschuh: Knöpfe 56 px, Zahl groß und mittig. */
+.regler-live { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin: 0 0 10px; }
+.regler-live span { display: flex; flex-direction: column; gap: 2px; padding: 8px 12px; border-radius: 12px;
+  background: var(--panel-2); border: 1px solid var(--line); }
+.regler-live small { color: var(--muted); font-size: 12px; }
+.regler-live b { font-size: 22px; font-variant-numeric: tabular-nums; }
+.regler-hinweis:empty { display: none; }
+.regler-werte { display: flex; flex-direction: column; gap: 6px; }
+.regler-zeile { display: grid; grid-template-columns: minmax(0, 1fr) 56px 120px 56px; align-items: center;
+  column-gap: 10px; row-gap: 2px; padding: 6px 12px; border-radius: 12px; background: var(--panel-2);
+  border: 1px solid var(--line); }
+.regler-zeile.geaendert { border-color: var(--blue-solid); }
+.regler-name { display: flex; flex-direction: column; font-size: 18px; font-weight: 600; min-width: 0; }
+.regler-name small { font-size: 12px; font-weight: 400; color: var(--muted); }
+.regler-zeile button { height: 48px; font-size: 26px; line-height: 1; padding: 0; }
+.regler-wert { text-align: center; font-size: 28px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.regler-schieber { grid-column: 1 / -1; width: 100%; margin: 0; height: 28px; accent-color: var(--blue-solid); }
+.regler-knoepfe { margin-top: 12px; flex-wrap: wrap; align-items: center; }
+@media (max-width: 700px) {
+  .regler-live { grid-template-columns: repeat(2, 1fr); }
+  .regler-zeile { grid-template-columns: minmax(0, 1fr) 48px 84px 48px; }
+  .regler-wert { font-size: 22px; }
+}
+
+/* Seit dem Lenkregler hat die Leiste 14 Seiten: auf 800 px Höhe einen Hauch
+   flachere Einträge, damit alles ohne Rollen passt (45 px bleibt gut antippbar). */
+@media (max-height: 820px) {
+  .sheet .tab { min-height: 45px; padding-top: 4px; padding-bottom: 4px; }
+  .sheet .tab-gruppe { margin-top: 10px; margin-bottom: 4px; }
+}

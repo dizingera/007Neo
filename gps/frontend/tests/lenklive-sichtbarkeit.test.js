@@ -73,7 +73,7 @@ test('echte Zustandsaufnahme sammelt verdeckt weiter und zeigt aktuelle Kennzahl
   const kontext = {
     state: { live: null, trail: [] }, lenkAufzeichnung: aufzeichnung,
     glaettungNachfuehren() {}, performance: { now: () => 1 }, geraeteLage: () => null,
-    flaeche: {}, zeichnenAnfordern() {}, window: {}, refreshLists() {}, updateHud() {},
+    flaeche: {}, zeichnenAnfordern() {}, window: {}, refreshLists() {}, updateHud() {}, reglerLiveZeigen() {},
     el: id => elemente[id], document: { visibilityState: 'visible',
       querySelector: () => ({ dataset: { tab: 'fields' } }) },
     LenkLive: { befund, zeichnen() {} }, lenkLiveZahlen: () => '',

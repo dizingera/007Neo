@@ -46,6 +46,8 @@ from .flotte import Flotte
 from .rtkbruecke import RtkBruecke
 from .genauigkeit import Genauigkeit
 from .spurintegral import SpurIntegral, hang_vorsteuerung
+from . import cerearegler
+from .cerearegler import CereaIntegral
 from .radmitte import Radmitte
 from .nachlauf import Nachlauf
 import json
@@ -115,6 +117,7 @@ class Engine:
         self.rtk_bruecke = RtkBruecke()
         self.genauigkeit = Genauigkeit()     # wie genau bei der laufenden Arbeit gelenkt wird
         self.spur_integral = SpurIntegral()  # Dauerversatz ausgleichen (spurintegral.py)
+        self.cerea_integral = CereaIntegral()  # I und I2 bei Regelart "cerea" statt dessen
         self.spurausgleich = {"integral_deg": 0.0, "hang_deg": 0.0}
         self._ausgleich_at: Optional[float] = None
         self.radmitte = Radmitte()           # Radmitte aus der Fahrt lernen
@@ -162,7 +165,8 @@ class Engine:
             lesen=lambda: {"steer_gain": self.profile.steer_gain,
                            "actuator_latency_ms": self.profile.actuator_latency_ms,
                            "regelart": self.profile.regelart,
-                           "lenk_traegheit_s": self.profile.lenk_traegheit_s},
+                           "lenk_traegheit_s": self.profile.lenk_traegheit_s,
+                           "cerea_lenk_aggr": self.profile.cerea_lenk_aggr},
             setzen=lambda werte: self.update_profile(werte, stempeln=False),
             nachlauf=lambda: self.nachlauf.sicher_s())
         gespeichert = self.store.get_setting("lenkabstimmung") or {}
@@ -2174,15 +2178,26 @@ class Engine:
         auf_spur = (self.guidance.active and self.turn is None
                     and not self.heading_filter.rueckwaerts)
         richtung = f"{self.line.id if self.line else ''}:{'her' if self.guidance.reversed_direction else 'hin'}"
-        integral = self.spur_integral.update(self.guidance.cross_track_m, dt, fix.speed_ms, lenkt,
-                                             auf_spur, self.profile.spur_integral, richtung)
+        cerea = self.profile.regelart == "cerea"
+        if cerea:
+            # Bei Cerea gleichen I und I2 den Versatz aus - nicht zweimal aufsummieren.
+            integral = self.cerea_integral.update(self.guidance.cross_track_m, dt, fix.speed_ms, lenkt,
+                                                  auf_spur, self.profile, richtung)
+        else:
+            integral = self.spur_integral.update(self.guidance.cross_track_m, dt, fix.speed_ms, lenkt,
+                                                 auf_spur, self.profile.spur_integral, richtung)
         hang = 0.0
         lage = self.imu.attitude if self.imu is not None else None
         if lage is not None and lage.fresh and self.profile.hang_vorsteuerung and auf_spur:
             hang = hang_vorsteuerung(lage.roll_deg * self.config.imu.roll_sign,
                                      self.profile.hang_vorsteuerung)
         self.spurausgleich = {"integral_deg": round(integral, 2), "hang_deg": round(hang, 2),
-                              "pausiert": self.spur_integral.pendelt}
+                              "pausiert": False if cerea else self.spur_integral.pendelt}
+        if cerea:
+            self.spurausgleich.update({
+                "i_deg": round(self.cerea_integral.i_deg, 2), "i2_deg": round(self.cerea_integral.i2_deg, 2),
+                "punkt_voraus_m": round(cerearegler.zielabstand(
+                    self.guidance.cross_track_m, fix.speed_ms, self.profile), 2)})
         if integral or hang:
             self.guidance.steer_angle_deg = self.profile.einschlag_begrenzen(
                 self.guidance.steer_angle_deg + integral + hang)
@@ -2206,6 +2221,7 @@ class Engine:
         # Den Teil, den der Ausgleich bisher für die schiefe Mitte gegengelenkt hat,
         # gleich herausnehmen - sonst liefe die Maschine kurz daneben, bis er sich neu einstellt.
         self.spur_integral.verschieben(-korrektur)
+        self.cerea_integral.verschieben(-korrektur)
         self.note(f"Radmitte um {korrektur:+.2f}° korrigiert")
         return {"korrektur_deg": korrektur, "speichern": speichern}
 

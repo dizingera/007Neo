@@ -98,8 +98,16 @@ class VehicleProfile:
     # Regelart der Spurführung: "stanley" (schaut auf jetzt) oder "voraus"
     # (Fahrzeugmodell, rechnet die Trägheit der Lenkung und die Kurve voraus -
     # siehe vorausregler.py). lenk_traegheit_s: wie lange der Radwinkel braucht,
-    # um einem Befehl zu zwei Dritteln zu folgen.
+    # um einem Befehl zu zwei Dritteln zu folgen. Dritte Regelart: "cerea" (Punkt
+    # voraus auf der Spur mit D, I, I2 - siehe cerearegler.py).
     regelart: str = "stanley"
+    # Regelart "cerea": die Werte wie im Cerea-Dialog (Grundwerte aus Andys Cerea).
+    cerea_lenk_aggr: float = 100.0      # 10-200, höher = Punkt näher = schärfer bei Tempo
+    cerea_auffahr_aggr: float = 100.0   # 10-200, höher = zügiger auf die Spur
+    cerea_l: float = 0.10               # fester Teil des Abstands zum Punkt (m)
+    cerea_i: float = 0.09
+    cerea_i2: float = 0.06
+    cerea_d: float = 0.45
     lenk_traegheit_s: float = 0.3
     steer_gain: float = 0.9         # Stanley k: higher = harder pull back to line
     steer_softening: float = 1.2    # m/s added to the denominator; tames low speed
@@ -236,6 +244,7 @@ TRAKTOR_FELDER = (
     "antenna_forward_m", "antenna_right_m", "antenna_height_m",
     "wheelbase_m", "max_steer_deg", "max_steer_left_deg", "max_steer_right_deg", "max_steer_rate_deg_s",
     "regelart", "lenk_traegheit_s", "bauform", "marke", "spurweite_m",
+    "cerea_lenk_aggr", "cerea_auffahr_aggr", "cerea_l", "cerea_i", "cerea_i2", "cerea_d",
     "spur_integral", "hang_vorsteuerung",
     "steer_gain", "steer_softening", "speed_gain_limit_kmh", "speed_gain_rest",
     "actuator_latency_ms",
@@ -570,7 +579,12 @@ class GuidanceLine:
             right_sign = 1.0 if innen[0] * rx + innen[1] * ry >= 0 else -1.0
         signed_xte = cross_track * right_sign
 
-        if profile.regelart == "voraus" and self.mode != "turn":
+        if profile.regelart == "cerea" and self.mode != "turn":
+            from . import cerearegler
+            gerade = self.mode == "ab" or (self.mode == "plan" and len(self.spuren[pass_number]["punkte"]) == 2)
+            kruemmung = 0.0 if gerade else self._kruemmung(position, vehicle_heading, along)
+            steer = cerearegler.einschlag(signed_xte, heading_error, speed_ms, profile, kruemmung)
+        elif profile.regelart == "voraus" and self.mode != "turn":
             if self._vorausregler is None:
                 from .vorausregler import Vorausregler
                 self._vorausregler = Vorausregler()

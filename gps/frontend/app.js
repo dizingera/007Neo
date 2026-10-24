@@ -146,6 +146,7 @@ function onState(data) {
   // Erstes Bild bei offenem Menü (Aufruf über #menu=…): die Listen wurden vor
   // dem Zustand gefüllt und wussten noch nichts vom geladenen Feld.
   if (!previous && !el('sheet').hidden) refreshLists();
+  reglerLiveZeigen(data);
 
   updateHud(data);
 }
@@ -2077,6 +2078,96 @@ el('btnSaveTraktor').onclick = async () => {
   }
 };
 
+/* ------------------------------------------------------------ Lenkregler
+ * Die Werte wie im Cerea-Dialog (cerearegler.py): − und + in festen Schritten,
+ * die beiden Aggressivitäten zusätzlich als Schieber. Sie gehören zum gewählten
+ * Traktor; „OK“ schaltet die Regelart Cerea ein. Oben live, wo der Punkt liegt. */
+const CEREA_GRUNDWERTE = { cerea_lenk_aggr: 100, cerea_auffahr_aggr: 100, cerea_l: 0.10,
+  cerea_i: 0.09, cerea_i2: 0.06, cerea_d: 0.45 };
+let reglerGeaendert = false;
+const reglerZeilen = [...document.querySelectorAll('#reglerWerte .regler-zeile')];
+
+function reglerWert(zeile) { return parseFloat(zeile.dataset.wert); }
+
+function reglerSetzen(zeile, wert) {
+  const unten = parseFloat(zeile.dataset.min), oben = parseFloat(zeile.dataset.max);
+  const stellen = parseInt(zeile.dataset.stellen, 10);
+  const sauber = Math.min(oben, Math.max(unten, Number(wert.toFixed(stellen))));
+  zeile.dataset.wert = String(sauber);
+  zeile.querySelector('.regler-wert').textContent = sauber.toLocaleString('de-DE',
+    { minimumFractionDigits: stellen, maximumFractionDigits: stellen });
+  const schieber = zeile.querySelector('.regler-schieber');
+  if (schieber) schieber.value = String(sauber);
+  zeile.querySelector('.regler-minus').disabled = sauber <= unten;
+  zeile.querySelector('.regler-plus').disabled = sauber >= oben;
+}
+
+function reglerAendern(zeile, wert) {
+  reglerSetzen(zeile, wert);
+  reglerGeaendert = true;
+  zeile.classList.add('geaendert');
+}
+
+function renderLenkregler(erzwingen = false) {
+  const traktor = traktorenListe.find((t) => t.aktiv) || (state.live && state.live.profile) || {};
+  if (!reglerGeaendert || erzwingen) {
+    reglerZeilen.forEach((zeile) => {
+      const wert = traktor[zeile.dataset.feld];
+      reglerSetzen(zeile, Number.isFinite(wert) ? wert : CEREA_GRUNDWERTE[zeile.dataset.feld]);
+      zeile.classList.remove('geaendert');
+    });
+    reglerGeaendert = false;
+  }
+  const art = { cerea: 'Cerea', voraus: 'Vorausschauend', stanley: 'Stanley' }[traktor.regelart] || traktor.regelart || '–';
+  el('reglerArt').textContent = `${traktor.name || 'Traktor'} · Regelart jetzt: ${art}`;
+  el('btnReglerStanley').hidden = traktor.regelart !== 'cerea';
+  el('reglerHinweis').textContent = traktor.regelart === 'cerea' ? ''
+    : 'Diese Werte wirken erst mit der Regelart Cerea – „OK“ schaltet sie für diesen Traktor ein.';
+}
+
+/* Die Zeile oben: Abweichung, Tempo, Punkt voraus, I + I2 - bei jedem Zustand neu. */
+function reglerLiveZeigen(s) {
+  if (el('sheet').hidden || el('reglerLive').offsetParent === null || !s) return;
+  const g = s.guidance || {};
+  const a = s.spurausgleich || {};
+  const zahl = (x, n) => Number(x).toLocaleString('de-DE', { minimumFractionDigits: n, maximumFractionDigits: n });
+  el('reglerAbw').textContent = g.active && Number.isFinite(g.cross_track_cm) ? `${zahl(g.cross_track_cm, 1)} cm` : '–';
+  el('reglerTempo').textContent = s.fix && Number.isFinite(s.fix.speed_kmh) ? `${zahl(s.fix.speed_kmh, 1)} km/h` : '–';
+  el('reglerPunkt').textContent = Number.isFinite(a.punkt_voraus_m) ? `${zahl(a.punkt_voraus_m, 2)} m` : '–';
+  el('reglerIntegral').textContent = Number.isFinite(a.i_deg) ? `${zahl(a.i_deg + a.i2_deg, 2)}°` : '–';
+}
+
+reglerZeilen.forEach((zeile) => {
+  const schritt = parseFloat(zeile.dataset.schritt);
+  zeile.querySelector('.regler-minus').onclick = () => reglerAendern(zeile, reglerWert(zeile) - schritt);
+  zeile.querySelector('.regler-plus').onclick = () => reglerAendern(zeile, reglerWert(zeile) + schritt);
+  const schieber = zeile.querySelector('.regler-schieber');
+  if (schieber) schieber.oninput = () => reglerAendern(zeile, parseFloat(schieber.value));
+});
+
+el('btnReglerGrund').onclick = () => {
+  reglerZeilen.forEach((zeile) => reglerAendern(zeile, CEREA_GRUNDWERTE[zeile.dataset.feld]));
+};
+
+el('btnReglerOk').onclick = async () => {
+  const payload = { regelart: 'cerea' };
+  reglerZeilen.forEach((zeile) => { payload[zeile.dataset.feld] = reglerWert(zeile); });
+  if (await api('POST', '/api/traktor', payload)) {
+    reglerGeaendert = false;
+    await renderTraktoren();
+    renderLenkregler(true);
+    toast('Lenkregler übernommen – Regelart Cerea');
+  }
+};
+
+el('btnReglerStanley').onclick = async () => {
+  if (await api('POST', '/api/traktor', { regelart: 'stanley' })) {
+    await renderTraktoren();
+    renderLenkregler(true);
+    toast('Regelart wieder Stanley');
+  }
+};
+
 /* ------------------------------------------------------------ Vorgewende */
 
 function fillHeadland() {
@@ -2822,7 +2913,8 @@ function renderAbstimmung() {
       'und mit eingeschalteter Lenkung geradeaus fahren.';
     return;
   }
-  const zeilen = [`Verstärkung ${zahl(a.steer_gain)} · Vorhalt ${a.actuator_latency_ms} ms` +
+  const zeilen = [(a.regelart === 'cerea' ? `Cerea-Regler · Lenkaggressivität ${zahl(a.cerea_lenk_aggr, 0)} · ` : '') +
+    `Verstärkung ${zahl(a.steer_gain)} · Vorhalt ${a.actuator_latency_ms} ms` +
     (a.regelart === 'voraus' ? ` · Vorausschauend, Trägheit ${zahl(a.lenk_traegheit_s)} s` : '') +
     (a.ausgangswerte ? ` (Ausgang: ${zahl(a.ausgangswerte.steer_gain)} / ${a.ausgangswerte.actuator_latency_ms} ms)` : '')];
   if (a.nachlauf_s != null) zeilen.push(`Gemessen: Das Rad folgt dem Befehl ${zahl(a.nachlauf_s, 1)} s später.`);
@@ -2832,8 +2924,8 @@ function renderAbstimmung() {
     : `Sammelt Messwerte … ${zahl(a.sammelt_s, 0)} von ${a.fenster_s} s ruhige Geradeausfahrt`);
   if (a.hinweis) zeilen.push(a.hinweis);
   const name = { steer_gain: 'Verstärkung', actuator_latency_ms: 'Vorhalt', lenk_traegheit_s: 'Trägheit',
-    regelart: 'Regelart' };
-  const wert = (x) => (typeof x === 'number' ? zahl(x) : { voraus: 'Vorausschauend', stanley: 'Stanley' }[x] || x);
+    regelart: 'Regelart', cerea_lenk_aggr: 'Lenkaggressivität' };
+  const wert = (x) => (typeof x === 'number' ? zahl(x) : { voraus: 'Vorausschauend', stanley: 'Stanley', cerea: 'Cerea' }[x] || x);
   (a.schritte || []).slice(-3).forEach((s) => zeilen.push(
     `${name[s.was] || s.was} ${s.von ? wert(s.von) + ' → ' + wert(s.nach) : ''} ${s.grund}`));
   el('abstInfo').textContent = zeilen.join('\n');
@@ -3079,6 +3171,12 @@ async function refreshLists(takt = false) {
     renderTraktoren();       // zeichnet danach auch die Geräteliste, passend zum Fahrzeug
   }
   if (active === 'headland') fillHeadland();
+  if (active === 'lenkregler') {
+    // Im Takt nur die Anzeige - sonst sprängen Werte, die gerade verstellt werden, zurück.
+    if (!takt) await renderTraktoren();
+    renderLenkregler();
+    reglerLiveZeigen(state.live);
+  }
   if (active === 'saatplan') {
     const feldId = state.live && state.live.field ? state.live.field.id : null;
     if (!takt || saat.seiteFeld !== feldId) renderSaatplan();
