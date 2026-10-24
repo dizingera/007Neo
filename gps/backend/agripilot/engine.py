@@ -1926,7 +1926,8 @@ class Engine:
         self.store.update_job(self.job["id"], reference_spacing_m=self.profile.spacing_m)
         self.distance_m = 0.0
         self.working_time_s = 0.0
-        self.genauigkeit.zuruecksetzen(self.steering.abgaben if self.steering else 0)
+        self.genauigkeit.zuruecksetzen(self.steering.abgaben if self.steering else 0,
+                                       self.steering.abgabe_gruende if self.steering else None)
         self.note(f"Arbeit gestartet{': ' + operation if operation else ''}")
         self._checkpoint_at = time.time()
         self._remember_session()
@@ -2582,7 +2583,8 @@ class Engine:
                 "compensation": self.config.imu.terrain_compensation,
             } if self.imu is not None else None),
             "steering": self.steering.status() if self.steering else None,
-            "genauigkeit": self.genauigkeit.ergebnis(self.steering.abgaben if self.steering else 0)
+            "genauigkeit": self.genauigkeit.ergebnis(self.steering.abgaben if self.steering else 0,
+                                     self.steering.abgabe_gruende if self.steering else None)
                            if self.job else None,
             "spurausgleich": self.spurausgleich,
             "nachlauf": self.nachlauf.ergebnis(),
@@ -2597,7 +2599,8 @@ class Engine:
         }
 
     def _genauigkeit_json(self) -> str:
-        ergebnis = self.genauigkeit.ergebnis(self.steering.abgaben if self.steering else 0)
+        ergebnis = self.genauigkeit.ergebnis(self.steering.abgaben if self.steering else 0,
+                                     self.steering.abgabe_gruende if self.steering else None)
         return json.dumps(ergebnis) if ergebnis else ""
 
     # -- Hindernisse ------------------------------------------------------

@@ -1,5 +1,16 @@
 # Bedienung im Feld
 
+## Warum die Lenkung abgegeben hat – je Arbeit (ab 1.5.81)
+
+Bisher stand bei einer Arbeit nur „20× abgegeben“. Jetzt auch **warum**, häufigster
+Grund zuerst, z. B. „20× abgegeben (12× zu weit von der Spur, 5× GPS-Daten
+veraltet, 3× Fahrer hat eingegriffen)“ – unter *Lenkung live → Genauigkeit der
+letzten Arbeiten*, im Lenk-Assistenten-Bereich und als Spalte **abgabe_gruende**
+im CSV der Arbeiten. Messwerte im Grund werden weggelassen, damit Gleiches
+zusammen zählt. Gewolltes (vom Fahrer ausgeschaltet, zu langsam, keine Spur,
+Rückwärts) zählt nicht. Die Arbeit wandert mit dem Abgleich zum Master – nach dem
+nächsten Feldtest steht dort, was abschaltet.
+
 ## Nicht mehr rausfliegen, IMU-Drehrichtung, Neigung kalibrieren (ab 1.5.80)
 
 Andy, 24.10.2026: „Es wird auch sehr oft die Lenkung ausgeschaltet, einmal bin ich

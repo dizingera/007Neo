@@ -59,6 +59,16 @@ GEWOLLTE_GRUENDE = frozenset({"vom Fahrer ausgeschaltet", "zu langsam", "keine S
 TEMPO_ENTPRELLUNG_S = 1.0   # so lange darf das Tempo kurz aus dem Fenster springen (GPS-Rauschen)
 
 
+def grund_kurz(reason: str) -> str:
+    """Grund ohne Messwerte, damit gleiche Gründe zusammen gezählt werden:
+    „zu weit von der Spur (1.20 m)“ -> „zu weit von der Spur“."""
+    grund = (reason or "unbekannt").split(" (")[0]
+    for vorne in ("RTK nötig", "Lenkausgang gestört"):
+        if grund.startswith(vorne):
+            return vorne
+    return grund
+
+
 def tempo_grenze_deg(tempo_ms: float, radstand_m: float, max_quer_ms2: float) -> Optional[float]:
     """Größter Einschlag (Grad), der bei diesem Tempo höchstens ``max_quer_ms2`` Querbeschleunigung
     verlangt - oder None, wenn nichts begrenzt (aus, oder im Schritttempo).
@@ -87,6 +97,8 @@ class SteeringController:
         # Wie oft die Lenkung von sich aus abgegeben hat, während sie lenkte (nicht der
         # Fahrer, nicht das Vorgewende) - für die Genauigkeit je Arbeit (genauigkeit.py).
         self.abgaben = 0  # setzt die Engine: kurzer RTK-Ausfall wird überbrückt
+        # ... und warum (Grund ohne Messwerte -> Anzahl), damit ein Feldtest zeigt, was abschaltet.
+        self.abgabe_gruende: dict[str, int] = {}
         self.command = SteerCommand()
         self.last_sent_at = 0.0
         self.max_rate_deg_s = 25.0
@@ -114,11 +126,19 @@ class SteeringController:
         self.output.on_arm()
         return "scharf"
 
+    def _abgabe(self, reason: str) -> None:
+        """Die Lenkung hat von sich aus aufgehört zu lenken: zählen, mit Grund."""
+        if reason in GEWOLLTE_GRUENDE:
+            return
+        self.abgaben += 1
+        grund = grund_kurz(reason)
+        self.abgabe_gruende[grund] = self.abgabe_gruende.get(grund, 0) + 1
+
     def disarm(self, reason: str = "vom Fahrer ausgeschaltet") -> None:
         if self.armed:
             self.disengage_count += 1
-            if self.command.engaged and reason not in GEWOLLTE_GRUENDE:
-                self.abgaben += 1
+            if self.command.engaged:
+                self._abgabe(reason)
         self.armed = False
         self.command = SteerCommand(reason=reason)
         self.output.command(False, 0.0, SteerContext())
@@ -127,8 +147,7 @@ class SteeringController:
         """Jetzt nicht lenken, aber scharf bleiben: geht es wieder, lenkt sie von selbst."""
         if self.command.engaged:
             self.disengage_count += 1
-            if reason not in GEWOLLTE_GRUENDE:
-                self.abgaben += 1
+            self._abgabe(reason)
         self.command = SteerCommand(reason=reason if self.armed else self.command.reason)
         self._last_angle, self._last_angle_at = 0.0, 0.0
         self.output.command(False, 0.0, SteerContext())
@@ -148,8 +167,7 @@ class SteeringController:
         if blocked:
             if self.command.engaged:
                 self.disengage_count += 1
-                if blocked not in GEWOLLTE_GRUENDE:
-                    self.abgaben += 1
+                self._abgabe(blocked)
             self.command = SteerCommand(
                 engaged=False, angle_deg=0.0, reason=blocked,
                 speed_ms=fix.speed_ms, cross_track_m=guidance.cross_track_m,

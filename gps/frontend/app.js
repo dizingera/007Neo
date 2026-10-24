@@ -3879,7 +3879,10 @@ function genauigkeitText(g) {
   if (!g) return '';
   const z = (x, n = 1) => Number(x).toLocaleString('de-DE', { minimumFractionDigits: n, maximumFractionDigits: n });
   return `${z(g.effektiv_cm)} cm effektiv · 95 % unter ${z(g.p95_cm)} cm · höchstens ${z(g.max_cm, 0)} cm · ` +
-    `${z(g.lenkanteil * 100, 0)} % gelenkt` + (g.abgaben ? ` · ${g.abgaben}× abgegeben` : '');
+    `${z(g.lenkanteil * 100, 0)} % gelenkt` + (g.abgaben ? ` · ${g.abgaben}× abgegeben` : '') +
+    // Warum (ab 1.5.81): „3× zu weit von der Spur, 2× GPS-Daten veraltet“
+    (g.abgabe_gruende && Object.keys(g.abgabe_gruende).length
+      ? ` (${Object.entries(g.abgabe_gruende).map(([grund, n]) => `${n}× ${grund}`).join(', ')})` : '');
 }
 
 async function renderGenauigkeit() {

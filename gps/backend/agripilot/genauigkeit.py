@@ -7,7 +7,8 @@ Spur, nicht in der Wende. Daraus je Arbeit
 * ``p95_cm``       - 95 % der Zeit lag die Abweichung darunter,
 * ``max_cm``       - die größte Abweichung,
 * ``lenkanteil``   - welcher Teil der Fahrt die Automatik gelenkt hat,
-* ``abgaben``      - wie oft die Lenkung von sich aus abgegeben hat (nicht der Fahrer).
+* ``abgaben``      - wie oft die Lenkung von sich aus abgegeben hat (nicht der Fahrer),
+* ``abgabe_gruende`` - und warum: Grund -> Anzahl.
 
 Gespeichert wird das Ergebnis in der Arbeit (Spalte ``genauigkeit``) - so sieht
 man über Wochen, ob die Abstimmung besser wird. Für das 95-%-Maß reicht eine
@@ -27,7 +28,8 @@ class Genauigkeit:
     def __init__(self) -> None:
         self.zuruecksetzen()
 
-    def zuruecksetzen(self, abgaben_start: int = 0) -> None:
+    def zuruecksetzen(self, abgaben_start: int = 0, gruende_start: Optional[dict] = None) -> None:
+        self.gruende_start = dict(gruende_start or {})
         self.n = 0
         self.summe2 = 0.0
         self.maximum = 0.0
@@ -59,11 +61,16 @@ class Genauigkeit:
                 return (i + 1) * FACH_CM
         return FAECHER * FACH_CM
 
-    def ergebnis(self, abgaben_jetzt: int = 0) -> Optional[dict]:
+    def ergebnis(self, abgaben_jetzt: int = 0, gruende_jetzt: Optional[dict] = None) -> Optional[dict]:
         """Die Zahlen für die Arbeit, oder None, solange nichts gelenkt wurde."""
         if self.n == 0:
             return None
+        gruende = {grund: anzahl - self.gruende_start.get(grund, 0)
+                   for grund, anzahl in (gruende_jetzt or {}).items()}
         return {
+            # Warum abgegeben wurde, häufigster Grund zuerst (ab 1.5.81).
+            "abgabe_gruende": dict(sorted(((g, a) for g, a in gruende.items() if a > 0),
+                                          key=lambda e: -e[1])),
             "effektiv_cm": round(math.sqrt(self.summe2 / self.n), 1),
             "p95_cm": round(self._quantil(0.95), 1),
             "max_cm": round(self.maximum, 1),
