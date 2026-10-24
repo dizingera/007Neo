@@ -234,3 +234,29 @@ class ConfirmForwardTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class LangsamRueckwaerts(unittest.TestCase):
+    def test_slow_reversing_does_not_spin_the_heading_round(self):
+        # Vorher wurde ein um 180° verdrehter Kurs zwischen 0,5 und 1 m/s eingeglättet:
+        # nach wenigen Zehntelsekunden zeigte der Traktor in die Gegenrichtung.
+        filt = HeadingFilter()
+        filt.update(90.0, None, 2.0)
+        for _ in range(10):
+            filt.update(270.0, None, 0.7)
+        self.assertAlmostEqual(filt.value, 90.0)
+        self.assertTrue(filt.gegenlaeufig)
+        self.assertFalse(filt.rueckwaerts)
+        filt.update(91.0, None, 0.7)                 # wieder vorwärts
+        self.assertFalse(filt.gegenlaeufig)
+
+    def test_the_driver_confirming_forward_takes_the_new_course(self):
+        filt = HeadingFilter()
+        filt.update(90.0, None, 2.0)
+        filt.update(270.0, None, 0.7)                # von Hand gewendet, langsam los
+        self.assertTrue(filt.gegenlaeufig)
+        filt.rueckwaerts = True                      # wie nach erkannter Umkehr
+        filt.bestaetige_vorwaerts()
+        filt.update(270.0, None, 0.7)
+        self.assertAlmostEqual(filt.value, 270.0)
+        self.assertFalse(filt.gegenlaeufig)

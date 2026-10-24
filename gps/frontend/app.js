@@ -378,8 +378,10 @@ function updateHud(s) {
     steer.classList.add('scharf'); steer.setAttribute('aria-checked', 'true');
     // Scharf, lenkt aber gerade nicht: sie wartet und greift von selbst wieder.
     const warten = steering.command.reason && steering.command.reason !== 'nicht scharf';
+    const rueck = steering.command.reason === 'Rückwärtsfahrt';
     lenkText(warten ? `wartet · ${steering.command.reason}` : 'scharf',
-      warten ? `wartet · ${steering.command.reason} · greift von selbst wieder` : 'scharf');
+      !warten ? 'scharf' : rueck ? 'wartet · Rückwärtsfahrt · fährst du vorwärts: tippen'
+        : `wartet · ${steering.command.reason} · greift von selbst wieder`);
   } else {
     steer.setAttribute('aria-checked', 'false');
     lenkText('aus', 'aus · tippen schaltet scharf');
@@ -1623,7 +1625,11 @@ el('btnWarnProbe').onclick = () => {
 
 el('btnSteer').onclick = async () => {
   const steering = state.live && state.live.steering;
-  if (steering && steering.armed) {
+  if (steering && steering.armed && !steering.command.engaged && steering.command.reason === 'Rückwärtsfahrt') {
+    // Wartet, weil die Anlage Rückwärts vermutet - ohne Gyro auch nach einer Wende von
+    // Hand. Tippen heißt hier: ich fahre vorwärts (Scharfschalten bestätigt das).
+    if (await api('POST', '/api/steering/arm', { operation: arbeitBezeichnung() })) toast('Vorwärts bestätigt');
+  } else if (steering && steering.armed) {
     await api('POST', '/api/steering/disarm');
     toast('Lenkung aus');
   } else {
@@ -2122,7 +2128,9 @@ function renderLenkregler(erzwingen = false) {
     reglerGeaendert = false;
   }
   const art = { cerea: 'Cerea', voraus: 'Vorausschauend', stanley: 'Stanley' }[traktor.regelart] || traktor.regelart || '–';
-  el('reglerArt').textContent = `${traktor.name || 'Traktor'} · Regelart jetzt: ${art}`;
+  // Ohne Traktorliste steht im Zustand das Gespann - dessen Name ist der des Geräts.
+  const name = traktorenListe.some((t) => t.aktiv) ? traktor.name : 'Traktor';
+  el('reglerArt').textContent = `${name} · Regelart jetzt: ${art}`;
   el('btnReglerStanley').hidden = traktor.regelart !== 'cerea';
   el('reglerHinweis').textContent = traktor.regelart === 'cerea' ? ''
     : 'Diese Werte wirken erst mit der Regelart Cerea – „OK“ schaltet sie für diesen Traktor ein.';

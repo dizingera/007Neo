@@ -975,6 +975,8 @@ class HeadingFilter:
     gier_vorzeichen: float = 1.0
     gier_bestaetigt: bool = False
     _gier_umgedreht: bool = False
+    # Langsam und gegen die Fahrtrichtung bewegt (meist Rückwärtsrangieren unter 1 m/s).
+    gegenlaeufig: bool = False
 
     def update(self, course: Optional[float], true_heading: Optional[float],
                speed_ms: float, yaw_rate_deg_s: Optional[float] = None,
@@ -984,6 +986,7 @@ class HeadingFilter:
         if true_heading is not None:
             self.value = true_heading
             self.rueckwaerts = False         # ein echter Kurs kennt keine Umkehr
+            self.gegenlaeufig = False
             self._gegen = 0
             return self.value
         if course is None or speed_ms < self.min_speed_ms:
@@ -1008,6 +1011,7 @@ class HeadingFilter:
             # letzte davor kann noch aus der Rückwärtsfahrt stammen.
             self._bestaetigt = False
             self.rueckwaerts = False
+            self.gegenlaeufig = False
             self._gegen = 0
             self._letzter_kurs = None
             self.value = course
@@ -1017,8 +1021,16 @@ class HeadingFilter:
         # mehrmals hintereinander so weit von der Erwartung liegt, ist keine
         # Wende - die dreht in kleinen Schritten -, sondern eine Umkehr.
         versatz = 180.0 if self.rueckwaerts else 0.0
-        if (speed_ms >= self.fusion_min_speed_ms and
-                abs(angle_difference(course, normalize_heading(self.value + versatz))) > 120.0):
+        gegen_erwartung = abs(angle_difference(course, normalize_heading(self.value + versatz))) > 120.0
+        # Langsamer als Schritttempo, aber gegen die Erwartung: meist langsames
+        # Rückwärtsrangieren. Den Kurs nicht einglätten - sonst dreht er sich in
+        # wenigen Zehntelsekunden herum, und die Lenkung lenkte mit einem falschen
+        # Kurs weiter. Die Engine pausiert die Lenkung solange (1.5.82).
+        self.gegenlaeufig = gegen_erwartung and speed_ms < self.fusion_min_speed_ms
+        if self.gegenlaeufig:
+            self._gegen = 0
+            return self.value
+        if speed_ms >= self.fusion_min_speed_ms and gegen_erwartung:
             # Erst ab Schritttempo: darunter ist der Bewegungskurs Zufall.
             self._gegen += 1
             if self._gegen < 3:
@@ -1142,6 +1154,7 @@ class HeadingFilter:
         self.value = None
         self._kurs_roh = None
         self.rueckwaerts = False
+        self.gegenlaeufig = False
         self._bestaetigt = False
         self.fusion_aktiv = True
         self.warnung = ""

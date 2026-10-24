@@ -2391,7 +2391,9 @@ class Engine:
         )
         # Hat der Fahrer eben "vorwärts" bestätigt, wartet das Filter auf den
         # nächsten Kurs - bis dahin nicht gleich wieder abschalten.
-        self.steering.rueckwaerts = (self.heading_filter.rueckwaerts
+        # Langsam gegen die Fahrtrichtung (unter 1 m/s, meist Rückwärtsrangieren) zählt
+        # wie Rückwärts: nicht lenken, bis der Kurs wieder passt oder der Fahrer bestätigt.
+        self.steering.rueckwaerts = ((self.heading_filter.rueckwaerts or self.heading_filter.gegenlaeufig)
                                      and not self.heading_filter.bestaetigung_offen)
         command = self.steering.update(self.guidance, fix, context)
         self._abstimmung_beobachten(command.engaged, fix)

@@ -1,5 +1,21 @@
 # Bedienung im Feld
 
+## Fehlersuche 1.5.82: langsam rückwärts, „wartet · Rückwärtsfahrt“
+
+* **Langsames Rückwärtsrangieren (0,5–1 m/s, 1,8–3,6 km/h):** Rückwärts wurde erst
+  ab 1 m/s erkannt. Darunter glättete der Kursfilter den um 180° verdrehten
+  Bewegungskurs ein – der Kurs drehte sich in wenigen Zehntelsekunden herum, und
+  die Lenkung lenkte nah an der Spur mit falschem Kurs weiter. Jetzt bleibt der
+  Kurs stehen, und die Lenkung wartet („Rückwärtsfahrt“), bis wieder vorwärts
+  gefahren wird. Mit Gyro bemerkt man davon nichts.
+* **„wartet · Rückwärtsfahrt“ nach einer Wende von Hand ohne Gyro:** Die Anlage
+  kann das nicht von Rückwärts unterscheiden. **Ein Tipp auf den Lenkknopf heißt
+  jetzt „ich fahre vorwärts“** – vorher schaltete er die Lenkung aus.
+* Lenkregler-Seite: ohne geladene Traktorliste stand dort der Gerätename.
+
+Statisch geprüft (pyflakes, node --check): keine undefinierten Namen, keine
+Syntaxfehler. Im Simulator nicht prüfbar: er fährt nicht rückwärts.
+
 ## Warum die Lenkung abgegeben hat – je Arbeit (ab 1.5.81)
 
 Bisher stand bei einer Arbeit nur „20× abgegeben“. Jetzt auch **warum**, häufigster
