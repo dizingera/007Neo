@@ -560,3 +560,41 @@ body.tag { --f-flaeche: rgba(23, 140, 70, .38); --f-doppelt: rgba(200, 104, 12, 
 .sheet .formular > .menue-gruppe { margin-bottom: 0; }
 .sheet .lenkung-notaus { position: sticky; top: -4px; z-index: 3; padding-block: 6px; background: var(--bg); }
 .sheet .tab-panel[data-panel="lenkung"] > .menue-gruppe > .karte { border: 0; }
+/* 1.5.98: drei Arbeitsbereiche; Aktualisierung immer in derselben Kopfzeile. */
+.sheet .sheet-head { display: grid; grid-template-columns: minmax(0, 1fr) minmax(220px, 360px) auto auto;
+  gap: 16px; flex: 0 0 auto; padding: 12px 20px; background: var(--bg); z-index: 5; }
+.sheet .sheet-brand { display: none; }
+.sheet .sheet-titelblock { min-width: 0; }
+.sheet .menue-suche { width: auto; min-width: 0; }
+.sheet .menue-update { display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  min-width: 112px; min-height: 48px; border: 1px solid var(--blue-solid); color: var(--text); background: var(--panel-2); }
+.sheet .menue-update svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 2; }
+.sheet .menue-update i { width: 9px; height: 9px; border-radius: 50%; background: var(--m-amber); }
+.sheet .menue-update i[hidden] { display: none; }
+.sheet .menue-navigation { flex: 0 0 224px; min-height: 0; display: flex; flex-direction: column;
+  border-right: 1px solid var(--line); background: var(--ui-nav); }
+.sheet .menue-bereiche { display: grid; gap: 6px; padding: 12px; border-bottom: 1px solid var(--line); }
+.sheet .menue-bereich { text-align: left; min-height: 48px; padding: 10px 14px; color: var(--muted);
+  background: transparent; border: 1px solid transparent; font-weight: 600; }
+.sheet .menue-bereich[aria-pressed="true"] { color: var(--text); border-color: var(--blue-solid);
+  background: color-mix(in srgb, var(--blue-solid) 17%, var(--ui-nav)); }
+.sheet .tabs { flex: 1 1 auto; width: auto; min-height: 0; padding: 12px; border: 0; gap: 6px; }
+.sheet .tabs .tab[hidden], .sheet .tabs .tab-gruppe, .sheet .tabs .tabs-fuss { display: none; }
+.sheet .tabs .tab { min-height: 52px; padding: 10px; }
+.sheet .tab-panel { background: var(--bg); }
+.sheet #updateBereich { scroll-margin-top: 12px; }
+.sheet #updateBereich > summary { font-size: 19px; }
+.sheet #updateBereich #updateStand { display: block; margin-top: 4px; font-size: 13px; font-weight: 400; overflow-wrap: anywhere; }
+@media (max-width: 1000px) and (min-width: 761px) {
+  .sheet .sheet-head { grid-template-columns: minmax(0, 1fr) auto auto; }
+  .sheet .menue-suche { grid-column: 1 / -1; grid-row: 2; }
+  .sheet .menue-navigation { flex-basis: 208px; }
+}
+@media (max-width: 760px) {
+  .sheet .sheet-head { grid-template-columns: minmax(0, 1fr) auto 48px; gap: 8px; padding: 10px 12px; }
+  .sheet .sheet-titel { font-size: 20px; }
+  .sheet .menue-suche { grid-column: 1 / -1; grid-row: 2; }
+  .sheet .menue-update { min-width: 100px; padding: 10px; }
+  .sheet .close { width: 48px; min-width: 48px; padding: 0; }
+  .sheet .menue-navigation { display: none; }
+}

@@ -2029,3 +2029,16 @@ sind Maße, Anbau und Abstimmung nach Themen aufgeteilt. Auswahl, Name und
 Übernehmen bleiben direkt sichtbar. Die Menüsuchfunktion öffnet auch zugeklappte
 Gruppen. In der Lenkung sind Werkstatt, Radmitte und ältere Assistenz separat
 aufklappbar; Motor sofort anhalten steht oberhalb und bleibt beim Rollen erreichbar.
+
+
+## Drei Menübereiche und fester Update-Knopf (ab 1.5.98)
+
+Feldarbeit, Maschine und Werkstatt sind die drei Hauptbereiche der Seitenleiste.
+Nach Auswahl erscheinen nur die zugehörigen Seiten. Die Suche durchsucht weiterhin
+alle Bereiche und öffnet den passenden Treffer. Auf schmalen Anzeigen sind die Seiten
+in der Auswahl Menübereich ebenfalls nach diesen drei Bereichen geordnet.
+
+Update steht immer oben rechts in der Menü-Kopfzeile, auch beim Rollen und auf
+anderen Menüseiten. Der Knopf öffnet direkt die Aktualisierung am Anfang der
+Systemseite. Ein Punkt zeigt eine bekannte neue Version an. Öffnen allein installiert
+kein Update; Suchen und Einspielen verwenden den bisherigen Update-Ablauf.

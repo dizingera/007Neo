@@ -298,6 +298,8 @@ function updateHud(s) {
   // Neue Version: der grüne Knopf „Update“ in der Leiste, statt eines Hinweises im Menü.
   const neueVersion = s.system && s.system.update_online;
   el('btnUpdateHaupt').hidden = !neueVersion;
+  el('menueUpdatePunkt').hidden = !neueVersion;
+  el('btnMenueUpdate').title = neueVersion ? `Update ${neueVersion} verfügbar` : 'Aktualisierung öffnen';
   if (neueVersion) {
     el('btnUpdateHauptText').textContent = `Update ${neueVersion}`;
     el('btnUpdateHaupt').title = `Version ${neueVersion} einspielen`;
@@ -1752,6 +1754,30 @@ function menueAusAdresse() {
 window.addEventListener('hashchange', menueAusAdresse);
 el('sheetClose').onclick = menueSchliessen;
 const reiter = [...document.querySelectorAll('.tab')];
+function menueBereichZeigen(gruppe) {
+  reiter.forEach(tab => { tab.hidden = tab.dataset.gruppe !== gruppe; });
+  document.querySelectorAll('.menue-bereich').forEach(knopf => {
+    knopf.setAttribute('aria-pressed', String(knopf.dataset.bereich === gruppe));
+  });
+}
+document.querySelectorAll('.menue-bereich').forEach(knopf => {
+  knopf.onclick = () => {
+    const gruppe = knopf.dataset.bereich;
+    const tab = reiter.find(t => t.dataset.gruppe === gruppe && t.classList.contains('active'))
+      || reiter.find(t => t.dataset.gruppe === gruppe);
+    if (tab) tab.onclick();
+  };
+});
+el('btnMenueUpdate').onclick = () => {
+  const tab = reiter.find(t => t.dataset.tab === 'system');
+  if (tab) tab.onclick();
+  const bereich = el('updateBereich');
+  bereich.open = true;
+  bereich.scrollIntoView({ block: 'start' });
+  el('btnUpdateSuchen').focus({ preventScroll: true });
+};
+menueBereichZeigen('feld');
+
 el('menueSeitenwahl').onchange = () => {
   const tab = reiter.find(t => t.dataset.tab === el('menueSeitenwahl').value);
   if (tab) tab.onclick();
@@ -1766,6 +1792,7 @@ reiter.forEach((tab, index) => {
     document.querySelectorAll('.tab-panel').forEach((panel) => {
       panel.hidden = panel.dataset.panel !== tab.dataset.tab;
     });
+    menueBereichZeigen(tab.dataset.gruppe);
     el('menueSeitenwahl').value = tab.dataset.tab;
     seitenkopf(tab);
     // Auf schmalen Geräten scrollt die Leiste: den gewählten Reiter in Sicht holen.
@@ -1777,7 +1804,9 @@ reiter.forEach((tab, index) => {
     const schritt = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[event.key];
     if (!schritt) return;
     event.preventDefault();
-    const ziel = reiter[(index + schritt + reiter.length) % reiter.length];
+    const sichtbar = reiter.filter(t => !t.hidden);
+    const platz = sichtbar.indexOf(tab);
+    const ziel = sichtbar[(platz + schritt + sichtbar.length) % sichtbar.length];
     ziel.focus();
     ziel.onclick();
   };
@@ -2690,10 +2719,7 @@ async function renderUpdate() {
   try {
     const stand = await (await fetch('/api/update')).json();
     updateVersion = stand.version;
-    el('updateStand').textContent =
-      `Version ${stand.version}` + (stand.commit ? ` · Stand ${stand.commit}` : '') +
-      (stand.eingespielt ? ` · eingespielt ${stand.eingespielt}` : '') +
-      (stand.git ? ' · aus Git-Klon' : '') + ` · ${stand.wurzel}`;
+    el('updateStand').textContent = `Installiert: Version ${stand.version}`;
     el('btnUpdateGit').hidden = !stand.git;
     el('btnUpdateZurueck').hidden = !(stand.sicherungen && stand.sicherungen.length);
     // Im installierten Programm gibt es nur das Online-Update und die Setup-Datei.
