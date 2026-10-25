@@ -765,7 +765,13 @@ class PhidgetOutput(SteerOutput):
             self.last_error_text = KEIN_BEFEHL
         elif engaged and self.last_error_text == KEIN_BEFEHL:
             self.last_error_text = ""
-        self._rueckmeldung_pruefen(measured, engaged)
+        self._rueckmeldung_pruefen(measured, engaged or regeltest)
+        if regeltest and (measured is None or not math.isfinite(measured)):
+            self.ready = False
+            self.status = self.last_error_text = "Rückmeldung fehlt im Werkstattlauf"
+            self.abbrechen("Werkstattlauf abgebrochen: Rückmeldung fehlt")
+            self.feedback = OutputFeedback(duty=0.0, received_at=time.time())
+            return
         if engaged and self.mode == "yaw_rate" and (
                 self._context.yaw_rate_deg_s is None
                 or not math.isfinite(self._context.yaw_rate_deg_s)):

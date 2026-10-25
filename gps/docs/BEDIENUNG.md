@@ -1,5 +1,11 @@
 # Bedienung im Feld
 
+## Sensorverlust beendet die Feinabstimmung (1.5.89)
+
+Fällt Drehgeber oder Radwinkelsensor während eines Regelsprungs aus, wird die komplette Feinabstimmung sofort abgebrochen. Der Motor steht, weitere Sprünge bleiben aus und die ursprünglichen P/I/D- und Leistungswerte gelten wieder (Prüfbefund F3).
+
+Nicht am echten Traktor geprüft.
+
 ## Gierratenausfall hält den Motor an (1.5.88)
 
 Fehlt im Gierratenmodus die IMU-Rückmeldung oder ist sie ungültig, stoppt der Motor sofort. Gespeicherte I- und D-Anteile werden gelöscht; die Lenkung wartet bis zur gültigen Rückmeldung (Prüfbefund F2).

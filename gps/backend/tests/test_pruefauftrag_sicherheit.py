@@ -129,3 +129,26 @@ class GierratenAusfall(unittest.TestCase):
                 a._step(.02)
                 self.assertTrue(a.ready)
                 self.assertGreater(a.motor.setTargetVelocity.call_args.args[0], 0.)
+
+
+class WerkstattSensorAusfall(unittest.IsolatedAsyncioTestCase):
+    async def test_sensorverlust_bricht_ab_und_verwirft_angehobene_reglerwerte(self):
+        a = ausgang()
+        start = (a.config.gain_p, a.config.max_duty)
+        task = asyncio.create_task(a.feinabstimmen())
+        await asyncio.sleep(0)
+        try:
+            a._step(.02)
+            a.config.gain_p, a.config.max_duty = 2., .9
+            a.measured_angle.return_value = None
+            a._step(.02)
+            self.assertFalse(a.ready)
+            self.assertEqual(a.motor.setTargetVelocity.call_args.args[0], 0.)
+            with self.assertRaisesRegex(RuntimeError, "Rückmeldung"):
+                await asyncio.wait_for(task, .5)
+            self.assertEqual((a.config.gain_p, a.config.max_duty), start)
+            a._step(.02)
+            self.assertEqual(a.motor.setTargetVelocity.call_args.args[0], 0.)
+        finally:
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
