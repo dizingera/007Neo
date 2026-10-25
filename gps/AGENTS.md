@@ -11,8 +11,10 @@ cd backend && PYTHONIOENCODING=utf-8 ./.venv/Scripts/python.exe -m unittest disc
 cd frontend && node --test tests/*.test.js
 ```
 
-Nur mit `backend/.venv` – das System-Python gibt dutzende Fehler.
+Nur mit `backend/.venv` – das System-Python gibt dutzende Fehler. Stand 1.5.85: 861 + 92 Tests grün.
 Simulator mit Oberfläche: `backend/.venv/Scripts/python.exe scripts/run_sim.py --port 8088`.
+Träger Lenkmotor und Rückwärtsfahrt lassen sich nachbilden: `POST /api/simulator` mit
+`lenk_totzeit_s`, `lenk_traegheit_s`, `lenk_rate_deg_s`, `speed_kmh` (negativ = rückwärts).
 
 ## Ausliefern
 
@@ -50,6 +52,12 @@ Simulator mit Oberfläche: `backend/.venv/Scripts/python.exe scripts/run_sim.py 
   `rad_versatz_deg`, `mess_korrektur_deg`, `fix_quality`. Prüffelder in
   `.simulator/agripilot.db` danach wieder löschen.
 - Externe Dienste (Luftbild LGL-BW, GitHub) können ausfallen; nie ohne Rückfall einbauen.
+- Lenkmotor (`actuators.PhidgetOutput`): Der Regelkreis läuft seit 1.5.85 in einem eigenen
+  Thread; ohne Lenkbefehl 0,5 s steht der Motor (die 1065 hat unter Phidget21 keinen
+  Failsafe). Tests, die `_step`/`_control_loop` selbst takten, setzen
+  `actuators.REGEL_FADEN = False` (setUpModule) – sonst laufen zwei Regelkreise.
+- Fahrzeugwerte (`TRAKTOR_FELDER`) bestimmt das Tablet selbst; nur `REGLER_FELDER`
+  (Regelart, Cerea-Werte) kommen vom Master, wenn sie dort geändert wurden.
 - Pi-Fallen: `~/.ssh/config` zeigt `Dreambox.local` auf die WLAN-Adresse, für große Dateien
   `-oHostName=192.168.0.126`. Größere Übertragungen PC→Pi rissen am 22.10. ab („Connection
   reset“), während der PC beim Senden Pakete verlor – `pi_ausrollen.daten_senden` schickt
@@ -61,4 +69,6 @@ Simulator mit Oberfläche: `backend/.venv/Scripts/python.exe scripts/run_sim.py 
   der Datei.
 
 Ausführliche Übergabe und offene Punkte: Obsidian-Vault, `Wiki/Projekte/AgriPilot-Uebergabe-2026-10-16.md`
-(fortlaufend ergänzt, aktueller Stand ganz unten).
+(fortlaufend ergänzt, aktueller Stand ganz unten). Laufender Prüfauftrag an Codex (25.10.2026):
+`Codex/2026-10-25-agripilot-pruefauftrag-von-claude.md`, Ergebnis nach
+`Codex/AgriPilot-Gesamtpruefung-2026-10-25/Ergebnis.md`.
