@@ -13,7 +13,7 @@
 
    Zwischengespeichert wird nur die Hülle: Seite, Stil, Programm, Symbole. */
 
-const CACHE = 'agripilot-huelle-v23';
+const CACHE = 'agripilot-huelle-v24';
 const HUELLE = [
   '/',
   '/index.html',

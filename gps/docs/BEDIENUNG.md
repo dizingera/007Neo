@@ -1975,3 +1975,33 @@ eine neue Auswahl wird anschließend einmal neu berechnet. Die Hülle ist eine
 geometrische Modellprüfung, keine Freigabe für ein reales Gespann. Hindernisse,
 Hang, Schlupf, mechanische Grenzen und reale Lenkdynamik benötigen praktische
 Prüfung. An echter Hardware wurde diese Erweiterung noch nicht erprobt.
+
+
+## Lenk-Automatik (ab 1.5.95)
+
+Im Menü **Lenkregler → Lenk-Automatik** ein Ziel (2, 3 oder 5 cm) wählen und
+**Starten** drücken. Die Automatik wählt den Cerea-Regler. Die Lenkung selbst
+muss der Fahrer einschalten; Starten gibt den Motor nicht frei.
+
+Nur ruhige Geradeausfahrten mit RTK-Fix und eingeschalteter Lenkung zählen.
+Bei eingerichteter IMU müssen aktuelle Lagewerte vorliegen. Nach Spurwechseln
+und Spurverschiebungen wartet die Messung fünf Sekunden. Wenden, Rückwärtsfahrt,
+GPS-Lücken und deutlich wechselndes Tempo oder Hang unterbrechen den Vergleich.
+
+Ein Versuch besteht aus 20 Sekunden Ausgangsmessung, einer kleinen Änderung,
+8 Sekunden Einschwingen und 20 Sekunden Vergleich. Die Automatik passt jeweils
+nur einen Wert an: Lenkaggressivität, Dämpfung, Vorschau oder Integralanteile.
+Nur mindestens fünf Prozent bessere Gesamtbewertung bei vergleichbaren Bedingungen
+und ohne wesentlich schlechtere große Abweichungen wird übernommen. Erfolgloses
+oder unterbrochenes Probieren nimmt sie zurück. Höchstens 24 Versuche pro Start;
+anschließend überwacht sie weiter. Das erreichbare Ziel berücksichtigt die vom
+GPS gemeldete Genauigkeit. Zentimetergenauigkeit ist damit kein Versprechen.
+
+**Stoppen** behält bestätigte Verbesserungen und verwirft einen laufenden Versuch.
+**Ausgangswerte** stellt die Werte vom letzten Start einschließlich der vorherigen
+Regelart wieder her. Einstellungen und Protokoll werden je Traktor-Gerät-Kombination
+gesichert. Ein Wechsel oder manuelle Regleränderungen stoppen die Optimierung.
+Nach einem Neustart wird ein unbestätigter Versuch zurückgenommen; die Automatik
+muss erneut gestartet werden. Der ältere Lenk-Assistent und diese Automatik laufen
+nicht gleichzeitig. Motorleistung, Fahrzeuggeometrie und Auffahraggressivität werden
+nicht automatisch kalibriert. Eine Feldprüfung und die Aufsicht des Fahrers bleiben nötig.

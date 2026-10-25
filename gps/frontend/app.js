@@ -2137,9 +2137,55 @@ function renderLenkregler(erzwingen = false) {
     : 'Diese Werte wirken erst mit der Regelart Cerea – „OK“ schaltet sie für diesen Traktor ein.';
 }
 
+function automatikZeigen(s) {
+  const a = s && s.lenkautomatik;
+  if (!a) return;
+  el('automatikHinweis').textContent = a.hinweis || 'Wartet auf Messdaten.';
+  el('automatikFortschritt').max = a.fenster_s || 20;
+  el('automatikFortschritt').value = a.sammelt_s || 0;
+  el('btnAutomatikStart').disabled = !!a.aktiv;
+  el('btnAutomatikStop').disabled = !a.aktiv;
+  el('btnAutomatikZurueck').disabled = !a.rueckkehr_moeglich;
+  el('automatikZiel').disabled = !!a.aktiv;
+  const z = x => Number(x).toLocaleString('de-DE', { maximumFractionDigits: 1 });
+  const m = a.messung;
+  el('automatikMessung').textContent = (m
+    ? `${z(m.effektiv_cm)} cm effektiv · 95 % unter ${z(m.p95_cm)} cm · ` : '') +
+    `Ziel ${z(a.effektives_ziel_cm || a.ziel_cm)} cm · ${a.versuche || 0} von ${a.max_versuche || 24} Versuchen`;
+  const namen = { cerea_lenk_aggr: 'Lenkaggressivität', cerea_d: 'Dämpfung D',
+    cerea_i: 'I', cerea_i2: 'I2', cerea_l: 'Vorausschau L' };
+  el('automatikProtokoll').replaceChildren(...(a.protokoll || []).slice().reverse().map(p => {
+    const li = document.createElement('li');
+    li.textContent = `${p.aktion}: ${Object.entries(p.werte || {}).map(([k,v]) =>
+      `${namen[k] || k} ${z(v)}`).join(', ')} · ${p.grund}`;
+    return li;
+  }));
+}
+
+let automatikBedienungLaeuft = false;
+async function automatikBedienen(aktion) {
+  if (automatikBedienungLaeuft) return;
+  automatikBedienungLaeuft = true;
+  try {
+    const r = await api('POST', '/api/lenkautomatik', { aktion,
+      ziel_cm: Number(el('automatikZiel').value) });
+    if (r) {
+      automatikZeigen({ lenkautomatik: r.data });
+      toast(aktion === 'start' ? 'Automatik misst bei der nächsten geraden Fahrt'
+        : aktion === 'stop' ? 'Optimierung gestoppt' : 'Ausgangswerte wiederhergestellt');
+      await renderTraktoren();
+      renderLenkregler(true);
+    }
+  } finally { automatikBedienungLaeuft = false; }
+}
+el('btnAutomatikStart').onclick = () => automatikBedienen('start');
+el('btnAutomatikStop').onclick = () => automatikBedienen('stop');
+el('btnAutomatikZurueck').onclick = () => automatikBedienen('zurueck');
+
 /* Die Zeile oben: Abweichung, Tempo, Punkt voraus, I + I2 - bei jedem Zustand neu. */
 function reglerLiveZeigen(s) {
   if (el('sheet').hidden || el('reglerLive').offsetParent === null || !s) return;
+  automatikZeigen(s);
   const g = s.guidance || {};
   const a = s.spurausgleich || {};
   const zahl = (x, n) => Number(x).toLocaleString('de-DE', { minimumFractionDigits: n, maximumFractionDigits: n });

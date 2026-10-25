@@ -50,6 +50,7 @@ from .spurintegral import SpurIntegral, hang_vorsteuerung
 from . import cerearegler
 from .cerearegler import CereaIntegral
 from .laengsneigung import Laengsneigung
+from .lenkautomatik import Lenkautomatik, FELDER as AUTOMATIK_FELDER
 from .radmitte import Radmitte
 from .nachlauf import Nachlauf
 import json
@@ -233,6 +234,10 @@ class Engine:
         self.simulator = None   # set when running on the simulator source
         self.imu = None         # set when a tilt sensor is configured
         self.terrain_offset_m = (0.0, 0.0)   # (rechts, vorn) - nur zur Anzeige
+        self.automatik = None
+        self._automatik_key = ""
+        self._automatik_spur = (None, 0.0)
+        self._automatik_holen()
 
     # -- profile ----------------------------------------------------------
 
@@ -285,6 +290,8 @@ class Engine:
         eintrag = next((p for p in profile if p["id"] == profile_id), None)
         if eintrag is None:
             raise KeyError("Maschine nicht gefunden")
+        if getattr(self, "automatik", None) is not None and self.automatik.aktiv:
+            self.automatik.stoppen()
         self.store.set_setting("vehicle_profile_active", profile_id)
         # Von den Grundwerten aus, nicht von der vorher gewählten Maschine: einer Maschine aus
         # einer älteren Version fehlen neuere Felder, und die erbte sie sonst vom Vorgänger
@@ -316,8 +323,82 @@ class Engine:
         if war_aktiv:
             self.select_profile(rest[0]["id"])
 
+    def _automatik_setzen(self, werte):
+        # Nur Spurreglerwerte ändern; Gerätegeometrie, laufende Wende und
+        # Teilbreiten bleiben dabei unberührt.
+        sauber = {k: v for k, v in werte.items() if k in AUTOMATIK_FELDER}
+        self.profile = replace(self.profile, **sauber)
+        self.store.set_setting("vehicle_profile", asdict(self.profile))
+        aktiv = self.store.get_setting("vehicle_profile_active")
+        profile = self.store.get_setting("vehicle_profiles") or []
+        self.store.set_setting("vehicle_profiles", [
+            {**p, **sauber} if p["id"] == aktiv else p for p in profile])
+        self._traktor_schreiben({k: getattr(self.profile, k) for k in TRAKTOR_FELDER}, False)
+
+    def _automatik_holen(self):
+        self.list_profiles()
+        self.list_traktoren()
+        key = (f"lenkautomatik:{self.store.get_setting('traktor_aktiv') or 'standard'}:"
+               f"{self.store.get_setting('vehicle_profile_active') or 'standard'}")
+        if self.automatik is None or key != self._automatik_key:
+            if self.automatik is not None and self.automatik.aktiv:
+                # Reguläre Wechsel stoppen vorher im alten Gespann. Diese
+                # Rückfallebene darf niemals alte Werte in ein neues Gespann schreiben.
+                self.automatik.versuch = None
+                self.automatik.stoppen()
+            self._automatik_key = key
+            self.automatik = Lenkautomatik(
+                lambda: {k: getattr(self.profile, k) for k in AUTOMATIK_FELDER},
+                self._automatik_setzen,
+                lambda stand, key=key: self.store.set_setting(key, stand),
+                self.store.get_setting(key))
+        return self.automatik
+
+    def automatik_bedienen(self, aktion, ziel_cm=3.0):
+        auto = self._automatik_holen()
+        if aktion == "start":
+            if self.profile.bauform != "traktor":
+                raise ValueError("Automatische Abstimmung ist für Traktoren verfügbar")
+            if self.steering is None or not self.steering.freigegeben:
+                raise ValueError("Automatik am Traktor mit eingerichteter Lenkung starten")
+            self.abstimmung_modus("aus")
+            auto.starten(ziel_cm)
+        elif aktion in ("stop", "zurueck"):
+            auto.stoppen(aktion == "zurueck")
+        else:
+            raise ValueError("Unbekannte Automatik-Aktion")
+        return auto.status()
+
+    def _automatik_beobachten(self, lenkt, fix):
+        auto = self._automatik_holen()
+        if not auto.aktiv:
+            return
+        jetzt = fix.received_at or time.time()
+        kontext = (self.field["id"] if self.field else None,
+                   self.line.id if self.line else None, self.guidance.pass_number,
+                   self.guidance.reversed_direction)
+        if kontext != self._automatik_spur[0]:
+            self._automatik_spur = (kontext, jetzt)
+        gerade = self.line is not None and self.line.mode == "ab"
+        if self.line is not None and self.line.mode == "plan":
+            spur = self.guidance.pass_number
+            gerade = (0 <= spur < len(self.line.spuren)
+                      and len(self.line.spuren[spur]["punkte"]) == 2)
+        lage = self.imu.attitude if self.imu is not None else None
+        gueltig = (lenkt and fix.valid and fix.rank >= 4 and gerade and self.turn is None
+                   and abs(self.guidance.heading_error_deg) < 8
+                   and jetzt - self._automatik_spur[1] >= 5
+                   and jetzt - self._nudge_zeit >= 5
+                   and not self.heading_filter.rueckwaerts and not self.heading_filter.gegenlaeufig
+                   and (self.imu is None or lage.fresh))
+        auto.beobachten(jetzt, self.guidance.cross_track_m, fix.speed_ms, gueltig,
+                        kontext, fix.accuracy_m or 0.03,
+                        lage.roll_deg if lage is not None and lage.fresh else 0.0)
+
     def abstimmung_modus(self, modus: str) -> dict:
         """Lenk-Assistent aus / nur Vorschläge / stellt selbst nach."""
+        if modus != "aus" and getattr(self, "automatik", None) is not None and self.automatik.aktiv:
+            self.automatik.stoppen()
         self.abstimmung.einschalten(modus)
         self.store.set_setting("lenkabstimmung", {
             "modus": self.abstimmung.modus, "ausgangswerte": self.abstimmung.ausgangswerte})
@@ -353,6 +434,9 @@ class Engine:
         self.list_profiles()          # legt auf einem frischen Gerät die erste Maschine an
         current = asdict(self.profile)
         values = dict(values)
+        if getattr(self, "automatik", None) is not None and self.automatik.aktiv:
+            self.automatik.stoppen()
+            current = asdict(self.profile)
         gespann.masse_pruefen(values)
         current.update({k: v for k, v in values.items() if k in fields})
         self.profile = VehicleProfile(**current)
@@ -448,6 +532,8 @@ class Engine:
     def select_traktor(self, traktor_id: str) -> dict:
         if not any(t["id"] == traktor_id for t in self.list_traktoren()):
             raise KeyError("Traktor nicht gefunden")
+        if getattr(self, "automatik", None) is not None and self.automatik.aktiv:
+            self.automatik.stoppen()
         self.store.set_setting("traktor_aktiv", traktor_id)
         self.update_profile(self._traktor_werte(), stempeln=False)
         traktor = self.aktiver_traktor()
@@ -527,6 +613,8 @@ class Engine:
 
     def update_traktor(self, values: dict) -> dict:
         """Den gewählten Traktor ändern: Name, Antenne, Lenkung."""
+        if getattr(self, "automatik", None) is not None and self.automatik.aktiv:
+            self.automatik.stoppen()
         values=dict(values)
         gespann.masse_pruefen(values)
         liste = [dict(t) for t in self.list_traktoren()]
@@ -1982,6 +2070,8 @@ class Engine:
 
     def on_fix(self, fix: Fix) -> None:
         if not fix.valid:
+            if getattr(self, "automatik", None) is not None:
+                self.automatik.unterbrechen("GPS-Ausfall – Versuch zurückgenommen.")
             self.fix = fix  # den tatsächlichen Fixverlust auch sofort anzeigen
             self.positionsfilter.reset()
             self.rtk_bruecke.zuruecksetzen()
@@ -2427,6 +2517,7 @@ class Engine:
             self.steering.max_rate_deg_s = float(self.profile.max_steer_rate_deg_s)
         command = self.steering.update(self.guidance, fix, context)
         self._abstimmung_beobachten(command.engaged, fix)
+        self._automatik_beobachten(command.engaged, fix)
         if self.job is not None:
             jetzt = fix.received_at or time.time()
             dt = jetzt - self._genau_at if getattr(self, "_genau_at", None) else 0.0
@@ -2504,6 +2595,8 @@ class Engine:
         if self.teilbreiten is not None and (self.job is None or age>GPS_STILLSTAND_S):
             self.teilbreiten.wunsch(0,min(32,len(self.sections)))
         if age > GPS_STILLSTAND_S:
+            if self.automatik is not None:
+                self.automatik.unterbrechen("GPS-Daten fehlen – wartet.")
             # Messlücke: beim Wiederempfang keinen Flächenstreifen von der alten
             # Geräteposition zur neuen zeichnen und keine Strecke dazuerfinden.
             self.tool_position = None
@@ -2629,6 +2722,7 @@ class Engine:
             "genauigkeit": self.genauigkeit.ergebnis(self.steering.abgaben if self.steering else 0,
                                      self.steering.abgabe_gruende if self.steering else None)
                            if self.job else None,
+            "lenkautomatik": self._automatik_holen().status(),
             "spurausgleich": self.spurausgleich,
             "nachlauf": self.nachlauf.ergebnis(),
             "radmitte": {"sammelt": self.radmitte.sammelt, "proben": len(self.radmitte.proben)},

@@ -479,3 +479,12 @@ body.tag { --f-flaeche: rgba(23, 140, 70, .38); --f-doppelt: rgba(200, 104, 12, 
   .sheet .tab { min-height: 45px; padding-top: 4px; padding-bottom: 4px; }
   .sheet .tab-gruppe { margin-top: 10px; margin-bottom: 4px; }
 }
+
+/* Automatische Spurabstimmung: Status und Rücknahme vor den Handwerten. */
+.sheet .lenkautomatik { margin-bottom: 16px; }
+.sheet .lenkautomatik h3 { margin-top: 0; }
+.sheet .lenkautomatik progress { width: 100%; height: 12px; accent-color: var(--blue-solid); }
+.sheet .automatik-bedienung { flex-wrap: wrap; align-items: flex-end; }
+.sheet .lenkautomatik #automatikHinweis { font-size: 19px; font-weight: 600; }
+.sheet .lenkautomatik ul { padding-left: 20px; line-height: 1.6; }
+.sheet .regler-manuell > summary { cursor: pointer; font-weight: 600; font-size: 18px; padding: 14px 0; }

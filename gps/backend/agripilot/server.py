@@ -1397,6 +1397,20 @@ def create_app(config=None) -> FastAPI:
         store.set_setting(_einrichtung_key(), {})
         return ok({})
 
+    @api.get("/api/lenkautomatik")
+    async def lenkautomatik_status():
+        return ok(engine._automatik_holen().status())
+
+    @api.post("/api/lenkautomatik")
+    async def lenkautomatik_bedienen(payload: dict = Body(...)):
+        def bedienen():
+            try:
+                ziel = float(payload.get("ziel_cm", 3.0))
+            except (TypeError, ValueError):
+                raise ValueError("Zielabweichung muss eine Zahl sein") from None
+            return engine.automatik_bedienen(str(payload.get("aktion", "")), ziel)
+        return guard(bedienen)
+
     @api.get("/api/abstimmung")
     async def abstimmung_lesen():
         return ok(engine.abstimmung.status())

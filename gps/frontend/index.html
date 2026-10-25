@@ -643,12 +643,48 @@
   <section class="tab-panel" data-panel="lenkregler" hidden>
     <!-- Die Werte wie im Cerea-Dialog: ein Punkt voraus auf der Spur (cerearegler.py).
          Sie gehören zum gewählten Traktor; „OK“ schaltet die Regelart Cerea ein. -->
+    <section class="karte lenkautomatik" aria-labelledby="automatikTitel">
+      <h3 id="automatikTitel">Lenk-Automatik</h3>
+      <p>Stimmt die Spurführung beim Arbeiten selbst ab. Eine Änderung wird erst nach einer
+        Vergleichsmessung übernommen. Schlechtere Versuche nimmt sie zurück.</p>
+      <div class="row automatik-bedienung">
+        <label>Zielabweichung
+          <select id="automatikZiel"><option value="3" selected>3 cm</option>
+            <option value="2">2 cm</option><option value="5">5 cm</option></select>
+        </label>
+        <button id="btnAutomatikStart" class="primary">Automatik starten</button>
+        <button id="btnAutomatikStop" disabled>Optimierung stoppen</button>
+        <button id="btnAutomatikZurueck">Ausgangswerte wiederherstellen</button>
+      </div>
+      <p id="automatikHinweis" role="status">Bereit zum Abstimmen.</p>
+      <progress id="automatikFortschritt" max="20" value="0" aria-label="Vergleichsmessung"></progress>
+      <p class="note" id="automatikMessung">Wartet auf eine Messung.</p>
+      <details><summary>Letzte automatische Änderungen</summary><ul id="automatikProtokoll"></ul></details>
+      <details class="erklaerung"><summary>So arbeitet die Automatik</summary>
+        <p>Am Tablet im Traktor starten. Verwendet den Cerea-Regler und schaltet die Lenkung
+          nicht selbst ein. Auf gerader Spur mit RTK und gleichmäßigem Tempo arbeiten:
+          20 Sekunden messen, eine kleine Änderung, 8 Sekunden einschwingen,
+          20 Sekunden vergleichen. Wenden, Spurwechsel, GPS-Ausfälle sowie deutlich andere
+          Geschwindigkeit oder Hanglage unterbrechen den Versuch.</p>
+        <p>Sie stellt Lenkaggressivität, Dämpfung und die Integralanteile gegen Driften nach;
+          bei Pendeln auch den festen Vorausschauabstand. Das Auffahren auf die Spur,
+          Antennenmaße, Radstand und Motorleistung werden damit nicht eingemessen.</p>
+        <p>Das Ziel wird an die gemeldete GPS-Genauigkeit angepasst. Es gibt keine Garantie
+          für Zentimetergenauigkeit bei jeder Boden- und Empfangslage. Nach höchstens
+          24 Versuchen überwacht sie mit den bestätigten Werten weiter. Nach einem Neustart
+          erneut starten; unbestätigte Versuche werden zurückgenommen.</p>
+        <p>Manuelle Änderungen und der bisherige Lenk-Assistent stoppen die Automatik.
+          Optimierung stoppen lässt bestätigte Einstellungen stehen und ändert nicht die
+          Freigabe der Lenkung. Der Lenkknopf schaltet den Motor wie gewohnt aus.</p>
+      </details>
+    </section>
     <div class="regler-live" id="reglerLive" role="status" aria-live="off">
       <span><small>Abweichung</small><b id="reglerAbw">–</b></span>
       <span><small>Tempo</small><b id="reglerTempo">–</b></span>
       <span><small>Punkt voraus</small><b id="reglerPunkt">–</b></span>
       <span><small>I + I2</small><b id="reglerIntegral">–</b></span>
     </div>
+    <details class="regler-manuell"><summary>Von Hand einstellen</summary>
     <p class="note regler-hinweis" id="reglerHinweis"></p>
     <div class="regler-werte" id="reglerWerte">
       <div class="regler-zeile" data-feld="cerea_lenk_aggr" data-min="10" data-max="200" data-schritt="5" data-stellen="0">
@@ -710,6 +746,7 @@
       <p><b>Im Büro eingestellt</b> (am Master), kommen die Werte beim nächsten Abgleich auch in
         jeder Kabine mit diesem Traktor an. Was eine Kabine selbst nachstellt, bleibt in dieser
         Kabine. Antenne, Radstand und die übrige Lenkung bestimmt weiter das Tablet selbst.</p>
+    </details>
     </details>
   </section>
 
