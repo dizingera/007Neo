@@ -766,6 +766,13 @@ class PhidgetOutput(SteerOutput):
         elif engaged and self.last_error_text == KEIN_BEFEHL:
             self.last_error_text = ""
         self._rueckmeldung_pruefen(measured, engaged)
+        if engaged and self.mode == "yaw_rate" and (
+                self._context.yaw_rate_deg_s is None
+                or not math.isfinite(self._context.yaw_rate_deg_s)):
+            self._integral = self._last_error = 0.0
+            self._safe_stop()
+            self.feedback = OutputFeedback(duty=0.0, received_at=time.time())
+            return
         if not engaged and not regeltest:
             self._safe_stop()
             self.feedback = OutputFeedback(wheel_angle_deg=measured, duty=0.0,
@@ -823,9 +830,10 @@ class PhidgetOutput(SteerOutput):
         Die Lenkautomatik pausiert dann („Lenkausgang gestört“) und greift wieder,
         sobald Drehgeber oder Radwinkelsensor wieder Werte liefern.
         """
-        if self.mode not in ("encoder", "was"):
+        if self.mode not in ("encoder", "was", "yaw_rate"):
             return
-        if measured is not None:
+        messwert = self._context.yaw_rate_deg_s if self.mode == "yaw_rate" else measured
+        if messwert is not None and math.isfinite(messwert):
             self._ohne_messung_seit = None
             if not self.ready and self.motor is not None and self._status_ok:
                 self.ready = True
@@ -836,10 +844,12 @@ class PhidgetOutput(SteerOutput):
         jetzt = time.monotonic()
         if self._ohne_messung_seit is None:
             self._ohne_messung_seit = jetzt
-        elif jetzt - self._ohne_messung_seit > RUECKMELDUNG_FRIST_S and self.ready:
+        if (self.mode == "yaw_rate"
+                or jetzt - self._ohne_messung_seit > RUECKMELDUNG_FRIST_S) and self.ready:
             self.ready = False
             self.status = ("Rückmeldung fehlt: " +
-                           ("Drehgeber" if self.mode == "encoder" else "Radwinkelsensor") +
+                           ({"encoder": "Drehgeber", "was": "Radwinkelsensor",
+                             "yaw_rate": "Gierrate"}[self.mode]) +
                            " liefert keine Werte")
             self.last_error_text = self.status
 

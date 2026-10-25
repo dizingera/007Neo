@@ -110,3 +110,22 @@ class WerkstattAbbruch(unittest.IsolatedAsyncioTestCase):
             s.disarm()
             task.cancel()
             await asyncio.gather(task, return_exceptions=True)
+
+
+class GierratenAusfall(unittest.TestCase):
+    def test_fehlende_oder_nicht_endliche_gierrate_stoppt_integral_und_d_anteil(self):
+        for rate in (None, float("nan"), float("inf")):
+            with self.subTest(rate=rate):
+                a = ausgang(feedback="yaw_rate", gain_i=.4, gain_d=.2)
+                a._integral, a._last_error = .25, 8.
+                a.command(True, 10., SteerContext(speed_ms=2., yaw_rate_deg_s=rate))
+                a._step(.02)
+                self.assertEqual(a.motor.setTargetVelocity.call_args.args[0], 0.)
+                self.assertEqual(a._integral, 0.)
+                self.assertEqual(a._last_error, 0.)
+                self.assertFalse(a.ready)
+                self.assertIn("Gierrate", a.status)
+                a.command(True, 5., SteerContext(speed_ms=2., yaw_rate_deg_s=0.))
+                a._step(.02)
+                self.assertTrue(a.ready)
+                self.assertGreater(a.motor.setTargetVelocity.call_args.args[0], 0.)

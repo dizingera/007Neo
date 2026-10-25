@@ -1,5 +1,11 @@
 # Bedienung im Feld
 
+## Gierratenausfall hält den Motor an (1.5.88)
+
+Fehlt im Gierratenmodus die IMU-Rückmeldung oder ist sie ungültig, stoppt der Motor sofort. Gespeicherte I- und D-Anteile werden gelöscht; die Lenkung wartet bis zur gültigen Rückmeldung (Prüfbefund F2).
+
+Nicht am echten Traktor geprüft.
+
 ## Werkstattläufe sicher abbrechen (1.5.87)
 
 „Lenkung aus“ beendet jetzt auch Motortest, Einmessen und Feinabstimmung. Ein Abbruch stoppt alle weiteren Impulse; bei abgebrochener Feinabstimmung werden die Ausgangswerte wiederhergestellt. Werkstattläufe und automatische Lenkung sind gegenseitig gesperrt (Prüfbefund F1).
