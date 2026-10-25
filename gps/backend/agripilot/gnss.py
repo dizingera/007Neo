@@ -73,13 +73,13 @@ class GnssSource:
             # Roh, vor der Auswertung. Ein Protokoll der Ergebnisse würde jeden
             # Auswertungsfehler mit aufzeichnen, den man gerade sucht.
             self.recorder.nmea(line, self.last_line_at)
-        fix = self.parser.feed(line)
+        fix = self.parser.feed(line, now=self.last_line_at)
         if fix is None:
             fix = self.parser.rejected_fix
         if fix is not None:
             # Jede veröffentlichte Messung ist ein eigener Schnappschuss. VTG/GGA
             # dürfen die bereits an die Engine übergebenen Werte nicht verändern.
-            fix = replace(fix, raw=dict(fix.raw), received_at=self.last_line_at)
+            fix = replace(fix, raw=dict(fix.raw))
             result = self.on_fix(fix)
             if asyncio.iscoroutine(result):
                 await result

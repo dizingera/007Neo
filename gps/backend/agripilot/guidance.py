@@ -986,6 +986,22 @@ class HeadingFilter:
     def update(self, course: Optional[float], true_heading: Optional[float],
                speed_ms: float, yaw_rate_deg_s: Optional[float] = None,
                dt: float = 0.0) -> Optional[float]:
+        def endlich(x):
+            return isinstance(x, (int, float)) and math.isfinite(x)
+        course = course if endlich(course) else None
+        true_heading = true_heading if endlich(true_heading) else None
+        yaw_rate_deg_s = yaw_rate_deg_s if endlich(yaw_rate_deg_s) else None
+        if not endlich(self.value):
+            self.value = None
+            self._letzter_kurs = None
+            self._gegen = 0
+            self.gegenlaeufig = self.rueckwaerts = False
+        if not endlich(self.bias_deg_s):
+            self.bias_deg_s = 0.0
+        if not endlich(dt):
+            dt = 0.0
+        if not endlich(speed_ms):
+            return self.value
         if yaw_rate_deg_s is not None:
             yaw_rate_deg_s *= self.gier_vorzeichen
         if true_heading is not None:

@@ -13,7 +13,7 @@
 
    Zwischengespeichert wird nur die Hülle: Seite, Stil, Programm, Symbole. */
 
-const CACHE = 'agripilot-huelle-v29';
+const CACHE = 'agripilot-huelle-v30';
 const HUELLE = [
   '/',
   '/index.html',
@@ -73,14 +73,24 @@ self.addEventListener('fetch', (event) => {
   // tagelang für frisch hält - und dann kommt ein Update auf dem Tablet erst
   // an, wenn der Browser Lust hat. So fragt er den Server nach dem Stand; eine
   // unveränderte Datei kostet nur ein "304, unverändert".
+  const rueckfall = async () => {
+    const treffer = await caches.match(event.request);
+    if (treffer && treffer.ok) return treffer;
+    if (event.request.mode === 'navigate') {
+      const index = await caches.match('/index.html');
+      if (index && index.ok) return index;
+    }
+    return null;
+  };
   event.respondWith(
     fetch(event.request, { cache: 'no-cache' })
-      .then((antwort) => {
+      .then(async (antwort) => {
+        if (!antwort.ok) return await rueckfall() || antwort;
         const kopie = antwort.clone();
-        caches.open(CACHE).then((cache) => cache.put(event.request, kopie));
+        const speichern = caches.open(CACHE).then((cache) => cache.put(event.request, kopie)).catch(() => {});
+        if (event.waitUntil) event.waitUntil(speichern);
         return antwort;
       })
-      .catch(() => caches.match(event.request)
-        .then((treffer) => treffer || caches.match('/index.html')))
+      .catch(async () => await rueckfall() || Response.error())
   );
 });

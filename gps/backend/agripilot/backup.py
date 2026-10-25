@@ -180,15 +180,88 @@ def zurueckspielen(zip_pfad: Path, db_ziel: Path, config_ziel: Optional[Path]) -
 
     Der Stand davor bleibt als ``.vorher`` neben den Dateien liegen.
     """
-    with zipfile.ZipFile(zip_pfad) as archiv:
-        namen = archiv.namelist()
-        if "agripilot.db" not in namen:
-            raise ValueError("Keine AgriPilot-Sicherung: agripilot.db fehlt")
-        for ziel in (db_ziel, Path(str(db_ziel) + "-wal"), Path(str(db_ziel) + "-shm")):
-            if ziel.exists():
-                ziel.replace(Path(str(ziel) + ".vorher"))
-        db_ziel.write_bytes(archiv.read("agripilot.db"))
-        if config_ziel is not None and "config.yaml" in namen:
-            if Path(config_ziel).exists():
-                Path(config_ziel).replace(Path(str(config_ziel) + ".vorher"))
-            Path(config_ziel).write_bytes(archiv.read("config.yaml"))
+    # Ein fester Archiv-Snapshot verhindert Wechsel zwischen Prüfung und Lesen.
+    # Sämtliche Archivlese- und Stagingfehler müssen vor dem ersten Zieltausch
+    # auftreten; auch eine defekte Konfiguration darf keine Originale verschieben.
+    with tempfile.TemporaryDirectory() as arbeit:
+        ordner = Path(arbeit)
+        snapshot = ordner / "sicherung.zip"
+        shutil.copyfile(zip_pfad, snapshot)
+        with zipfile.ZipFile(snapshot) as archiv:
+            namen = archiv.namelist()
+            if namen.count("agripilot.db") != 1 or namen.count("config.yaml") > 1:
+                raise ValueError("Keine eindeutige AgriPilot-Sicherung")
+            daten = archiv.read("agripilot.db")
+            konfig = archiv.read("config.yaml") if config_ziel is not None and "config.yaml" in namen else None
+        if not pruefen(snapshot)["ok"]:
+            raise ValueError("Sicherung enthält keine gültige AgriPilot-Datenbank")
+        db_ziel = Path(db_ziel)
+        plaene = [(db_ziel, daten), (Path(str(db_ziel) + "-wal"), None),
+                  (Path(str(db_ziel) + "-shm"), None)]
+        if config_ziel is not None and konfig is not None:
+            plaene.append((Path(config_ziel), konfig))
+        # Staging liegt jeweils neben dem Ziel: replace bleibt auch bei einer
+        # Konfiguration auf einem anderen Laufwerk ein lokaler Dateitausch.
+        staging = {}
+        original = {}
+        schritte = []
+        geaendert = []
+        aufraeumen_erlaubt = True
+        try:
+            for ziel, inhalt in plaene:
+                eltern = ziel.parent.resolve()
+                if eltern not in staging:
+                    staging[eltern] = Path(tempfile.mkdtemp(prefix=".agripilot-restore-", dir=eltern))
+                temp = staging[eltern]
+                for pfad in (ziel, Path(str(ziel) + ".vorher")):
+                    if pfad in original:
+                        raise ValueError("Überlappende Wiederherstellungsziele")
+                    if pfad.exists() and not pfad.is_file():
+                        raise ValueError("Wiederherstellungsziel ist keine Datei")
+                    kopie = temp / (str(len(original)) + ".original") if pfad.exists() else None
+                    if kopie is not None:
+                        shutil.copy2(pfad, kopie)
+                    original[pfad] = kopie
+                neu = None
+                if inhalt is not None:
+                    neu = temp / ziel.name
+                    neu.write_bytes(inhalt)
+                schritte.append((ziel, neu))
+            # Auch neue .vorher-Dateien vollständig vorbereiten, bevor irgend-
+            # ein Original verändert wird. Bestehende .vorher bleiben rollbackfähig.
+            for ziel, _ in plaene:
+                if original[ziel] is not None:
+                    temp = staging[ziel.parent.resolve()]
+                    neu = temp / (str(len(schritte)) + ".vorher-neu")
+                    shutil.copy2(original[ziel], neu)
+                    schritte.append((Path(str(ziel) + ".vorher"), neu))
+            try:
+                for ziel, neu in schritte:
+                    if neu is None:
+                        if not ziel.exists():
+                            continue
+                        ziel.unlink()
+                    else:
+                        neu.replace(ziel)
+                    geaendert.append(ziel)
+            except BaseException:
+                fehler = []
+                for ziel in reversed(geaendert):
+                    try:
+                        alt = original[ziel]
+                        if alt is None:
+                            ziel.unlink(missing_ok=True)
+                        else:
+                            alt.replace(ziel)
+                    except OSError as exc:
+                        fehler.append(exc)
+                if fehler:
+                    # Bei erneutem Datenträgerfehler die verbliebenen Original-
+                    # kopien für manuelle Rettung behalten, niemals wegräumen.
+                    aufraeumen_erlaubt = False
+                    raise OSError("Wiederherstellung und Rückabwicklung fehlgeschlagen; temporäre Originalkopien bleiben neben den Zielen erhalten") from fehler[0]
+                raise
+        finally:
+            if aufraeumen_erlaubt:
+                for temp in staging.values():
+                    shutil.rmtree(temp, ignore_errors=True)

@@ -119,7 +119,7 @@
       <!-- Saatplan: an die Startecke fahren, in Fahrtrichtung ausrichten, drücken. -->
       <!-- Hindernis: Mast, Stein, Schacht - an der Maschine oder an einer Gerätekante. -->
       <button class="taste" id="btnHindernis" aria-expanded="false" aria-controls="hindernisFenster"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l9 17H3z"/><path d="M12 10v4M12 17v.5"/></svg><span>Hindernis</span></button>
-      <button class="taste" id="btnSaatplanHier"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20V4h16"/><path d="M8 20V8M12 20V8M16 20V8" stroke-dasharray="2 2"/><path d="M4 4l4 4"/></svg><span>Saatplan</span></button>
+      <button class="taste" id="btnSaatplanHier" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20V4h16"/><path d="M8 20V8M12 20V8M16 20V8" stroke-dasharray="2 2"/><path d="M4 4l4 4"/></svg><span>Saatplan</span></button>
     </div>
     <div class="gruppe paar" role="group" aria-label="Spur verschieben">
       <button class="taste" id="btnNudgeLeft" aria-label="Spur 10 cm nach links"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg><span>10 cm</span></button>
@@ -402,11 +402,11 @@
           <label>Säspuren am Rand vor der Fahrgasse<input type="number" step="1" min="0" max="20" name="randspuren"></label>
         </div>
         <div class="row">
-          <button id="btnSaatplanAbHier" class="primary">Ab hier planen</button>
+          <button id="btnSaatplanAbHier" class="primary" disabled>Ab hier planen</button>
           <span class="note">Traktor an der Startecke, in Richtung der ersten Spur</span>
         </div>
         <div class="row">
-          <button id="btnSaatplanPlanen">Mit gewählter Ecke planen</button>
+          <button id="btnSaatplanPlanen" disabled>Mit gewählter Ecke planen</button>
           <label class="switch"><input type="checkbox" id="saatplanZeigen" checked> Plan auf der Karte</label>
         </div>
       </section>
@@ -415,8 +415,8 @@
         <p id="saatplanZusammenfassung"></p>
         <div id="saatplanKonflikte"></div>
         <div class="row">
-          <button id="btnSaatplanUebernehmen" class="primary">Als Aussaat übernehmen</button>
-          <button id="btnSaatplanLoeschen">Plan verwerfen</button>
+          <button id="btnSaatplanUebernehmen" class="primary" disabled>Als Aussaat übernehmen</button>
+          <button id="btnSaatplanLoeschen" disabled>Plan verwerfen</button>
         </div>
       </section>
     </div>

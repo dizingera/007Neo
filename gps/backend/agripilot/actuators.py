@@ -737,6 +737,17 @@ class PhidgetOutput(SteerOutput):
             generation = self._kommando_generation
         if self.motor is None:
             return
+        if not self.ready:
+            measured = self.measured_angle()
+            # Ein gestörter Ausgang darf in diesem Takt niemals Leistung liefern.
+            # Gültige Rückmeldung kann ihn für den folgenden Takt wieder bereit machen.
+            self._rueckmeldung_pruefen(measured, False)
+            self._integral = self._last_error = 0.0
+            self._safe_stop()
+            self.feedback = OutputFeedback(wheel_angle_deg=measured if measured is not None
+                                           and math.isfinite(measured) else None,
+                                           duty=0.0, received_at=time.time())
+            return
         with self._motor_lock:
             if self._fahrer_eingriff:
                 self._safe_stop()
@@ -763,6 +774,10 @@ class PhidgetOutput(SteerOutput):
                 self._test_bis = 0.0
             return
         measured = self.measured_angle()
+        # Auch AUS-Rückmeldungen werden an HTTP und WebSocket weitergereicht.
+        # Ungültig heißt unbekannt (None), niemals ein erfundener Nullwinkel.
+        if measured is not None and not math.isfinite(measured):
+            measured = None
         jetzt = time.time()
         regeltest = (self._regeltest_ziel is not None and jetzt < self._regeltest_bis
                      and not self._engaged)
@@ -783,9 +798,10 @@ class PhidgetOutput(SteerOutput):
             self.abbrechen("Werkstattlauf abgebrochen: Rückmeldung fehlt")
             self.feedback = OutputFeedback(duty=0.0, received_at=time.time())
             return
-        if engaged and self.mode == "yaw_rate" and (
-                self._context.yaw_rate_deg_s is None
-                or not math.isfinite(self._context.yaw_rate_deg_s)):
+        messwert = self._context.yaw_rate_deg_s if self.mode == "yaw_rate" else measured
+        if engaged and (not self.ready or messwert is None or not math.isfinite(messwert)):
+            # Auch innerhalb der Diagnosefrist sofort stromlos; NaN darf nie
+            # durch den Begrenzer in maximale Motorleistung verwandelt werden.
             self._integral = self._last_error = 0.0
             self._safe_stop()
             self.feedback = OutputFeedback(duty=0.0, received_at=time.time())
@@ -800,6 +816,11 @@ class PhidgetOutput(SteerOutput):
             error = 0.0 if measured is None else self._regeltest_ziel - measured
         else:
             error = self._error(measured)
+        if not math.isfinite(error) or not math.isfinite(dt) or dt <= 0:
+            self._integral = self._last_error = 0.0
+            self._safe_stop()
+            self.feedback = OutputFeedback(duty=0.0, received_at=time.time())
+            return
         self._integral = _clamp(self._integral + error * dt,
                                 -self.config.integral_limit, self.config.integral_limit)
         derivative = (error - self._last_error) / dt if dt > 0 else 0.0
@@ -808,6 +829,11 @@ class PhidgetOutput(SteerOutput):
         duty = (self.config.gain_p * error
                 + self.config.gain_i * self._integral
                 + self.config.gain_d * derivative)
+        if not math.isfinite(duty):
+            self._integral = self._last_error = 0.0
+            self._safe_stop()
+            self.feedback = OutputFeedback(duty=0.0, received_at=time.time())
+            return
         # Mindestleistung gegen die Haftreibung - nur wo noch gelenkt werden
         # muss: außerhalb des Totbands und nur bei einem Radwinkel als Regelgröße.
         if (self.mode != "yaw_rate" and abs(error) > self.config.dead_band_deg
@@ -1036,7 +1062,7 @@ class PhidgetOutput(SteerOutput):
             gemessen = self.measured_angle()
             data.update({"mitte_gelernt": self.mitte_gelernt,
                          "zaehlwerte_je_grad": self.config.encoder_counts_per_deg,
-                         "radwinkel": None if gemessen is None else round(gemessen, 2),
+                         "radwinkel": None if gemessen is None or not math.isfinite(gemessen) else round(gemessen, 2),
                          "soll_grad": round(self._target_angle, 2)})
         return data
 

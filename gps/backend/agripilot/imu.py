@@ -23,7 +23,7 @@ from __future__ import annotations
 import asyncio
 import math
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Optional
 
 # Geräte-Kennungen aus der Tinkerforge-Bibliothek
@@ -45,10 +45,14 @@ class Attitude:
 
     @property
     def fresh(self) -> bool:
-        return self.received_at > 0 and (time.time() - self.received_at) < 1.0
+        zahlen = (self.roll_deg, self.pitch_deg, self.yaw_rate_deg_s, self.received_at)
+        if self.yaw_deg is not None:
+            zahlen += (self.yaw_deg,)
+        return (all(isinstance(x, (int, float)) and math.isfinite(x) for x in zahlen)
+                and self.received_at > 0 and 0 <= time.time() - self.received_at < 1.0)
 
     def to_dict(self) -> dict:
-        return {
+        daten = {
             "roll_deg": self.roll_deg,
             "pitch_deg": self.pitch_deg,
             "yaw_deg": self.yaw_deg,
@@ -56,6 +60,9 @@ class Attitude:
             "calibration": self.calibration,
             "fresh": self.fresh,
         }
+        # Auch defekte Replay-/Diagnosewerte müssen als gültiges JSON darstellbar sein.
+        return {k: None if isinstance(v, float) and not math.isfinite(v) else v
+                for k, v in daten.items()}
 
 
 class ImuSource:
@@ -87,8 +94,14 @@ class ImuSource:
         Montagefehler sind bei drei Metern Antennenhöhe schon fünf Zentimeter
         Dauerversatz. Deshalb wird einmal auf ebenem Boden genullt.
         """
-        self.roll_offset += self.attitude.roll_deg
-        self.pitch_offset += self.attitude.pitch_deg
+        lage = self.attitude
+        if not lage.fresh or not all(math.isfinite(x) for x in
+                (lage.roll_deg, lage.pitch_deg, self.roll_offset, self.pitch_offset)):
+            raise RuntimeError("Der Neigungssensor liefert keine aktuelle gültige Lage")
+        self.roll_offset += lage.roll_deg
+        self.pitch_offset += lage.pitch_deg
+        # Derselbe Schnappschuss darf beim Doppelklick kein zweites Mal zählen.
+        self.attitude = replace(lage, roll_deg=0.0, pitch_deg=0.0)
         return {"roll_offset": self.roll_offset, "pitch_offset": self.pitch_offset}
 
     # -- Kalibrieren wie bei Cerea: M1, um 180° wenden, M2 --------------------
@@ -124,6 +137,13 @@ class ImuSource:
 
     def _publish(self, roll: float, pitch: float, yaw: Optional[float],
                  yaw_rate: float, calibration: int = 3) -> None:
+        if not all(isinstance(x, (int, float)) and math.isfinite(x) for x in
+                   (roll, pitch, yaw_rate, self.roll_offset, self.pitch_offset)) or (
+                       yaw is not None and (not isinstance(yaw, (int, float)) or not math.isfinite(yaw))):
+            # Ein defektes Paket macht die letzte Lage sofort ungültig. Keine
+            # Aufzeichnung und kein frischer Zeitstempel für ungültige Zahlen.
+            self.attitude = replace(self.attitude, received_at=0.0)
+            return
         self.attitude = Attitude(
             roll_deg=roll - self.roll_offset,
             pitch_deg=pitch - self.pitch_offset,

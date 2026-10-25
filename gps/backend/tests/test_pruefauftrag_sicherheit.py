@@ -128,6 +128,10 @@ class GierratenAusfall(unittest.TestCase):
                 a.command(True, 5., SteerContext(speed_ms=2., yaw_rate_deg_s=0.))
                 a._step(.02)
                 self.assertTrue(a.ready)
+                # Der als gestört begonnene Takt bleibt stromlos; erst der
+                # folgende Takt mit gültiger Rückmeldung darf wieder regeln.
+                self.assertEqual(a.motor.setTargetVelocity.call_args.args[0], 0.)
+                a._step(.02)
                 self.assertGreater(a.motor.setTargetVelocity.call_args.args[0], 0.)
 
 

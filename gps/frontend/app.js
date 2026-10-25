@@ -109,6 +109,8 @@ function onState(data) {
   lenkAufzeichnung.aufnehmen(data);
   glaettungNachfuehren(previous, data);
   state.live = data;
+  reglerKontextPruefen();
+  saatKontextPruefen();
   if (window.Arbeitstag) window.Arbeitstag.aktualisieren(data);
   if (el("uebungsKennzeichen")) el("uebungsKennzeichen").hidden = !(data.system && data.system.uebung);
   if (typeof updateErfolgPruefen === "function") updateErfolgPruefen(data);
@@ -793,22 +795,88 @@ function drawHeadland() {
 /* Saatplan: der vorab geplante Schlag. Säspuren dünn, Fahrgassen rot mit ihrem
  * Abstand, Vorgewende-Runden gestrichelt, Ränder mit Konflikt bernsteinfarben.
  * Der Plan gehört zum Feld und wird nachgeladen, sobald ein anderes Feld kommt. */
-const saat = { feld: null, plan: null, zeigen: true, laedt: false };
-
-async function saatplanLaden(feldId) {
+const saat = { feld: null, plan: null, zeigen: true, laedt: false, kontext: null, folge: 0, anfrage: 0, formReadyField: null, formReadyFolge: null };
+function saatKontextPruefen() {
+  const id = state.live && state.live.field ? state.live.field.id : null;
+  if (id !== saat.kontext) {
+    saat.kontext = id; saat.folge++; saat.anfrage++;
+    saat.feld = null; saat.plan = null; saat.laedt = false;
+    saat.optionen = []; saat.vorschau = null; saat.ansicht = null;
+    clearTimeout(saat.planTakt);
+    saatFormSperren();
+  }
+  saatBedienung();
+  return id;
+}
+function saatFormSperren() {
+  saat.formReadyField = null; saat.formReadyFolge = null;
+  const wahl = el('saatplanStart');
+  wahl.innerHTML = ''; wahl.value = '';
+  el('saatplanErgebnis').hidden = true;
+  el('saatplanForm').querySelectorAll('input, select').forEach(input => { input.value = ''; });
+  saatBedienung();
+}
+function saatFormBereit() {
+  return !!saat.kontext && saat.formReadyField === saat.kontext && saat.formReadyFolge === saat.folge;
+}
+function saatBedienung() {
+  const gesperrt = !saatFormBereit() || saat.laedt;
+  ['btnSaatplanPlanen','btnSaatplanAbHier','btnSaatplanHier','btnSaatplanUebernehmen','btnSaatplanLoeschen']
+    .forEach(id => { el(id).disabled = gesperrt; });
+  el('saatplanForm').querySelectorAll('input, select').forEach(input => { input.disabled = gesperrt; });
+}
+function saatAktion() {
+  saatKontextPruefen();
+  if (!saatFormBereit() || saat.laedt) return null;
+  return saatAnfrage();
+}
+function saatFormFuellen(daten, k) {
+  if (!saatAktuell(k) || !daten || !Array.isArray(daten.optionen)) return;
+  saat.optionen = daten.optionen;
+  const wahl = el('saatplanStart');
+  wahl.innerHTML = '';
+  daten.optionen.forEach(o => {
+    const option = document.createElement('option'); option.value = o.id; option.textContent = o.text;
+    wahl.appendChild(option);
+  });
+  const vorgabe = daten.vorgabe || {};
+  wahl.value = daten.optionen.some(o => o.id === vorgabe.start) ? vorgabe.start : (daten.optionen[0] && daten.optionen[0].id) || '';
+  const form = el('saatplanForm');
+  ['breite_m','fahrgasse_m','randspuren'].forEach(name => {
+    form.querySelector(`[name="${name}"]`).value = vorgabe[name] ?? '';
+  });
+  if (daten.optionen.some(o => o.id === wahl.value) &&
+      ['breite_m','fahrgasse_m','randspuren'].every(name => Number.isFinite(vorgabe[name]))) {
+    saat.formReadyField = k.feld; saat.formReadyFolge = k.folge;
+  }
+}
+function saatAnfrage() {
+  const feld = saatKontextPruefen();
   saat.laedt = true;
+  saatBedienung();
+  return {feld, folge: saat.folge, anfrage: ++saat.anfrage};
+}
+function saatAktuell(k) {
+  return saatKontextPruefen() === k.feld && saat.folge === k.folge && saat.anfrage === k.anfrage;
+}
+function saatFertig(k) { if (saatAktuell(k)) { saat.laedt = false; saatBedienung(); } }
+async function saatplanLaden(feldId, k = saatAnfrage()) {
   try {
-    const antwort = await (await fetch(`/api/fields/${feldId}/saatplan`)).json();
+    if (!saatAktuell(k) || feldId !== k.feld) return null;
+    saatFormSperren();
+    const r = await fetch(`/api/fields/${feldId}/saatplan`);
+    if (r.ok === false) throw new Error('Saatplan nicht erreichbar');
+    const antwort = await r.json();
+    if (!saatAktuell(k)) return null;
     saat.feld = feldId;
     saat.plan = antwort.data ? antwort.data.plan : null;
+    saatFormFuellen(antwort.data, k);
     zeichnenAnfordern();
     return antwort.data;
   } catch (fehler) {
-    saat.feld = feldId; saat.plan = null;
+    if (saatAktuell(k)) { saat.feld = feldId; saat.plan = null; }
     return null;
-  } finally {
-    saat.laedt = false;
-  }
+  } finally { saatFertig(k); }
 }
 
 /* Schrift an einem Weltpunkt. Mit ``belegt`` (Liste der schon beschrifteten Kästen in
@@ -1297,15 +1365,20 @@ el('btnCurve').onclick = async () => {
  * zeigen, drücken. Der Plan liegt sofort auf der Karte, das Menü zeigt ihn
  * mit Reihenfolge und Füllstreifen und bietet die Übernahme an. */
 el('btnSaatplanHier').onclick = async () => {
-  const antwort = await api('POST', '/api/saatplan/hier', {});
-  if (!antwort) return;
-  const plan = antwort.data;
-  saat.feld = state.live.field.id; saat.plan = plan; saat.zeigen = true;
-  zeichnenAnfordern();
-  toast(`Saatplan ${plan.startwahl}: ${plan.anzahl_spuren} Spuren, ${plan.anzahl_fahrgassen} Fahrgassen` +
-        (plan.fuellstreifen ? `, A–B ${plan.fuellstreifen.abstand_m.toFixed(1).replace('.', ',')} m` : ''));
-  el('sheet').hidden = false;
-  document.querySelector('.tab[data-tab="saatplan"]').onclick();
+  const k = saatAktion();
+  if (!k) return;
+  try {
+    if (!k.feld) return;
+    const antwort = await api('POST', '/api/saatplan/hier', {});
+    if (!antwort || !saatAktuell(k)) return;
+    const plan = antwort.data;
+    saat.feld = k.feld; saat.plan = plan; saat.zeigen = true;
+    zeichnenAnfordern();
+    toast(`Saatplan ${plan.startwahl}: ${plan.anzahl_spuren} Spuren, ${plan.anzahl_fahrgassen} Fahrgassen` +
+          (plan.fuellstreifen ? `, A–B ${plan.fuellstreifen.abstand_m.toFixed(1).replace('.', ',')} m` : ''));
+    el('sheet').hidden = false;
+    document.querySelector('.tab[data-tab="saatplan"]').onclick();
+  } finally { saatFertig(k); }
 };
 /* Wende: planen, ansehen, starten. Bewusst zwei Druck – die Route liegt erst
  * sichtbar auf der Karte, bevor die Maschine ihr folgt. */
@@ -2074,9 +2147,9 @@ function fillTraktorForm(traktor, erzwingen = false) {
   });
 }
 
-async function renderTraktoren() {
+async function renderTraktoren(aktuell = null) {
   const liste = await fetch('/api/traktoren').then((r) => r.json()).catch(() => null);
-  if (!Array.isArray(liste)) return;
+  if (!Array.isArray(liste) || (aktuell && !aktuell())) return;
   traktorenListe = liste;
   const select = el('traktorSelect');
   select.replaceChildren(...liste.map((t) => Object.assign(document.createElement('option'), {
@@ -2087,7 +2160,7 @@ async function renderTraktoren() {
   // Mit dem Mähdrescher kommt sein Schneidwerk (und zurück das letzte Gerät).
   const vorher = (geraeteAlle.find((p) => p.aktiv) || {}).id;
   const geraete = await fetch('/api/profiles').then((r) => r.json()).catch(() => null);
-  if (!Array.isArray(geraete)) return;
+  if (!Array.isArray(geraete) || (aktuell && !aktuell())) return;
   renderProfiles(geraete);
   const jetzt = geraete.find((p) => p.aktiv);
   if (jetzt && vorher !== undefined && jetzt.id !== vorher) fillProfileFrom(jetzt);
@@ -2133,6 +2206,22 @@ el('btnSaveTraktor').onclick = async () => {
 const CEREA_GRUNDWERTE = { cerea_lenk_aggr: 100, cerea_auffahr_aggr: 100, cerea_l: 0.10,
   cerea_i: 0.09, cerea_i2: 0.06, cerea_d: 0.45 };
 let reglerGeaendert = false;
+let reglerTraktorId = null, reglerFolge = 0, reglerAnzeigeId = null, reglerBearbeitung = 0;
+function reglerKontextPruefen() {
+  const id = state.live && state.live.traktor_id || null;
+  if (id !== reglerTraktorId) {
+    reglerTraktorId = id;
+    reglerFolge++;
+    reglerGeaendert = false;
+    reglerAnzeigeId = null;
+    reglerBearbeitung++;
+  }
+  return id;
+}
+function reglerKontextAktuell(kontext) {
+  return reglerKontextPruefen() === kontext.id && reglerFolge === kontext.folge
+    && reglerBearbeitung === kontext.bearbeitung;
+}
 const reglerZeilen = [...document.querySelectorAll('#reglerWerte .regler-zeile')];
 
 function reglerWert(zeile) { return parseFloat(zeile.dataset.wert); }
@@ -2151,13 +2240,22 @@ function reglerSetzen(zeile, wert) {
 }
 
 function reglerAendern(zeile, wert) {
+  const id = reglerKontextPruefen();
+  if (!id) return;
+  if (id !== reglerAnzeigeId) { renderLenkregler(true); return; }
+  reglerBearbeitung++;
   reglerSetzen(zeile, wert);
   reglerGeaendert = true;
   zeile.classList.add('geaendert');
 }
 
 function renderLenkregler(erzwingen = false) {
-  const traktor = traktorenListe.find((t) => t.aktiv) || (state.live && state.live.profile) || {};
+  const id = reglerKontextPruefen();
+  const gewaehlt = traktorenListe.find((t) => t.aktiv && t.id === id);
+  const traktor = gewaehlt || (state.live && state.live.profile) || {};
+  reglerAnzeigeId = id;
+  el('btnReglerOk').disabled = !id;
+  el('btnReglerStanley').disabled = !id;
   if (!reglerGeaendert || erzwingen) {
     reglerZeilen.forEach((zeile) => {
       const wert = traktor[zeile.dataset.feld];
@@ -2168,10 +2266,10 @@ function renderLenkregler(erzwingen = false) {
   }
   const art = { cerea: 'Cerea', voraus: 'Vorausschauend', stanley: 'Stanley' }[traktor.regelart] || traktor.regelart || '–';
   // Ohne Traktorliste steht im Zustand das Gespann - dessen Name ist der des Geräts.
-  const name = traktorenListe.some((t) => t.aktiv) ? traktor.name : 'Traktor';
+  const name = gewaehlt ? gewaehlt.name : 'Traktor';
   el('reglerArt').textContent = `${name} · Regelart jetzt: ${art}`;
   el('btnReglerStanley').hidden = traktor.regelart !== 'cerea';
-  el('reglerHinweis').textContent = traktor.regelart === 'cerea' ? ''
+  el('reglerHinweis').textContent = !id ? 'Traktor noch nicht eindeutig geladen – auf den aktuellen Zustand warten.' : traktor.regelart === 'cerea' ? ''
     : 'Diese Werte wirken erst mit der Regelart Cerea – „OK“ schaltet sie für diesen Traktor ein.';
 }
 
@@ -2280,10 +2378,13 @@ function probefahrtZeigen(p) {
 let probefahrtBedienungLaeuft = false;
 async function probefahrtBedienen(aktion) {
   if (probefahrtBedienungLaeuft) return;
+  const id = reglerKontextPruefen();
+  if (!id) return;
+  const kontext = {id, folge: reglerFolge, bearbeitung: reglerBearbeitung};
   probefahrtBedienungLaeuft = true;
   try {
-    const r = await api('POST', '/api/probefahrt', {aktion});
-    if (r) { probefahrtZeigen(r.data); toast(r.data.hinweis); }
+    const r = await api('POST', '/api/probefahrt', {aktion, erwartete_traktor_id: id});
+    if (r && reglerKontextAktuell(kontext)) { probefahrtZeigen(r.data); toast(r.data.hinweis); }
   } finally { probefahrtBedienungLaeuft = false; }
 }
 el('btnProbefahrtVorher').onclick = () => probefahrtBedienen('vorher');
@@ -2322,16 +2423,20 @@ function automatikZeigen(s) {
 let automatikBedienungLaeuft = false;
 async function automatikBedienen(aktion) {
   if (automatikBedienungLaeuft) return;
+  const id = reglerKontextPruefen();
+  if (!id) return;
+  const kontext = {id, folge: reglerFolge, bearbeitung: reglerBearbeitung};
   automatikBedienungLaeuft = true;
   try {
-    const r = await api('POST', '/api/lenkautomatik', { aktion,
+    const r = await api('POST', '/api/lenkautomatik', { aktion, erwartete_traktor_id: id,
       ziel_cm: Number(el('automatikZiel').value) });
-    if (r) {
+    if (r && reglerKontextAktuell(kontext)) {
+      await renderTraktoren(() => reglerKontextAktuell(kontext));
+      if (!reglerKontextAktuell(kontext)) return;
       automatikZeigen({ lenkautomatik: r.data });
+      renderLenkregler(true);
       toast(aktion === 'start' ? 'Automatik misst bei der nächsten geraden Fahrt'
         : aktion === 'stop' ? 'Optimierung gestoppt' : 'Ausgangswerte wiederhergestellt');
-      await renderTraktoren();
-      renderLenkregler(true);
     }
   } finally { automatikBedienungLaeuft = false; }
 }
@@ -2371,19 +2476,32 @@ el('btnReglerGrund').onclick = () => {
 };
 
 el('btnReglerOk').onclick = async () => {
-  const payload = { regelart: 'cerea' };
+  const id = reglerKontextPruefen();
+  if (!id) { renderLenkregler(true); return; }
+  if (reglerAnzeigeId !== id) { renderLenkregler(true); toast('Traktor gewechselt – Werte neu geladen. Bitte prüfen.'); return; }
+  const kontext = {id, folge: reglerFolge, bearbeitung: reglerBearbeitung};
+  const payload = { regelart: 'cerea', erwartete_traktor_id: id };
   reglerZeilen.forEach((zeile) => { payload[zeile.dataset.feld] = reglerWert(zeile); });
-  if (await api('POST', '/api/traktor', payload)) {
+  const antwort = await api('POST', '/api/traktor', payload);
+  if (antwort) {
+    if (!reglerKontextAktuell(kontext)) return;
     reglerGeaendert = false;
     await renderTraktoren();
+    if (!reglerKontextAktuell(kontext)) return;
     renderLenkregler(true);
     toast('Lenkregler übernommen – Regelart Cerea');
   }
 };
 
 el('btnReglerStanley').onclick = async () => {
-  if (await api('POST', '/api/traktor', { regelart: 'stanley' })) {
+  const id = reglerKontextPruefen();
+  if (!id) return;
+  if (reglerAnzeigeId !== id) { renderLenkregler(true); toast('Traktor gewechselt – Werte neu geladen. Bitte prüfen.'); return; }
+  const kontext = {id, folge: reglerFolge, bearbeitung: reglerBearbeitung};
+  if (await api('POST', '/api/traktor', { regelart: 'stanley', erwartete_traktor_id: id })) {
+    if (!reglerKontextAktuell(kontext)) return;
     await renderTraktoren();
+    if (!reglerKontextAktuell(kontext)) return;
     renderLenkregler(true);
     toast('Regelart wieder Stanley');
   }
@@ -2425,27 +2543,15 @@ el('btnSaveHeadland').onclick = async () => {
 
 /* Reiter Saatplan: Vorgabe wählen, planen, Ergebnis und Konflikte lesen. */
 async function renderSaatplan() {
+  const k = saatAnfrage();
   const feld = state.live && state.live.field;
   saat.seiteFeld = feld ? feld.id : null;   // für welches Feld die Seite gefüllt ist
   el('saatplanErgebnis').hidden = true;
-  if (!feld) { el('saatplanFeld').textContent = 'Kein Feld geladen – erst unter Felder ein Feld laden.'; return; }
+  if (!feld) { saatFertig(k); el('saatplanFeld').textContent = 'Kein Feld geladen – erst unter Felder ein Feld laden.'; return; }
   el('saatplanFeld').textContent = `Schlag: ${feld.name}`;
-  const daten = await saatplanLaden(feld.id);
+  const daten = await saatplanLaden(feld.id, k);
+  if (!saatAktuell(k)) return;
   if (!daten) { el('saatplanFeld').textContent = `${feld.name}: keine Grenze – erst umfahren oder Shapefile einlesen.`; return; }
-  saat.optionen = daten.optionen;
-  const wahl = el('saatplanStart');
-  wahl.innerHTML = '';
-  daten.optionen.forEach((o) => {
-    const option = document.createElement('option');
-    option.value = o.id; option.textContent = o.text;
-    wahl.appendChild(option);
-  });
-  const vorgabe = daten.vorgabe || {};
-  if (vorgabe.start) wahl.value = vorgabe.start;
-  const form = el('saatplanForm');
-  ['breite_m', 'fahrgasse_m', 'randspuren'].forEach((name) => {
-    if (vorgabe[name] != null) form.querySelector(`[name="${name}"]`).value = vorgabe[name];
-  });
   zeigeSaatplan(daten.plan);
 }
 
@@ -2730,60 +2836,80 @@ function zeigeSaatplan(plan) {
 }
 
 el('btnSaatplanPlanen').onclick = async () => {
-  const feld = state.live && state.live.field;
-  if (!feld) { toast('Erst ein Feld laden', true); return; }
-  const form = el('saatplanForm');
-  const zahl = (name) => parseFloat(String(form.querySelector(`[name="${name}"]`).value).replace(',', '.'));
-  const antwort = await api('POST', `/api/fields/${feld.id}/saatplan`, {
-    start: el('saatplanStart').value, breite_m: zahl('breite_m'),
-    fahrgasse_m: zahl('fahrgasse_m'), randspuren: Math.round(zahl('randspuren')),
-  });
-  if (!antwort) return;
-  saat.feld = feld.id; saat.plan = antwort.data; saat.zeigen = true;
-  el('saatplanZeigen').checked = true;
-  zeigeSaatplan(antwort.data);
-  zeichnenAnfordern();
-  toast(antwort.data.konflikte.length
-    ? `Geplant – ${antwort.data.konflikte.length} Konflikt${antwort.data.konflikte.length > 1 ? 'e' : ''}`
-    : 'Geplant – passt an allen Rändern');
+  const k = saatAktion();
+  if (!k) return;
+  try {
+    if (!k.feld) return;
+    const feld = state.live && state.live.field;
+    if (!feld) { toast('Erst ein Feld laden', true); return; }
+    const form = el('saatplanForm');
+    const zahl = (name) => parseFloat(String(form.querySelector(`[name="${name}"]`).value).replace(',', '.'));
+    const antwort = await api('POST', `/api/fields/${feld.id}/saatplan`, {
+      start: el('saatplanStart').value, breite_m: zahl('breite_m'),
+      fahrgasse_m: zahl('fahrgasse_m'), randspuren: Math.round(zahl('randspuren')),
+    });
+    if (!antwort || !saatAktuell(k)) return;
+    saat.feld = feld.id; saat.plan = antwort.data; saat.zeigen = true;
+    el('saatplanZeigen').checked = true;
+    zeigeSaatplan(antwort.data);
+    zeichnenAnfordern();
+    toast(antwort.data.konflikte.length
+      ? `Geplant – ${antwort.data.konflikte.length} Konflikt${antwort.data.konflikte.length > 1 ? 'e' : ''}`
+      : 'Geplant – passt an allen Rändern');
+  } finally { saatFertig(k); }
 };
 
 el('btnSaatplanAbHier').onclick = async () => {
-  // Werte aus dem Formular mitgeben, damit z. B. 3 m Sämaschine gilt.
-  const form = el('saatplanForm');
-  const zahl = (name) => parseFloat(String(form.querySelector(`[name="${name}"]`).value).replace(',', '.'));
-  const antwort = await api('POST', '/api/saatplan/hier', {
-    breite_m: zahl('breite_m'), fahrgasse_m: zahl('fahrgasse_m'), randspuren: Math.round(zahl('randspuren')),
-  });
-  if (!antwort) return;
-  saat.feld = state.live.field.id; saat.plan = antwort.data; saat.zeigen = true;
-  el('saatplanZeigen').checked = true;
-  zeigeSaatplan(antwort.data);
-  zeichnenAnfordern();
-  toast(`Geplant ab ${antwort.data.startwahl}`);
+  const k = saatAktion();
+  if (!k) return;
+  try {
+    if (!k.feld) return;
+    // Werte aus dem Formular mitgeben, damit z. B. 3 m Sämaschine gilt.
+    const form = el('saatplanForm');
+    const zahl = (name) => parseFloat(String(form.querySelector(`[name="${name}"]`).value).replace(',', '.'));
+    const antwort = await api('POST', '/api/saatplan/hier', {
+      breite_m: zahl('breite_m'), fahrgasse_m: zahl('fahrgasse_m'), randspuren: Math.round(zahl('randspuren')),
+    });
+    if (!antwort || !saatAktuell(k)) return;
+    saat.feld = k.feld; saat.plan = antwort.data; saat.zeigen = true;
+    el('saatplanZeigen').checked = true;
+    zeigeSaatplan(antwort.data);
+    zeichnenAnfordern();
+    toast(`Geplant ab ${antwort.data.startwahl}`);
+  } finally { saatFertig(k); }
 };
 
 el('saatplanZeigen').onchange = (event) => { saat.zeigen = event.target.checked; zeichnenAnfordern(); };
 
 el('btnSaatplanUebernehmen').onclick = async () => {
-  const feld = state.live && state.live.field;
-  if (!feld) return;
-  const jahr = await erntejahrWaehlen();
-  if (jahr === null) return;
-  const antwort = await api('POST', `/api/fields/${feld.id}/saatplan/uebernehmen`, { saison: jahr });
-  if (antwort) {
-    toast(saat.plan && saat.plan.saisonspur_b
-      ? `Saisonspur „${antwort.data.name}“ aktiv – an B die Spur „… B“ laden`
-      : `Saisonspur „${antwort.data.name}“ aktiv`);
-  }
+  const k = saatAktion();
+  if (!k) return;
+  try {
+    if (!k.feld) return;
+    const feld = state.live && state.live.field;
+    if (!feld) return;
+    const jahr = await erntejahrWaehlen();
+    if (jahr === null || !saatAktuell(k)) return;
+    const antwort = await api('POST', `/api/fields/${feld.id}/saatplan/uebernehmen`, { saison: jahr });
+    if (antwort && saatAktuell(k)) {
+      toast(saat.plan && saat.plan.saisonspur_b
+        ? `Saisonspur „${antwort.data.name}“ aktiv – an B die Spur „… B“ laden`
+        : `Saisonspur „${antwort.data.name}“ aktiv`);
+    }
+  } finally { saatFertig(k); }
 };
 
 el('btnSaatplanLoeschen').onclick = async () => {
-  const feld = state.live && state.live.field;
-  if (!feld) return;
-  if (await api('DELETE', `/api/fields/${feld.id}/saatplan`)) {
-    saat.plan = null; zeigeSaatplan(null); zeichnenAnfordern(); toast('Plan verworfen');
-  }
+  const k = saatAktion();
+  if (!k) return;
+  try {
+    if (!k.feld) return;
+    const feld = state.live && state.live.field;
+    if (!feld) return;
+    if (await api('DELETE', `/api/fields/${feld.id}/saatplan`) && saatAktuell(k)) {
+      saat.plan = null; zeigeSaatplan(null); zeichnenAnfordern(); toast('Plan verworfen');
+    }
+  } finally { saatFertig(k); }
 };
 
 el('autoSections').onchange = (event) =>
@@ -4533,8 +4659,10 @@ async function einstellungenSpeichern() {
   const antwort = await api('POST', '/api/settings', { aenderungen });
   if (!antwort) return;
   settings.werte = antwort.data.werte;
-  document.querySelectorAll('.setting-field.changed').forEach((box) =>
-    box.classList.remove('changed'));
+  settings.gruppen.forEach((gruppe) => gruppe.felder.forEach((feld) => {
+    const input = document.getElementById(`set-${feld.schluessel}`);
+    if (input) input.closest('.setting-field').classList.toggle('changed', feldGeaendert(feld, input));
+  }));
   const neustart = antwort.data.neustart_noetig || [];
   toast(neustart.length
     ? `Gespeichert – Neustart nötig für: ${neustart.join(', ')}`

@@ -59,6 +59,9 @@ class CoverageMap:
         self.cells: set[tuple[int, int]] = set()
         self.applied_area_m2 = 0.0  # includes overlap: what the machine actually put out
         self._new_cells: list[tuple[int, int]] = []
+        # Geometrische Fläche und Zellzentrenfläche unterscheiden sich am Rand.
+        # Diese Differenz ist keine doppelte Bearbeitung.
+        self._raster_korrektur_m2 = 0.0
         # Was nicht diese Maschine eben gefahren hat (anderer Traktor, früherer
         # Stand). Getrennt, weil die Anzeige die eigene Fahrt selbst als glatten
         # Streifen zeichnet und nur das Fremde aus Zellen malen muss.
@@ -77,7 +80,7 @@ class CoverageMap:
     @property
     def overlap_m2(self) -> float:
         """Ground gone over more than once - the number that costs money."""
-        return max(0.0, self.applied_area_m2 - self.area_m2)
+        return max(0.0, self.applied_area_m2 - self.area_m2 - self._raster_korrektur_m2)
 
     @property
     def overlap_percent(self) -> float:
@@ -135,27 +138,36 @@ class CoverageMap:
                 (p1[0] + right[0] * section.right_m, p1[1] + right[1] * section.right_m),
                 (p1[0] + right[0] * section.left_m, p1[1] + right[1] * section.left_m),
             ]
-            self._rasterise(corners)
-            applied += math.dist(p0, p1) * section.width
+            # Fläche genau des Parallelogramms, das auch rasterisiert wird.
+            flaeche = abs((p1[0]-p0[0])*right[1] - (p1[1]-p0[1])*right[0]) * section.width
+            if flaeche <= 1e-12:
+                continue
+            neu, gesamt = self._rasterise(corners)
+            doppelt = flaeche * (gesamt-neu)/gesamt if gesamt else 0.0
+            self._raster_korrektur_m2 += flaeche - neu*self.cell_size**2 - doppelt
+            applied += flaeche
         return applied
 
-    def _rasterise(self, polygon: Sequence[Point]) -> None:
+    def _rasterise(self, polygon: Sequence[Point]) -> tuple[int, int]:
         """Mark every cell whose centre falls inside the quad."""
         xs = [p[0] for p in polygon]
         ys = [p[1] for p in polygon]
         cs = self.cell_size
         ix0, ix1 = int(math.floor(min(xs) / cs)), int(math.ceil(max(xs) / cs))
         iy0, iy1 = int(math.floor(min(ys) / cs)), int(math.ceil(max(ys) / cs))
+        neu = gesamt = 0
         for ix in range(ix0, ix1 + 1):
             cx = (ix + 0.5) * cs
             for iy in range(iy0, iy1 + 1):
                 cell = (ix, iy)
-                if cell in self.cells:
-                    continue
                 cy = (iy + 0.5) * cs
                 if point_in_polygon((cx, cy), polygon):
-                    self.cells.add(cell)
-                    self._new_cells.append(cell)
+                    gesamt += 1
+                    if cell not in self.cells:
+                        self.cells.add(cell)
+                        self._new_cells.append(cell)
+                        neu += 1
+        return neu, gesamt
 
     # -- section control --------------------------------------------------
 
@@ -217,8 +229,7 @@ class CoverageMap:
             ahead_an = max(mindest_vorlauf_m, look_ahead_m + tempo * t_an - halb)
         schwelle = max(0.05, min(1.0, pcc))
         langsam = rueckwaerts or tempo < min_speed_ms
-        if vorgewende_m > 0.0:
-            from .headland import distance_to_boundary   # spät: headland braucht guidance
+        from .feldwerkzeuge import strecke_enthalten
         for section in sections:
             if not section.auto or section.forced_off:
                 continue
@@ -226,14 +237,15 @@ class CoverageMap:
                 section.enabled = False
                 continue
             kurz = self._section_proben(tool_centre, forward, right, section, ahead_aus)
-            if boundary is not None and any(
-                    not point_in_polygon(punkt, boundary) for punkt in kurz):
-                section.enabled = False
-                continue
-            if vorgewende_m > 0.0 and boundary is not None and any(
-                    (distance_to_boundary(punkt, boundary) or 0.0) < vorgewende_m for punkt in kurz):
-                section.enabled = False
-                continue
+            # Die volle Querstrecke einschließlich Enden und schmaler Buchten
+            # prüfen; Überdeckungsproben bleiben davon unabhängig.
+            if boundary is not None:
+                kanten = [(tool_centre[0]+forward[0]*ahead_aus+right[0]*q,
+                           tool_centre[1]+forward[1]*ahead_aus+right[1]*q)
+                          for q in (section.left_m, section.right_m)]
+                if not strecke_enthalten(*kanten, boundary, max(0.0, vorgewende_m)):
+                    section.enabled = False
+                    continue
             frei = False
             for proben in ((kurz,) if ahead_an == ahead_aus else
                            (kurz, self._section_proben(tool_centre, forward, right, section, ahead_an))):
@@ -308,6 +320,7 @@ class CoverageMap:
         added = other.cells - self.cells
         self.cells |= added
         self.applied_area_m2 += other.applied_area_m2
+        self._raster_korrektur_m2 += other._raster_korrektur_m2
         self._fremde_neu.extend(sorted(added))
 
     def cells_for_display(self, limit: int = 200_000) -> list[list[int]]:

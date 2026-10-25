@@ -23,7 +23,7 @@ ARTEN = ("Mast", "Stein", "Schacht", "Baum", "Sonstiges")
 
 
 def warnung(position, kurs_deg: Optional[float], tempo_ms: float, breite_m: float,
-            hindernisse: Iterable[dict]) -> Optional[dict]:
+            hindernisse: Iterable[dict], *, profil=None, geraetekurs=None, rueckwaerts=False) -> Optional[dict]:
     """Das nächste Hindernis voraus im Fahrstreifen, oder None.
 
     ``hindernisse``: je ``{"id", "name", "x", "y", "radius_m"}`` in lokalen Metern.
@@ -31,10 +31,12 @@ def warnung(position, kurs_deg: Optional[float], tempo_ms: float, breite_m: floa
     """
     if position is None or kurs_deg is None:
         return None
-    h = math.radians(kurs_deg)
+    if profil is not None:
+        return _gespann_warnung(position, kurs_deg, tempo_ms, hindernisse, profil, geraetekurs, rueckwaerts)
+    h = math.radians(kurs_deg + (180 if rueckwaerts or tempo_ms < 0 else 0))
     vor = (math.sin(h), math.cos(h))
     rechts = (math.cos(h), -math.sin(h))
-    reichweite = max(MIN_VORAUS_M, tempo_ms * VORAUS_S)
+    reichweite = max(MIN_VORAUS_M, abs(tempo_ms) * VORAUS_S)
     halb = max(0.5, breite_m / 2.0) + SEITEN_RESERVE_M
     beste = None
     for hd in hindernisse:
@@ -54,8 +56,22 @@ def warnung(position, kurs_deg: Optional[float], tempo_ms: float, breite_m: floa
     return beste
 
 
-def auf_route(pfad, breite_m: float, hindernisse: Iterable[dict]) -> Optional[dict]:
+def auf_route(pfad, breite_m: float, hindernisse: Iterable[dict], *,
+              profil=None, geraetekurs=None, startkurs=None, endkurs=None,
+              huelle=None) -> Optional[dict]:
     """Das erste Hindernis, das das Gespann auf diesem Pfad berühren würde."""
+    if profil is not None or huelle is not None:
+        if huelle is None:
+            from . import gespann
+            huelle = gespann.pruefen(pfad, [], profil, geraetekurs=geraetekurs,
+                                     startkurs=startkurs, endkurs=endkurs)
+        if not huelle.get("vollstaendig") or not huelle.get("huellen"):
+            return _unbekannt()
+        for hd in hindernisse:
+            if _huelle_trifft(huelle["huellen"], hd, SEITEN_RESERVE_M/2 + .11):
+                return {"id": hd.get("id"), "name": hd.get("name") or "Hindernis",
+                        "vollstaendig": True}
+        return None
     halb = max(0.5, breite_m / 2.0) + SEITEN_RESERVE_M / 2
     for hd in hindernisse:
         grenze = halb + max(0.0, float(hd.get("radius_m") or 0.0))
@@ -73,3 +89,44 @@ def _abstand_strecke(p, a, b) -> float:
     laenge2 = dx * dx + dy * dy
     t = 0.0 if laenge2 == 0 else max(0.0, min(1.0, ((p[0] - ax) * dx + (p[1] - ay) * dy) / laenge2))
     return math.hypot(p[0] - (ax + t * dx), p[1] - (ay + t * dy))
+
+
+def _unbekannt():
+    return {"id": None, "name": "Gespannmaße fehlen – Hindernisprüfung unvollständig",
+            "vollstaendig": False, "abstand_m": 0.0, "seite": "mitte"}
+
+
+def _huelle_trifft(huellen, hd, reserve):
+    from .geo import point_in_polygon
+    p = (hd["x"], hd["y"])
+    radius = max(0.0, float(hd.get("radius_m") or 0.0)) + reserve
+    return any(point_in_polygon(p, ring) or any(
+        _abstand_strecke(p, a, b) <= radius
+        for a,b in zip(ring,ring[1:]+ring[:1])) for ring in huellen if len(ring)>=3)
+
+
+def _gespann_warnung(position, kurs, tempo, hindernisse, profil, geraetekurs, rueckwaerts=False):
+    from . import gespann
+    hindernisse = list(hindernisse)
+    if not hindernisse:
+        return None
+    h = math.radians(kurs); vor = (math.sin(h), math.cos(h))
+    richtung = -1 if rueckwaerts or tempo < 0 else 1
+    reichweite = max(MIN_VORAUS_M, abs(tempo)*VORAUS_S)
+    ziel = (position[0]+vor[0]*reichweite*richtung, position[1]+vor[1]*reichweite*richtung)
+    huelle = gespann.pruefen([position,ziel], [], profil,
+                            geraetekurs=geraetekurs, startkurs=kurs, endkurs=kurs)
+    if not huelle["vollstaendig"]:
+        return _unbekannt()
+    beste = None
+    for hd in hindernisse:
+        if not _huelle_trifft(huelle["huellen"], hd, SEITEN_RESERVE_M+.11):
+            continue
+        dx,dy=hd["x"]-position[0],hd["y"]-position[1]
+        abstand=max(0.0,(dx*vor[0]+dy*vor[1])*richtung-max(0.,float(hd.get("radius_m") or 0.)))
+        seitlich=dx*math.cos(h)-dy*math.sin(h)
+        if beste is None or abstand<beste["abstand_m"]:
+            beste={"id":hd.get("id"),"name":hd.get("name") or "Hindernis",
+                   "abstand_m":round(abstand,1),"vollstaendig":True,
+                   "seite":"mitte" if abs(seitlich)<.5 else ("rechts" if seitlich>0 else "links")}
+    return beste

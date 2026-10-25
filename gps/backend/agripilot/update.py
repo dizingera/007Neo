@@ -170,9 +170,26 @@ def paket_pruefen(daten: bytes) -> Paket:
         manifest = json.loads(zf.read(MANIFEST).decode("utf-8"))
     except (ValueError, UnicodeDecodeError) as exc:
         raise UpdateFehler(f"update.json ist nicht lesbar: {exc}") from exc
+    if not isinstance(manifest, dict):
+        raise UpdateFehler("update.json muss ein Objekt mit Dateiliste sein")
+    for key in ("version", "commit", "erstellt"):
+        if key in manifest and not isinstance(manifest[key], str):
+            raise UpdateFehler(f"update.json: {key} muss Text sein")
+    if "ordner" in manifest and (not isinstance(manifest["ordner"], list)
+            or any(not isinstance(o, str) or o not in ORDNER for o in manifest["ordner"])):
+        raise UpdateFehler("update.json: ordner muss eine Liste der Programmordner sein")
     dateien = manifest.get("dateien")
     if not isinstance(dateien, dict) or not dateien:
         raise UpdateFehler("update.json nennt keine Dateien")
+    for name, pruefsumme in dateien.items():
+        if isinstance(name, str) and name:
+            teile = Path(name).parts
+            if name.startswith("/") or ".." in teile or ":" in name or not teile or teile[0] not in ORDNER:
+                raise UpdateFehler(f"Unzulässiger Pfad im Paket: {name}")
+        if (not isinstance(name, str) or not name or name.endswith("/")
+                or not isinstance(pruefsumme, str) or len(pruefsumme) != 64
+                or any(c not in "0123456789abcdef" for c in pruefsumme)):
+            raise UpdateFehler("update.json enthält einen ungültigen Dateinamen oder SHA-256-Prüfwert")
     for name in namen:
         if name == MANIFEST or name.endswith("/"):
             continue
@@ -242,31 +259,56 @@ def einspielen(daten: bytes, wurzel_pfad: Optional[Path] = None,
 
     sicherung = _neue_sicherung(arbeit)
     protokoll: list[tuple[Path, Path]] = []    # (von, nach) - zum Zurückdrehen
-    try:
-        for ordner in ORDNER:
-            quelle = neu / ordner
-            if quelle.is_dir():           # ein Paket ohne docs lässt docs, wie sie sind
-                _inhalt_tauschen(wurzel_pfad / ordner, quelle, sicherung / ordner, protokoll)
-    except Exception as exc:  # noqa: BLE001 - alles zurück, dann erst melden
-        for von, nach in reversed(protokoll):
-            if nach.exists():
-                if von.exists():
-                    shutil.rmtree(von, ignore_errors=True) if von.is_dir() else von.unlink()
-                shutil.move(str(nach), str(von))
-        raise UpdateFehler(f"Einspielen abgebrochen, alter Stand wiederhergestellt: {exc}") from exc
-    finally:
-        shutil.rmtree(neu, ignore_errors=True)
-
     stand = {"version": paket.version, "commit": paket.commit,
              "erstellt": paket.manifest.get("erstellt", ""),
              "eingespielt": time.strftime("%Y-%m-%d %H:%M"),
              "dateien": len(paket.manifest["dateien"]), "sicherung": sicherung.name}
-    (wurzel_pfad / MANIFEST).write_text(json.dumps(stand, indent=1, ensure_ascii=False),
-                                        encoding="utf-8")
+    status_neu = None
+    try:
+        status_neu = _status_vorbereiten(arbeit, stand)
+        for ordner in ORDNER:
+            quelle = neu / ordner
+            if quelle.is_dir():           # ein Paket ohne docs lässt docs, wie sie sind
+                _inhalt_tauschen(wurzel_pfad / ordner, quelle, sicherung / ordner, protokoll)
+        _status_tauschen(wurzel_pfad / MANIFEST, status_neu, sicherung, protokoll)
+    except Exception as exc:  # noqa: BLE001 - alles zurück, dann erst melden
+        rueckfehler = _tausch_zurueck(protokoll)
+        if rueckfehler:
+            raise UpdateFehler(f"Einspielen und Rückabwicklung fehlgeschlagen: {exc}; {rueckfehler}. Sicherung: {sicherung}") from exc
+        raise UpdateFehler(f"Einspielen abgebrochen, alter Stand wiederhergestellt: {exc}") from exc
+    finally:
+        shutil.rmtree(neu, ignore_errors=True)
+        if status_neu is not None:
+            shutil.rmtree(status_neu.parent, ignore_errors=True)
+
     _sicherungen_ausduennen(arbeit, behalten=3)
     stand["requirements"] = _requirements_installieren(wurzel_pfad) if pip else "übersprungen"
     stand["warnungen"] = paket.warnungen
     return stand
+
+
+def _status_vorbereiten(arbeit: Path, stand: dict) -> Path:
+    """Status auf demselben Laufwerk vollständig schreiben, bevor Dateien wechseln."""
+    import tempfile
+    ordner = Path(tempfile.mkdtemp(prefix="status-", dir=arbeit))
+    try:
+        pfad = ordner / MANIFEST
+        pfad.write_text(json.dumps(stand, indent=1, ensure_ascii=False), encoding="utf-8")
+        return pfad
+    except Exception:
+        shutil.rmtree(ordner, ignore_errors=True)
+        raise
+
+
+def _status_tauschen(ziel: Path, neu: Path, sicherung: Path,
+                     protokoll: list[tuple[Path, Path]]) -> None:
+    """Originalstatus und neuen Status in dieselbe Rückabwicklung aufnehmen."""
+    if ziel.exists():
+        alt = sicherung / MANIFEST
+        ziel.replace(alt)
+        protokoll.append((ziel, alt))
+    neu.replace(ziel)
+    protokoll.append((neu, ziel))
 
 
 def _neue_sicherung(arbeit: Path) -> Path:
@@ -306,7 +348,22 @@ def _inhalt_tauschen(alt: Path, quelle: Path, ablage: Path,
             continue
         ziel = alt / kind.name
         shutil.move(str(kind), str(ziel))
-        protokoll.append((ziel, kind))   # zurück hieße: wieder weg aus alt
+        protokoll.append((kind, ziel))   # wie oben: tatsächliche Richtung (von, nach)
+
+
+def _tausch_zurueck(protokoll: list[tuple[Path, Path]]) -> str:
+    """Jeden erfolgten Verschiebeschritt rückwärts ausführen, Fehler offen melden."""
+    fehler = []
+    for von, nach in reversed(protokoll):
+        try:
+            if nach.exists():
+                if von.exists():
+                    raise OSError(f"Rückziel bereits vorhanden: {von}")
+                von.parent.mkdir(parents=True, exist_ok=True)
+                shutil.move(str(nach), str(von))
+        except OSError as exc:
+            fehler.append(str(exc))
+    return "; ".join(fehler)
 
 
 def _sicherungen_ausduennen(arbeit: Path, behalten: int) -> None:
@@ -339,14 +396,25 @@ def zurueckholen(name: str = "", wurzel_pfad: Optional[Path] = None) -> dict[str
     quelle = arbeit / (name or vorhanden[0])
     ablage = _neue_sicherung(arbeit)
     protokoll: list[tuple[Path, Path]] = []
-    for ordner in ORDNER:
-        if (quelle / ordner).is_dir():
-            _inhalt_tauschen(wurzel_pfad / ordner, quelle / ordner, ablage / ordner, protokoll)
-    shutil.rmtree(quelle, ignore_errors=True)
-    stand_datei = wurzel_pfad / MANIFEST
     stand = {"version": "zurückgeholt", "commit": "", "eingespielt": time.strftime("%Y-%m-%d %H:%M"),
              "sicherung": ablage.name, "zurueck_aus": quelle.name}
-    stand_datei.write_text(json.dumps(stand, indent=1, ensure_ascii=False), encoding="utf-8")
+    status_neu = None
+    try:
+        status_neu = _status_vorbereiten(arbeit, stand)
+        for ordner in ORDNER:
+            if (quelle / ordner).is_dir():
+                _inhalt_tauschen(wurzel_pfad / ordner, quelle / ordner, ablage / ordner, protokoll)
+        _status_tauschen(wurzel_pfad / MANIFEST, status_neu, ablage, protokoll)
+    except Exception as exc:  # noqa: BLE001 - auch beim Zurückholen keinen halben Stand lassen
+        rueckfehler = _tausch_zurueck(protokoll)
+        if rueckfehler:
+            raise UpdateFehler(f"Zurückholen und Rückabwicklung fehlgeschlagen: {exc}; {rueckfehler}. Sicherung: {ablage}") from exc
+        raise UpdateFehler(f"Zurückholen abgebrochen, bisheriger Stand wiederhergestellt: {exc}") from exc
+    finally:
+        if status_neu is not None:
+            shutil.rmtree(status_neu.parent, ignore_errors=True)
+    # Erst nach erfolgreichem Datei- UND Statustausch ist die Quellsicherung verbraucht.
+    shutil.rmtree(quelle, ignore_errors=True)
     return stand
 
 

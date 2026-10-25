@@ -14,10 +14,10 @@ function umgebung(eingabe) {
       this.onclose();
     } },
   };
-  const kontext = { prompt: () => eingabe, toast: () => {}, refreshLists() {}, confirm: () => true,
-    document: { querySelector: () => ({ focus() {} }) },
+  const kontext = { clearTimeout() {}, prompt: () => eingabe, toast: () => {}, refreshLists() {}, confirm: () => true,
+    document: { querySelector: () => ({ focus() {} }), createElement: () => ({}) },
     state: { live: { field: { id: 'feld' } } }, saat: {},
-    el: id => elemente[id], item: werte => ({ werte, querySelectorAll: () => [{}, { classList: { add() {} } }] }),
+    el: id => elemente[id] || (elemente[id] = {querySelectorAll: () => [], querySelector: () => ({}), appendChild() {}}), item: werte => ({ werte, querySelectorAll: () => [{}, { classList: { add() {} } }] }),
     api: async (...werte) => { aufrufe.push(werte); return { data: { name: 'Saat', fahrgasse_m: 21 } }; },
   };
   vm.createContext(kontext);
@@ -26,6 +26,11 @@ function umgebung(eingabe) {
   vm.runInContext(quelle.slice(beginn, ende), kontext);
   const spur = quelle.indexOf('function spurZeile(');
   vm.runInContext(quelle.slice(spur, quelle.indexOf('function renderLines(', spur)), kontext);
+  const helfer = quelle.indexOf('const saat =');
+  vm.runInContext(quelle.slice(helfer, quelle.indexOf('/* Schrift an einem', helfer)), kontext);
+  vm.runInContext(`const k = saatAnfrage();
+    saatFormFuellen({optionen:[{id:'start',text:'Start'}], vorgabe:{start:'start',breite_m:3,fahrgasse_m:21,randspuren:3}},k);
+    saatFertig(k);`, kontext);
   const plan = quelle.indexOf("el('btnSaatplanUebernehmen').onclick");
   vm.runInContext(quelle.slice(plan, quelle.indexOf("el('btnSaatplanLoeschen')", plan)), kontext);
   return { kontext, aufrufe, elemente };

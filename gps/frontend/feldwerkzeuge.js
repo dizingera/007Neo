@@ -273,7 +273,9 @@
       // Frühere Grenze laden: jeder Druck holt den nächstälteren gesicherten Stand in den Entwurf.
       el('fwVerlauf').onclick = async () => {
         if (this.busy || !this.feld) return;
-        const r = await this.api('GET', `/api/fields/${this.feld.id}/grenzverlauf`);
+        const feldId = this.feld.id, folge = this.folge;
+        const r = await this.api('GET', `/api/fields/${feldId}/grenzverlauf`);
+        if (folge !== this.folge || this.modus !== 'grenze' || this.feld?.id !== feldId) return;
         const verlauf = (r.ok && r.data && r.data.verlauf) || [];
         if (!verlauf.length) { this.status('Noch keine frühere Grenze gesichert.'); return; }
         const stand = verlauf[this.verlaufStelle % verlauf.length];

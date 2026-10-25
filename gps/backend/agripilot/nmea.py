@@ -10,11 +10,14 @@ than raised.
 from __future__ import annotations
 
 import math
+import time
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from typing import Optional
 
 KNOTS_TO_MS = 0.514444
+# Getrennte Empfangsfristen: 1-Hz- und 0,5-Hz-Teilsätze bleiben möglich.
+KOMPONENTEN_FRIST_S = 3.0
 
 # GGA quality indicator -> short label shown to the driver.  The distinction
 # between RTK fix and float matters a lot: float is decimetre level and not
@@ -184,8 +187,27 @@ class NmeaParser:
         self.fix = Fix()
         self.rejected_fix: Optional[Fix] = None
         self.last_error: Optional[str] = None
+        self.component_received_at: dict[str, float] = {}
+        self._now = 0.0
 
-    def feed(self, sentence: str) -> Optional[Fix]:
+    def _stempeln(self, *teile):
+        for teil in teile:
+            self.component_received_at[teil] = self._now
+
+    def _ablaufen(self):
+        felder = {'qualitaet': {'fix_quality': 0},
+                  'geschwindigkeit': {'speed_ms': 0.0}, 'kurs': {'course_deg': None},
+                  'heading': {'heading_deg': None}, 'hoehe': {'altitude': None},
+                  'hdop': {'hdop': None}, 'gst': {'lat_error': None, 'lon_error': None},
+                  'satelliten': {'satellites': 0}, 'korrekturen': {'age_of_corrections': None}}
+        for teil, zeit in list(self.component_received_at.items()):
+            if 0 <= self._now - zeit <= KOMPONENTEN_FRIST_S:
+                continue
+            for feld, wert in felder.get(teil, {}).items():
+                setattr(self.fix, feld, wert)
+            del self.component_received_at[teil]
+
+    def feed(self, sentence: str, now: Optional[float] = None) -> Optional[Fix]:
         """Consume one line. Returns the Fix when an epoch is complete."""
         self.rejected_fix = None
         sentence = sentence.strip()
@@ -203,13 +225,23 @@ class NmeaParser:
         handler = getattr(self, f"_handle_{kind.lower()}", None)
         if handler is None:
             return None
-        return handler(parts)
+        self._now = time.time() if now is None else now
+        self._ablaufen()
+        result = handler(parts)
+        if result is not None or self.rejected_fix is not None:
+            # Ausschließlich ein positionsführender Satz erneuert die Position.
+            self._stempeln('position')
+            self.fix.received_at = self._now
+            if self.rejected_fix is not None:
+                self.rejected_fix.received_at = self._now
+        return result
 
     def _reject_position(self) -> None:
         # Der Parser meldet weiter nur gültige Positionen zurück. Der Empfangsweg
         # bekommt zusätzlich den Ausfall, damit Motor und Teilbreiten sofort stoppen.
         # Eine RMC-Wiederkehr belegt GPS, aber noch keinen neuen RTK-Fix.
         self.fix.fix_quality = 0
+        self.component_received_at.pop('qualitaet', None)
         self.rejected_fix = replace(self.fix, raw=dict(self.fix.raw))
         return None
 
@@ -223,11 +255,11 @@ class NmeaParser:
         fix.lat = _degrees(p[2], p[3]) if p[3] in ("N", "S") else None
         fix.lon = _degrees(p[4], p[5]) if p[5] in ("E", "W") else None
         fix.fix_quality = _to_int(p[6]) or 0
+        self._stempeln('qualitaet', 'satelliten', 'hdop', 'hoehe', 'korrekturen')
         fix.satellites = _to_int(p[7]) or 0
         fix.hdop = _to_float(p[8])
         fix.altitude = _to_float(p[9])
-        if len(p) > 13:
-            fix.age_of_corrections = _to_float(p[13])
+        fix.age_of_corrections = _to_float(p[13]) if len(p) > 13 else None
         return fix if fix.valid else self._reject_position()
 
     def _handle_rmc(self, p: list[str]) -> Optional[Fix]:
@@ -246,9 +278,11 @@ class NmeaParser:
             speed = _to_float(p[7])
             if speed is not None:
                 fix.speed_ms = speed * KNOTS_TO_MS
+                self._stempeln('geschwindigkeit')
             course = _to_float(p[8])
             if course is not None:
                 fix.course_deg = course
+                self._stempeln('kurs')
             if fix.fix_quality == 0:
                 fix.fix_quality = 1  # receiver only sends RMC: assume plain GPS
         return fix if (active and fix.valid) else self._reject_position()
@@ -259,9 +293,11 @@ class NmeaParser:
         course = _to_float(p[1])
         if course is not None:
             self.fix.course_deg = course
+            self._stempeln('kurs')
         kmh = _to_float(p[7])
         if kmh is not None:
             self.fix.speed_ms = kmh / 3.6
+            self._stempeln('geschwindigkeit')
         return None
 
     def _handle_gst(self, p: list[str]) -> None:
@@ -269,6 +305,7 @@ class NmeaParser:
             return None
         self.fix.lat_error = _to_float(p[6])
         self.fix.lon_error = _to_float(p[7])
+        self._stempeln('gst')
         return None
 
     def _handle_hdt(self, p: list[str]) -> None:
@@ -279,6 +316,7 @@ class NmeaParser:
         heading = _to_float(p[1])
         if heading is not None:
             self.fix.heading_deg = heading
+            self._stempeln('heading')
         return None
 
     def _handle_gsa(self, p: list[str]) -> None:
@@ -286,6 +324,7 @@ class NmeaParser:
             hdop = _to_float(p[16])
             if hdop is not None:
                 self.fix.hdop = hdop
+                self._stempeln('hdop')
         return None
 
 

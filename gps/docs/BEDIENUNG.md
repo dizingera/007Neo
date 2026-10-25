@@ -2167,3 +2167,64 @@ am gemeinsamen Programmstand sind dort gesperrt. Eine deutliche Übungskennzeich
 bleibt auf der Fahransicht. Von einem entfernten Tablet wird der lokale PC-Start
 nicht ausgelöst. Echte Vergleichsfahrt und Rohdatenaufzeichnung bleiben verlinkt;
 eine reale Fahrabnahme ersetzt der Übungsmodus nicht.
+
+
+## Fehlerprüfung und Korrekturen (1.5.101)
+
+Nach dem Gesamtausbau wurden zusätzlich zu den bestehenden Tests unabhängige
+Gegenfälle für Lenkung, Sensoren, Feldarbeit, Daten, Updates und Oberfläche geprüft.
+
+- Der eigene Motorregler stoppt sofort, wenn Radwinkel/Drehrate fehlen oder nicht
+  endlich sind oder der Ausgang nicht bereit ist. Ungültige Fehler-/Leistungswerte
+  erreichen den Motor nicht; Integral und D-Zustand werden zurückgesetzt.
+- NMEA-Komponenten altern getrennt. GGA-Qualität, HDT, Bewegungskurs und Tempo
+  verfallen nach mehr als drei Sekunden. Ein neuer RMC-Satz erneuert keine alte
+  RTK-Freigabe oder Dualantennenrichtung. HDT und VTG allein erneuern keine Position.
+  Unterstützt werden damit aktuelle Teildaten mindestens innerhalb dieser Frist;
+  langsamere Teilmeldungen verfallen. Die Frist nutzt Empfangszeit, keine aus UTC
+  rekonstruierte Messlatenz. GNSS-Neustart und Replay verwenden denselben Parser.
+- Die IMU-Nullung verlangt frische endliche Daten. Doppeltes Nullstellen derselben
+  Messung addiert keinen zweiten Offset. Ungültige Gierraten vergiften den Kursfilter
+  nicht; gültige Kursdaten können einen beschädigten Zustand wieder aufbauen.
+- Grenzabschaltung der automatischen Teilbreiten prüft die ganze Querstrecke mit
+  beiden Außenkanten und konkaven Aussparungen. Überdeckungsproben bleiben getrennt.
+  Geometrisch überstrichene Fläche und Raster erzeugen bei Seitendrift keine
+  künstliche Überlappung. Bereits gespeicherte Kennzahlen werden nicht nachträglich
+  als neu vermessen ausgegeben.
+- Hindernisprüfung nutzt gemessene Traktor-/Gerätehüllen einschließlich seitlichem
+  Versatz, Frontschneidwerk, Nachlauf und Rückwärtsfahrt. Fehlende Maße sind eine
+  unvollständige Prüfung. Das bleibt eine Prüfung gespeicherter Hindernisse,
+  keine automatische Erkennung unbekannter Hindernisse oder Kollisionsgarantie.
+- Gelöschte offene Arbeiten lassen sich nicht wieder aufnehmen. Konkurrierende
+  Datenfassungen werden auch bei älterer eingehender Uhrzeit im Konfliktarchiv
+  erhalten. Konfliktauflösung prüft den tatsächlich wirksamen Zwischenstand.
+- Wiederherstellung prüft alle Archivdaten vor dem ersten Zieltausch. Dateitausch
+  und Rückfallkopien werden vorbereitet und bei abgefangenen Fehlern rückwärts
+  zurückgesetzt. Mehrere Laufwerke sind damit keine stromausfallsichere Transaktion;
+  bei zusätzlichem Rückrollfehler bleiben Originalkopien zur Rettung erhalten.
+- Alle Update-/Neustartwege verlangen Stillstand und ausgeschaltete Lenkung.
+  Rückwärtsfahrt zählt als Fahrt. Echte Lenkgeräte brauchen eine frische gültige
+  Position; ein ausdrücklich GPS- und ausgangsloser Verwaltungsrechner ohne
+  laufenden Auftrag darf weiterhin gewartet werden. Nach Download beziehungsweise
+  Paketprüfung wird der Zustand erneut geprüft. Ungültige Manifeste werden vor
+  Nebenwirkungen abgewiesen. Programmtausch und Status werden gemeinsam abgesichert.
+- Speicherfehler im optionalen Betriebsbuch beenden den Überwachungstakt nicht.
+  Eine gedrosselte Warnung weist auf den Speicherfehler hin.
+- Reglerentwürfe sind an die echte Traktor-ID gebunden; der Server lehnt fremde
+  Zielkennungen ab. Verspätete Grenzverlauf-/Saatplanantworten verändern kein anderes
+  Feld. Eingaben während einer Speicherung behalten ihren Entwurfszustand.
+- Offline-Dateien werden nur aus erfolgreichen Antworten erneuert; HTTP-Fehler
+  überschreiben keine funktionierende Hülle. Eine neue Lenkausgangsstörung während
+  einer bestehenden Pause erzeugt eine Warnung ohne dauernde Wiederholung.
+
+Alle Funktionsprüfungen erfolgten ohne echte Motorbewegung. Die Korrekturen sind
+kein Nachweis für die Lenkgenauigkeit oder Sicherheit der konkreten Anlage im Feld.
+
+Weitere Gegenproben sichern den Formular-Ladezustand beim Feldwechsel: Solange
+der neue Saatplan nicht vollständig geladen ist, bleiben alte Startoptionen und
+Planungsaktionen gesperrt. Auch verspätete Automatikantworten dürfen einen neuen
+Reglerentwurf nicht löschen. Automatik- und Vergleichsfahrtanfragen können eine
+erwartete Traktor-ID mitsenden; abweichende aktuelle Auswahl wird abgewiesen.
+Ein Lenkausgangsfehler aus aktiver Führung erzeugt ebenfalls einen Alarm statt nur
+einer gewöhnlichen Pausemeldung. Nicht endliche Radwinkel bleiben auch bei
+abgeschalteter Lenkung in HTTP-/WebSocket-Ausgaben unbekannt und gültiges JSON.

@@ -19,9 +19,17 @@
     const vorSteuer = vorher && vorher.steering;
     const jetztSteuer = jetzt.steering;
 
+    // Eine neue Ausgangsstörung ist unabhängig vom vorherigen Führen ein Alarm.
+    const ausgangsfehler = jetztSteuer && jetztSteuer.command && jetztSteuer.command.reason || '';
+    if (vorSteuer && vorSteuer.armed && vorSteuer.command &&
+        ausgangsfehler.startsWith('Lenkausgang gestört:') && vorSteuer.command.reason !== ausgangsfehler) {
+      liste.push({id: 'lenkausgang-stoerung', stufe: 'alarm', text: ausgangsfehler,
+        ansage: `Lenkung gestört. ${ausgangsfehler}`});
+    }
     // Die Lenkung hat geführt und tut es nicht mehr.
     if (vorSteuer && vorSteuer.command && vorSteuer.command.engaged &&
-        jetztSteuer && jetztSteuer.command && !jetztSteuer.command.engaged) {
+        jetztSteuer && jetztSteuer.command && !jetztSteuer.command.engaged &&
+        !ausgangsfehler.startsWith('Lenkausgang gestört:')) {
       const grund = jetztSteuer.command.reason || '';
       if (jetztSteuer.armed) {
         // Nur pausiert (ab 1.5.80): sie greift von selbst wieder. Kein Alarm -

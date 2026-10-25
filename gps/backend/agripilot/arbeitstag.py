@@ -131,7 +131,7 @@ def fortsetzen(engine, job_id):
     if engine.job:
         raise RuntimeError("Erst die laufende Arbeit beenden")
     j = engine.store.get_job(job_id)
-    if not j or j.get("ended_at") is not None:
+    if not j or j.get("deleted") or j.get("ended_at") is not None:
         raise RuntimeError("Nur eine offene Arbeit kann fortgesetzt werden")
     if j["device_id"] != engine.config.network.device_id:
         raise RuntimeError("Diese Arbeit gehört zu einem anderen Gerät")

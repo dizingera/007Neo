@@ -15,6 +15,7 @@ import asyncio
 import dataclasses
 import hmac
 import struct
+import sqlite3
 import sys
 import contextlib
 import copy
@@ -520,16 +521,24 @@ class Application:
             await asyncio.sleep(interval)
             # Auch ohne Zuschauer: die Lenkung muss überwacht bleiben.
             self.engine.tick()
-            self.engine.betriebsbuch.observation({
-                "steering": {**self.steering.status(),
-                             "engaged": self.steering.command.engaged,
-                             "reason": self.steering.command.reason},
-                "guidance": self.engine.guidance.to_dict(),
-                "fix": self.engine.fix.to_dict() if self.engine.fix else None,
-                "imu": {"healthy": bool(self.imu and self.imu.healthy)},
-                "field": {"id": self.engine.field["id"]} if self.engine.field else None,
-                "job": {"id": self.engine.job["id"]} if self.engine.job else None,
-            })
+            try:
+                self.engine.betriebsbuch.observation({
+                    "steering": {**self.steering.status(),
+                                 "engaged": self.steering.command.engaged,
+                                 "reason": self.steering.command.reason},
+                    "guidance": self.engine.guidance.to_dict(),
+                    "fix": self.engine.fix.to_dict() if self.engine.fix else None,
+                    "imu": {"healthy": bool(self.imu and self.imu.healthy)},
+                    "field": {"id": self.engine.field["id"]} if self.engine.field else None,
+                    "job": {"id": self.engine.job["id"]} if self.engine.job else None,
+                })
+            except (OSError, sqlite3.Error):
+                # Das optionale Tagebuch darf den Überwachungstakt nicht beenden.
+                jetzt = time.monotonic()
+                vorher = getattr(self, "_betriebsbuch_fehler_at", None)
+                if vorher is None or jetzt-vorher >= 30:
+                    self._betriebsbuch_fehler_at = jetzt
+                    self.engine.note("Betriebsbuch konnte nicht gespeichert werden – Speicher prüfen; Überwachung läuft weiter")
             # Und die Inbetriebnahme liest mit, auch wenn niemand hinsieht:
             # ein Fix, der nur beim Hinschauen steht, ist keiner.
             self.checklist.beobachten(self.checklist_input())
@@ -1166,6 +1175,9 @@ def create_app(config=None) -> FastAPI:
         """Den gewählten Traktor ändern: Name, Antenne, Lenkung - und Bauform: wird er
         zum Mähdrescher, kommt das Schneidwerk als Gerät gleich mit."""
         def aendern():
+            erwartet = payload.get("erwartete_traktor_id")
+            if erwartet is not None and erwartet != engine.aktiver_traktor()["id"]:
+                raise ValueError("Traktor wurde gewechselt – Lenkregler neu laden")
             engine.update_traktor(payload)
             engine.geraet_zum_fahrzeug()
             return engine.aktiver_traktor()
@@ -1215,7 +1227,10 @@ def create_app(config=None) -> FastAPI:
         """Aktuelle Lage als eben merken - auf ebenem Boden ausführen."""
         if application.imu is None:
             raise HTTPException(400, "Kein Neigungssensor eingerichtet")
-        result = application.imu.level_here()
+        try:
+            result = application.imu.level_here()
+        except (RuntimeError, ValueError) as exc:
+            raise HTTPException(400, str(exc)) from exc
         store.set_setting("imu_offsets", result)
         engine.note("Neigungssensor genullt")
         return ok(result)
@@ -1420,8 +1435,13 @@ def create_app(config=None) -> FastAPI:
     async def probefahrt_status():
         return ok(engine.probefahrt.status())
 
+    def traktor_kontext_pruefen(payload):
+        if "erwartete_traktor_id" in payload and payload["erwartete_traktor_id"] != engine.aktiver_traktor()["id"]:
+            raise HTTPException(400,"Traktor wurde gewechselt – Ansicht neu laden")
+
     @api.post("/api/probefahrt")
     async def probefahrt_bedienen(payload: dict = Body(...)):
+        traktor_kontext_pruefen(payload)
         return guard(engine.probefahrt_bedienen, str(payload.get('aktion', '')))
 
     @api.get("/api/probefahrt/bericht")
@@ -1437,6 +1457,7 @@ def create_app(config=None) -> FastAPI:
 
     @api.post("/api/lenkautomatik")
     async def lenkautomatik_bedienen(payload: dict = Body(...)):
+        traktor_kontext_pruefen(payload)
         def bedienen():
             try:
                 ziel = float(payload.get("ziel_cm", 3.0))
@@ -1551,6 +1572,35 @@ def create_app(config=None) -> FastAPI:
 
     # -- Aktualisierung ---------------------------------------------------
 
+    def update_stillstand_pruefen():
+        """Kein Eingriff bei Fahrt, scharfer Lenkung oder unbekanntem Stillstand."""
+        import math
+        if application.steering.armed:
+            raise HTTPException(409, "Erst die Lenkung ausschalten")
+        fix = engine.fix
+        if fix is not None:
+            try:
+                tempo = float(fix.speed_ms)
+                if not math.isfinite(tempo):
+                    raise ValueError("Geschwindigkeit unbekannt")
+            except (TypeError, ValueError, OverflowError):
+                raise HTTPException(409, "Gültige Geschwindigkeit zum Prüfen des Stillstands erforderlich") from None
+            if abs(tempo) > 0.5:
+                raise HTTPException(409, "Erst anhalten - während der Fahrt wird nicht aktualisiert")
+        # Ein reiner Verwaltungsrechner (z. B. Pi-Master) hat absichtlich kein GPS.
+        verwaltung = (config.gnss.source == "aus" and engine.job is None
+                      and config.steering.output == "none" and config.teilbreiten.output == "aus")
+        if verwaltung:
+            return
+        try:
+            alter = time.time() - float(fix.received_at) if fix is not None else float("inf")
+            frisch = (fix is not None and fix.valid and bool(fix.received_at)
+                      and math.isfinite(alter) and 0 <= alter <= 2.0)
+        except (TypeError, ValueError, OverflowError):
+            frisch = False
+        if not frisch:
+            raise HTTPException(409, "Frische gültige Position zum Prüfen des Stillstands erforderlich")
+
     @api.get("/api/update")
     async def update_stand() -> dict:
         # als_programm: in der exe gibt es nur das Online-Update und die Setup-Datei -
@@ -1574,11 +1624,7 @@ def create_app(config=None) -> FastAPI:
         if not update_module.als_programm():
             raise HTTPException(400, "Das geht nur in der Programmversion (AgriPilot.exe). "
                                      "Hier: Paket einspielen oder aus GitHub holen.")
-        if application.steering.armed:
-            raise HTTPException(409, "Erst die Lenkung ausschalten")
-        fix = engine.fix
-        if fix is not None and fix.valid and fix.speed_ms > 0.5:
-            raise HTTPException(409, "Erst anhalten - während der Fahrt wird nicht aktualisiert")
+        update_stillstand_pruefen()
         ergebnis = await asyncio.to_thread(application.online_pruefen)
         if ergebnis["fehler"]:
             raise HTTPException(400, ergebnis["fehler"])
@@ -1591,11 +1637,7 @@ def create_app(config=None) -> FastAPI:
         except onlineupdate_module.OnlineFehler as exc:
             raise HTTPException(400, str(exc)) from exc
         # Während Download/Prüfung kann der Fahrer losfahren oder scharfschalten.
-        if application.steering.armed:
-            raise HTTPException(409, "Erst die Lenkung ausschalten")
-        fix = engine.fix
-        if fix is not None and fix.valid and fix.speed_ms > 0.5:
-            raise HTTPException(409, "Erst anhalten - während der Fahrt wird nicht aktualisiert")
+        update_stillstand_pruefen()
         application.steering.disarm("Aktualisierung")
         engine.suspend_job()          # die Arbeit läuft danach weiter
         engine.note(f"Aktualisierung auf {ergebnis['neu']} wird eingespielt - das Programm startet neu")
@@ -1615,11 +1657,18 @@ def create_app(config=None) -> FastAPI:
         """
         import base64
         try:
-            daten = base64.b64decode(payload.get("zip") or "")
+            daten = base64.b64decode(payload.get("zip") or "", validate=True)
         except (ValueError, TypeError) as exc:
             raise HTTPException(400, f"Paket nicht lesbar: {exc}") from exc
         if not daten:
             raise HTTPException(400, "Kein Paket übergeben")
+        update_stillstand_pruefen()
+        try:
+            geprueft = await asyncio.to_thread(update_module.paket_pruefen, daten)
+            geprueft.zf.close()
+        except update_module.UpdateFehler as exc:
+            raise HTTPException(400, str(exc)) from exc
+        update_stillstand_pruefen()
         application.steering.disarm("Aktualisierung")
         engine.suspend_job()     # die Arbeit läuft nach dem Neustart weiter
         try:
@@ -1632,6 +1681,7 @@ def create_app(config=None) -> FastAPI:
     @api.post("/api/update/git")
     async def update_git():
         """Aus dem Git-Klon holen (nur vorspulen) - am Hof mit Netz."""
+        update_stillstand_pruefen()
         application.steering.disarm("Aktualisierung")
         try:
             ergebnis = await asyncio.to_thread(update_module.aus_repo_holen)
@@ -1643,6 +1693,7 @@ def create_app(config=None) -> FastAPI:
 
     @api.post("/api/update/zurueck")
     async def update_zurueck(payload: dict = Body(default={})):
+        update_stillstand_pruefen()
         application.steering.disarm("Aktualisierung")
         try:
             ergebnis = await asyncio.to_thread(update_module.zurueckholen, payload.get("name", ""))
@@ -1655,6 +1706,7 @@ def create_app(config=None) -> FastAPI:
     async def update_neustart():
         """Das Programm beenden und wiederkommen lassen. Die Antwort geht vor
         dem Beenden hinaus; die Anzeige verbindet sich von selbst neu."""
+        update_stillstand_pruefen()
         application.steering.disarm("Neustart")
         engine.suspend_job()     # die Arbeit läuft nach dem Neustart weiter
         engine.note("Neustart")

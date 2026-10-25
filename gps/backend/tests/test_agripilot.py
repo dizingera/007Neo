@@ -3341,6 +3341,8 @@ class UpdateTest(unittest.TestCase):
 
     def test_package_round_trip_keeps_environment_and_data(self):
         import zipfile
+        import json
+        from unittest import mock
         from agripilot import update
         with tempfile.TemporaryDirectory() as q, tempfile.TemporaryDirectory() as z:
             quelle = self._baum(q, "neu")
@@ -3370,7 +3372,13 @@ class UpdateTest(unittest.TestCase):
             sicherungen = update.sicherungen(ziel)
             self.assertEqual(len(sicherungen), 1)
             self.assertIn('"alt"', (ziel / ".update" / sicherungen[0] / "backend" / "agripilot" / "__init__.py").read_text())
-            stand = update.stand("1.1.0", ziel)
+            # Den echten Statustausch unabhängig von der Anzeige prüfen.
+            status = json.loads((ziel / update.MANIFEST).read_text(encoding="utf-8"))
+            self.assertEqual(status["commit"], "abc1234")
+            # Diese Fixture ist eine Paketinstallation ohne Git. Ein TEMP unter
+            # einem fremden Repository darf dessen HEAD nicht in den Test tragen.
+            with mock.patch.object(update, "repo_verfuegbar", return_value=False):
+                stand = update.stand("1.1.0", ziel)
             self.assertEqual(stand["paket_version"], "1.1.0")
             self.assertEqual(stand["commit"], "abc1234")
             # ... und zurück.
@@ -3426,7 +3434,11 @@ class UpdateTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as ordner, tempfile.TemporaryDirectory() as q:
             config = config_module.load("/kein-solcher-pfad.yaml")
             config.server.data_dir = ordner
-            config.gnss.source = "simulator"
+            # Explizite Verwaltungsfixture: keine laufende Simulatorfahrt.
+            config.gnss.source = "aus"
+            config.imu.source = "aus"
+            config.corrections.source = "aus"
+            config.steering.output = "none"
             with TestClient(create_app(config)) as client:
                 stand = client.get("/api/update").json()
                 self.assertIn("version", stand)

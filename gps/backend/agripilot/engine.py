@@ -1880,7 +1880,8 @@ class Engine:
         huelle = gespann.pruefen(pfad, grenze, self.profile, einstellung.grenzabstand_m,
                                 self.implement_heading.value, self.heading, (kurs+180)%360)
         im_feld = mitte_im_feld and huelle["im_feld"]
-        hindernis = hindernisse_module.auf_route(pfad, self.profile.width_m, self._hindernisse)
+        hindernis = hindernisse_module.auf_route(pfad, self.profile.width_m, self._hindernisse,
+                                                 profil=self.profile, huelle=huelle)
         if hindernis is not None:
             im_feld = False
             huelle = {**huelle, "im_feld": False,
@@ -2030,6 +2031,19 @@ class Engine:
                 verbindung=gespann._hulle([tuple(p) for p in alte_huellen[0]+lage["huellen"][0]])
                 if not feldwerkzeuge.flaeche_enthalten(verbindung,feldwerkzeuge.arbeitsgrenze(self.field),self.headland.grenzabstand_m+.10):
                     raise RuntimeError("Anfahrt zur Wenderoute verlässt den Grenzabstand – neu planen")
+        # Hindernisse können seit der Vorschau neu hinzugekommen sein. Auch
+        # ohne Grenzschalter niemals eine unbekannte oder getroffene Hülle freigeben.
+        self._hindernisse_laden(erzwingen=True)
+        hindernis_route = list(self.turn_preview)
+        if geo.distance(self._lenkpunkt(), hindernis_route[0]) > 1e-6:
+            hindernis_route.insert(0, self._lenkpunkt())
+        hindernis = hindernisse_module.auf_route(
+            hindernis_route, self.profile.width_m,
+            self._hindernisse, profil=self.profile,
+            geraetekurs=self.implement_heading.value, startkurs=self.heading,
+            endkurs=(getattr(self, "_turn_kurs", self.heading)+180)%360)
+        if hindernis is not None:
+            raise RuntimeError("Hindernisprüfung: " + hindernis["name"] + " – Wende neu planen")
         # Der Folger gibt spätestens dort auf, wo auch die Lenkung aufgäbe -
         # sonst zeigte die Anzeige "Wende läuft", während der Motor längst
         # abgeschaltet hat und der Fahrer allein lenkt.
@@ -2675,6 +2689,7 @@ class Engine:
 
     def state(self) -> dict[str, Any]:
         fix = self.fix
+        traktor = self.aktiver_traktor()
         return {
             "time": time.time(),
             "device": {
@@ -2730,7 +2745,8 @@ class Engine:
                             if self.position is not None and len(self.field["boundary"]) >= 3 else None),
             } if self.field else None,
             "profile": asdict(self.profile),
-            "traktor": self.aktiver_traktor()["name"],
+            "traktor": traktor["name"],
+            "traktor_id": traktor["id"],
             "sections": [asdict(s) for s in self._wirksame_teilbreiten()],
             "teilbreiten_hardware": self.teilbreiten.status_dict() if self.teilbreiten else None,
             "auto_sections": self.auto_sections,
@@ -2821,7 +2837,9 @@ class Engine:
         vorher = self.hindernis_warnung
         self.hindernis_warnung = hindernisse_module.warnung(
             self.steer_position or self.position, self.heading, fix.speed_ms,
-            self.profile.width_m, self._hindernisse)
+            self.profile.width_m, self._hindernisse, profil=self.profile,
+            geraetekurs=self.implement_heading.value,
+            rueckwaerts=getattr(self.heading_filter, "rueckwaerts", False))
         if self.hindernis_warnung and (not vorher or vorher.get("id") != self.hindernis_warnung["id"]):
             self.note(f"Achtung: {self.hindernis_warnung['name']} in "
                       f"{self.hindernis_warnung['abstand_m']:.0f} m")

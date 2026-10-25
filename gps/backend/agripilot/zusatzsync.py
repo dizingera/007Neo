@@ -202,7 +202,7 @@ def konflikt_sichern(store, table, incoming):
     push = float(store.get_setting("sync_push_cursor", 0))
     remote_stamp = store.get_setting(f"sync_remote_stand:{table}:{local['id']}")
     received = store.db.execute("SELECT received_at FROM sync_received WHERE table_name=? AND record_id=?", (table, local["id"])).fetchone()
-    if (incoming.get("updated_at", 0) <= local["updated_at"] or local["updated_at"] <= push
+    if (local["updated_at"] <= push
             or local["updated_at"] == remote_stamp
             or (received and local["updated_at"] <= received["received_at"])):
         return False
@@ -228,7 +228,9 @@ def konflikt_sichern(store, table, incoming):
     if any(c["id"] == ident for c in archiv):
         return False
     archiv.append({"id": ident, "tabelle": table, "datensatz_id": local["id"], "zeit": time.time(),
-                   "lokal": local, "eingehend": incoming, "status": "offen", "neuerer_uebernommen": True})
+                   "lokal": local, "eingehend": incoming, "status": "offen",
+                   "erwarteter_stand": max(local["updated_at"], incoming.get("updated_at", 0)),
+                   "neuerer_uebernommen": incoming.get("updated_at", 0) > local["updated_at"]})
     store.set_setting("sync_konflikte", archiv[-50:])
     return True
 
@@ -246,7 +248,8 @@ def loesen(store, id, auswahl):
         raise ValueError("Konflikttabelle ungültig")
     current = store.db.execute(f"SELECT * FROM {table} WHERE id=?", (conflict["datensatz_id"],)).fetchone()
     record = dict(conflict[auswahl])
-    if not current or current["updated_at"] != conflict["eingehend"]["updated_at"]:
+    erwartet = conflict.get("erwarteter_stand", conflict["eingehend"]["updated_at"])
+    if not current or current["updated_at"] != erwartet:
         raise ValueError("Datensatz inzwischen geändert; Konflikt neu prüfen")
     # Aktuelle vereinigte Arbeitsfläche bei einer Metadatenauflösung erhalten.
     if table == "jobs" and current["coverage"]:
