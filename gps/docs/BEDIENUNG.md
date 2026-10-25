@@ -1,5 +1,17 @@
 # Bedienung im Feld
 
+## Beschädigte GPS-Meldungen sicher verwerfen (1.5.93)
+
+Nicht berechenbare oder unendliche Zahlen im GPS-Datenstrom werden verworfen.
+Koordinaten brauchen gültige Minuten, Wertebereiche und passende
+Himmelsrichtungen. Ungültige Positionsmeldungen lösen keine neue Position aus;
+eine fehlerhafte RMC-Meldung veröffentlicht nicht mehr die alte Position als frisch.
+Die nächste gültige Meldung wird wieder verarbeitet.
+
+Auch direkt eingehende ungültige Koordinaten werden vor der Projektion in lokale
+Feldmeter erkannt. Die Lenkung wartet und es wird keine Fläche daraus markiert.
+Mit beschädigten NMEA-Sätzen und einer Motorattrappe geprüft, ohne echte Hardware.
+
 ## Bearbeitete Fläche beim Abgleich erhalten (1.5.92)
 
 Zusätzliche Zellen derselben Arbeit werden auch aus einem älteren oder gleich

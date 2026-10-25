@@ -9,6 +9,7 @@ than raised.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Optional
@@ -56,7 +57,10 @@ class Fix:
 
     @property
     def valid(self) -> bool:
-        return self.lat is not None and self.lon is not None and self.fix_quality > 0
+        return (self.lat is not None and self.lon is not None
+                and math.isfinite(self.lat) and math.isfinite(self.lon)
+                and -90.0 <= self.lat <= 90.0 and -180.0 <= self.lon <= 180.0
+                and self.fix_quality > 0)
 
     @property
     def fix_label(self) -> str:
@@ -78,7 +82,7 @@ class Fix:
         return None
 
     def to_dict(self) -> dict:
-        return {
+        daten = {
             "lat": self.lat,
             "lon": self.lon,
             "altitude": self.altitude,
@@ -95,6 +99,9 @@ class Fix:
             "age_of_corrections": self.age_of_corrections,
             "utc": self.utc.isoformat() if self.utc else None,
         }
+        # Auch verworfene Messungen werden angezeigt. JSON kennt kein NaN/Inf.
+        return {k: None if isinstance(v, float) and not math.isfinite(v) else v
+                for k, v in daten.items()}
 
 
 def checksum_ok(sentence: str) -> bool:
@@ -115,26 +122,28 @@ def checksum_ok(sentence: str) -> bool:
 
 def _to_float(value: str) -> Optional[float]:
     try:
-        return float(value)
-    except (TypeError, ValueError):
+        result = float(value)
+        return result if math.isfinite(result) else None
+    except (TypeError, ValueError, OverflowError):
         return None
 
 
 def _to_int(value: str) -> Optional[int]:
-    try:
-        return int(float(value))
-    except (TypeError, ValueError):
-        return None
+    number = _to_float(value)
+    return int(number) if number is not None else None
 
 
 def _degrees(value: str, hemisphere: str) -> Optional[float]:
     """NMEA packs coordinates as ddmm.mmmm - split the degrees off the minutes."""
     raw = _to_float(value)
-    if raw is None or not value:
+    if raw is None or not value or raw < 0 or hemisphere not in ("N", "S", "E", "W"):
         return None
     degrees = int(raw / 100)
     minutes = raw - degrees * 100
     result = degrees + minutes / 60.0
+    limit = 90.0 if hemisphere in ("N", "S") else 180.0
+    if minutes >= 60.0 or result > limit:
+        return None
     if hemisphere in ("S", "W"):
         result = -result
     return result
@@ -201,8 +210,8 @@ class NmeaParser:
             return None
         fix = self.fix
         fix.utc = _utc_time(p[1]) or fix.utc
-        fix.lat = _degrees(p[2], p[3])
-        fix.lon = _degrees(p[4], p[5])
+        fix.lat = _degrees(p[2], p[3]) if p[3] in ("N", "S") else None
+        fix.lon = _degrees(p[4], p[5]) if p[5] in ("E", "W") else None
         fix.fix_quality = _to_int(p[6]) or 0
         fix.satellites = _to_int(p[7]) or 0
         fix.hdop = _to_float(p[8])
@@ -218,9 +227,12 @@ class NmeaParser:
         active = p[2] == "A"
         fix.utc = _utc_time(p[1], p[9]) or fix.utc
         if active:
+            if p[4] not in ("N", "S") or p[6] not in ("E", "W"):
+                return None
             lat, lon = _degrees(p[3], p[4]), _degrees(p[5], p[6])
-            if lat is not None and lon is not None:
-                fix.lat, fix.lon = lat, lon
+            if lat is None or lon is None:
+                return None  # Alte Position niemals als neue Messung veröffentlichen.
+            fix.lat, fix.lon = lat, lon
             speed = _to_float(p[7])
             if speed is not None:
                 fix.speed_ms = speed * KNOTS_TO_MS
