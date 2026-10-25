@@ -49,6 +49,7 @@ from .genauigkeit import Genauigkeit
 from .spurintegral import SpurIntegral, hang_vorsteuerung
 from . import cerearegler
 from .cerearegler import CereaIntegral
+from .laengsneigung import Laengsneigung
 from .radmitte import Radmitte
 from .nachlauf import Nachlauf
 import json
@@ -113,6 +114,10 @@ class Engine:
         self._gier_gemerkt = self.store.get_setting("imu_gier_vorzeichen")
         if self._gier_gemerkt in (-1, -1.0):
             self.heading_filter.gier_vorzeichen = -1.0
+        # ... und der Längsneigung, aus der Fahrt am Hang gelernt (laengsneigung.py).
+        self.laengsneigung = Laengsneigung()
+        if self.store.get_setting("imu_pitch_vorzeichen") in (-1, -1.0):
+            self.laengsneigung.vorzeichen = -1.0
 
         self.field: Optional[dict] = None
         self.plane: Optional[geo.LocalPlane] = None
@@ -2040,6 +2045,15 @@ class Engine:
                 return  # keine Fläche oder Lenkbefehle aus verworfenen Messungen
         else:
             self.positionsfilter.reset()
+        # Richtung der Längsneigung aus Höhe und Strecke prüfen (laengsneigung.py).
+        neu = self.laengsneigung.update(
+            self.position, fix.altitude,
+            attitude.pitch_deg if (attitude is not None and attitude.fresh) else None,
+            fix.speed_ms, fix.rank >= 4,
+            self.heading_filter.rueckwaerts or self.heading_filter.gegenlaeufig)
+        if neu is not None:
+            self.store.set_setting("imu_pitch_vorzeichen", neu)
+            self.note(self.laengsneigung.meldung)
         self.position = self._compensate_terrain(self.position, heading, attitude)
 
         previous_tool = self.tool_position
@@ -2102,7 +2116,8 @@ class Engine:
             self.terrain_offset_m = (0.0, 0.0)
             return antenna
         right_off, forward_off = terrain_offset(
-            attitude, self.profile.antenna_height_m, self.config.imu.roll_sign
+            attitude, self.profile.antenna_height_m, self.config.imu.roll_sign,
+            self.laengsneigung.vorzeichen
         )
         self.terrain_offset_m = (right_off, forward_off)
         h = math.radians(heading)
@@ -2594,6 +2609,11 @@ class Engine:
                 "terrain_offset_cm": [self.terrain_offset_m[0] * 100.0,
                                       self.terrain_offset_m[1] * 100.0],
                 "compensation": self.config.imu.terrain_compensation,
+                # Aus der Fahrt geprüft: Drehrichtung (Gier) und Längsneigung.
+                "gier_vorzeichen": self.heading_filter.gier_vorzeichen,
+                "gier_geprueft": self.heading_filter.gier_bestaetigt,
+                "laengs_vorzeichen": self.laengsneigung.vorzeichen,
+                "laengs_geprueft": self.laengsneigung.bestaetigt,
             } if self.imu is not None else None),
             "steering": self.steering.status() if self.steering else None,
             "genauigkeit": self.genauigkeit.ergebnis(self.steering.abgaben if self.steering else 0,

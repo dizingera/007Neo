@@ -3989,6 +3989,13 @@ function renderSystem() {
   el('imuNote').hidden = !imu;
   el('imuKalibRow').hidden = !imu;
   el('imuKalibNote').hidden = !imu;
+  if (imu) {
+    // Was die Fahrt über die Einbaulage verraten hat (Gier aus der Kurve, Längs aus der RTK-Höhe).
+    const pruef = (geprueft, vz) => (geprueft ? (vz < 0 ? 'geprüft, umgedreht' : 'geprüft') : 'noch nicht geprüft');
+    el('imuNote').textContent = 'Zum Nullen auf ebenem Boden stehen – ein Grad Montagefehler sind bei 3 m ' +
+      `Antennenhöhe schon 5 cm Dauerversatz. Drehrichtung: ${pruef(imu.gier_geprueft, imu.gier_vorzeichen)} · ` +
+      `Längsneigung: ${pruef(imu.laengs_geprueft, imu.laengs_vorzeichen)} (am Hang fahren).`;
+  }
   if (imu) el('compensation').checked = !!imu.compensation;
 
   const steering = state.live.steering;

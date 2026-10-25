@@ -343,14 +343,20 @@ def build_source(config, simulator=None) -> Optional[ImuSource]:
 
 
 def terrain_offset(attitude: Attitude, antenna_height_m: float,
-                   roll_sign: float = 1.0) -> tuple[float, float]:
+                   roll_sign: float = 1.0, pitch_sign: float = 1.0) -> tuple[float, float]:
     """Wie weit die Antenne durch die Neigung neben dem Boden steht.
 
     Ergebnis in Fahrzeugkoordinaten: (nach rechts, nach vorn) in Metern. Genau
     dieser Betrag wird von der gemessenen Position abgezogen, um vom Punkt der
     Antenne auf den Punkt am Boden zu kommen.
+
+    Rechts tiefer (roll +) neigt die Antenne nach rechts. Nase oben (pitch +, wie
+    in ``Attitude``) neigt sie nach **hinten** - bis 1.5.83 stand hier das
+    Vorzeichen für "Nase unten", und der Ausgleich verdoppelte den Längsfehler,
+    statt ihn aufzuheben. Ob der Sensor wirklich "Nase oben" positiv meldet,
+    prüft laengsneigung.py während der Fahrt (``pitch_sign``).
     """
     roll = math.radians(attitude.roll_deg * roll_sign)
-    pitch = math.radians(attitude.pitch_deg)
+    pitch = math.radians(attitude.pitch_deg * pitch_sign)
     return (antenna_height_m * math.sin(roll),
-            antenna_height_m * math.sin(pitch))
+            -antenna_height_m * math.sin(pitch))

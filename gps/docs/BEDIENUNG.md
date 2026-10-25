@@ -1,5 +1,20 @@
 # Bedienung im Feld
 
+## Hangausgleich längs korrigiert und selbst geprüft (ab 1.5.84)
+
+* **Fehler behoben:** Der Hangausgleich längs hatte das falsche Vorzeichen. Bergauf
+  (Nase oben) neigt sich die Antenne nach hinten – der Ausgleich schob die Position
+  aber noch weiter nach hinten statt nach vorn. Bei einem Sensor, der wie vorgesehen
+  „Nase oben“ positiv meldet, verdoppelte sich so der Längsfehler (3 m Antenne, 5°
+  Hang: gut 50 cm statt 0) – Teilbreiten und Vorgewende schalteten zu früh oder zu
+  spät. Seitlich (quer zur Spur) war alles richtig.
+* **Neu: AgriPilot prüft die Richtung der Längsneigung selbst**, während du am Hang
+  fährst: Bergauf steigt die RTK-Höhe, also muss die Längsneigung positiv sein. Zeigen
+  genug deutliche Abschnitte (je 5 m, mindestens 2° Steigung, RTK fix, über 1 m/s)
+  das Gegenteil, wird das Vorzeichen umgedreht und gemerkt.
+* **Anzeige:** Lenkung → Am Stand → Neigungssensor zeigt „Drehrichtung: geprüft /
+  geprüft, umgedreht / noch nicht geprüft“ und dasselbe für die Längsneigung.
+
 ## Lenkregler im Büro einstellen, Simulator rückwärts (ab 1.5.83)
 
 * **Lenkregler vom Büro in die Kabine:** Bisher behielt das Tablet alle

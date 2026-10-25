@@ -1033,7 +1033,9 @@ class ImuTest(unittest.TestCase):
     def test_pitch_shifts_along_the_direction_of_travel(self):
         from agripilot.imu import Attitude, terrain_offset
         _, forward = terrain_offset(Attitude(pitch_deg=5.0), 3.0)
-        self.assertAlmostEqual(forward, 3.0 * math.sin(math.radians(5.0)), places=6)
+        # Nase oben (bergauf): die Antenne neigt nach hinten, steht also hinter dem
+        # Bodenpunkt - bis 1.5.83 hatte das das falsche Vorzeichen.
+        self.assertAlmostEqual(forward, -3.0 * math.sin(math.radians(5.0)), places=6)
 
     def test_roll_sign_can_be_flipped_for_the_mounting(self):
         from agripilot.imu import Attitude, terrain_offset
