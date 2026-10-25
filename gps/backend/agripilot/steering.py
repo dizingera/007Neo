@@ -292,6 +292,7 @@ class SteeringController:
             "wheel_angle_deg": feedback.wheel_angle_deg,
             "driver_override": feedback.driver_override and feedback.fresh,
             "duty": feedback.duty,
+            "rueckmeldung_frisch": feedback.fresh,
             "disengagements": self.disengage_count,
             "tempo_begrenzt": self.tempo_begrenzt and self.command.engaged,
             "tempo_grenze_deg": round(self.tempo_grenze_deg, 1) if self.tempo_grenze_deg is not None else None,

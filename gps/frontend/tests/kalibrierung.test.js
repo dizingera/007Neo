@@ -22,7 +22,7 @@ test('abgewiesenes Speichern erhält Eingaben und bestätigt keinen Erfolg',asyn
   const {w,el}=ansicht(async()=>antwort(basis()),async()=>null);
   await w.laden();el('wk_wheelbase_m').value='3.2';el('werkstattForm').oninput();el('werkstattVermessen').checked=true;
   await w.senden('geometrie');
-  assert.equal(w.dirty,true);assert.equal(el('wk_wheelbase_m').value,'3.2');assert.match(el('werkstattInfo').textContent,/Nicht gespeichert/);
+  assert.equal(el('werkstattForm').dataset.geaendert,'1');assert.equal(w.dirty,true);assert.equal(el('wk_wheelbase_m').value,'3.2');assert.match(el('werkstattInfo').textContent,/Nicht gespeichert/);
 });
 test('bestätigter POST wird direkt angezeigt, auch wenn ein zusätzlicher GET scheitern würde',async()=>{
   let gets=0,payload;
@@ -31,7 +31,7 @@ test('bestätigter POST wird direkt angezeigt, auch wenn ein zusätzlicher GET s
   await w.laden();el('wk_wheelbase_m').value='3.2';el('werkstattForm').oninput();el('werkstattVermessen').checked=true;
   await w.senden('geometrie');
   assert.equal(payload.kontext,'alt');assert.equal(payload.traktor_id,'a');assert.equal(payload.werte.wheelbase_m,3.2);
-  assert.equal(w.daten.kontext,'neu');assert.equal(w.daten.sicherung.id,'s');assert.equal(gets,1);assert.equal(w.dirty,false);
+  assert.equal(w.daten.kontext,'neu');assert.equal(w.daten.sicherung.id,'s');assert.equal(gets,1);assert.equal(w.dirty,false);assert.equal(el('werkstattForm').dataset.geaendert,'');
 });
 test('eine späte ältere Ladeantwort überschreibt keinen neueren Stand',async()=>{
   const wartend=[];const {w}=ansicht(()=>new Promise(resolve=>wartend.push(resolve)),async()=>null);

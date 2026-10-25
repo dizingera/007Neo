@@ -2176,6 +2176,7 @@ let motorstaerkeBeschaeftigt = false;
 function motorstaerkeZeigen() {
   const wert = Number(el('motorstaerkeRegler').value);
   el('motorstaerkeWert').textContent = `${wert} %`;
+  el('motorstaerkeRegler').closest('.motorstaerke').classList.toggle('entwurf', motorstaerkeGespeichert !== null && wert !== motorstaerkeGespeichert);
   el('motorstaerkeRegler').disabled = motorstaerkeBeschaeftigt || motorstaerkeGespeichert === null;
   el('btnMotorstaerkeSpeichern').disabled = motorstaerkeBeschaeftigt || motorstaerkeGespeichert === null
     || wert === motorstaerkeGespeichert;
@@ -2224,7 +2225,71 @@ el('btnMotorstaerkeSpeichern').onclick = async () => {
   }
 };
 
+function probefahrtZeigen(p) {
+  if (!p) return;
+  el('probefahrtHinweis').textContent = p.hinweis;
+  el('probefahrtFortschritt').value = p.sammelt_s || 0;
+  el('probefahrtFortschritt').max = p.dauer_s || 30;
+  el('btnProbefahrtVorher').disabled = !!p.sammelt;
+  el('btnProbefahrtNachher').disabled = !!p.sammelt || !p.vorher;
+  el('btnProbefahrtStop').disabled = !p.sammelt;
+  el('probefahrtExport').hidden = !p.bericht;
+  const host = el('probefahrtErgebnis');
+  // Die Messwerte ändern sich erst bei einer abgeschlossenen Messung.
+  const key = JSON.stringify([p.vorher, p.bericht]);
+  if (host.dataset.stand === key) return;
+  host.dataset.stand = key;
+  host.replaceChildren();
+  const b = p.bericht;
+  const abgeschlossen = p.phase === 'fertig' || !p.vorher;
+  const vor = abgeschlossen && b ? b.vorher : p.vorher;
+  const nach = abgeschlossen && b ? b.nachher : null;
+  if (!vor) return;
+  const titel = document.createElement('p');
+  titel.textContent = abgeschlossen && b ? `Letzter abgeschlossener Vergleich${b.uebung ? " (Simulator)" : ""}: ${b.urteil}` : 'Vorher-Messung gespeichert – bereit für Nachher.';
+  host.appendChild(titel);
+  const tabelle = document.createElement('table');
+  const kopf = document.createElement('tr');
+  ['Messwert', 'Vorher', 'Nachher'].forEach(text => { const th = document.createElement('th'); th.textContent = text; kopf.appendChild(th); });
+  tabelle.appendChild(kopf);
+  const zeilen = [['rms_cm','Spurabweichung effektiv','cm',1], ['p95_cm','95 % der Abweichungen unter','cm',1],
+    ['tempo_kmh','Tempo','km/h',1], ['gps_cm','Gemeldete GPS-Genauigkeit','cm',1],
+    ['roll_deg','Mittlere Hangneigung','°',1], ['imu_anteil','Aktuelle IMU-Werte','%',0], ['nachlauf_s','Rad folgt später','s',1],
+    ['radfehler_deg','Rad-Soll/Ist-Abstand','°',1], ['motor_grenze_anteil','An der Motorgrenze','%',0]];
+  const format = (m,k,u,n) => {
+    const v = m && m.werte && m.werte[k];
+    if (!Number.isFinite(v)) return '–';
+    return (['motor_grenze_anteil','imu_anteil'].includes(k) ? v*100 : v).toLocaleString('de-DE', {maximumFractionDigits:n}) + ' ' + u;
+  };
+  zeilen.forEach(([k,label,u,n]) => {
+    const tr = document.createElement('tr');
+    [label,format(vor,k,u,n),format(nach,k,u,n)].forEach(text => { const td=document.createElement('td');td.textContent=text;tr.appendChild(td); });
+    tabelle.appendChild(tr);
+  });
+  host.appendChild(tabelle);
+  if (abgeschlossen && b && b.vergleichbar && Number.isFinite(b.rms_aenderung_prozent)) {
+    const urteil = document.createElement('p');
+    urteil.textContent = `Änderung der effektiven Abweichung: ${Math.abs(b.rms_aenderung_prozent).toLocaleString('de-DE', {maximumFractionDigits:1})} % ${b.rms_aenderung_prozent >= 0 ? 'weniger' : 'mehr'}.`;
+    host.appendChild(urteil);
+  }
+}
+let probefahrtBedienungLaeuft = false;
+async function probefahrtBedienen(aktion) {
+  if (probefahrtBedienungLaeuft) return;
+  probefahrtBedienungLaeuft = true;
+  try {
+    const r = await api('POST', '/api/probefahrt', {aktion});
+    if (r) { probefahrtZeigen(r.data); toast(r.data.hinweis); }
+  } finally { probefahrtBedienungLaeuft = false; }
+}
+el('btnProbefahrtVorher').onclick = () => probefahrtBedienen('vorher');
+el('btnProbefahrtNachher').onclick = () => probefahrtBedienen('nachher');
+el('btnProbefahrtStop').onclick = () => probefahrtBedienen('abbrechen');
+el('btnFahrerRegler').onclick = () => document.querySelector('.tab[data-tab="lenkregler"]').onclick();
+el('btnFahrerWerkstatt').onclick = () => document.querySelector('.tab[data-tab="lenkwerkstatt"]').onclick();
+
 function automatikZeigen(s) {
+  probefahrtZeigen(s && s.probefahrt);
   const a = s && s.lenkautomatik;
   if (!a) return;
   el('automatikHinweis').textContent = a.hinweis || 'Wartet auf Messdaten.';
@@ -2234,11 +2299,12 @@ function automatikZeigen(s) {
   el('btnAutomatikStop').disabled = !a.aktiv;
   el('btnAutomatikZurueck').disabled = !a.rueckkehr_moeglich;
   el('automatikZiel').disabled = !!a.aktiv;
+  el('automatikTempo').replaceChildren(...(a.tempowerte || []).map(t => { const li=document.createElement('li');li.textContent=`${t.bereich}: ${t.gelernt ? 'bestätigte Werte vorhanden' : 'noch nicht gelernt'}`;return li; }));
   const z = x => Number(x).toLocaleString('de-DE', { maximumFractionDigits: 1 });
   const m = a.messung;
   el('automatikMessung').textContent = (m
     ? `${z(m.effektiv_cm)} cm effektiv · 95 % unter ${z(m.p95_cm)} cm · ` : '') +
-    `Ziel ${z(a.effektives_ziel_cm || a.ziel_cm)} cm · ${a.versuche || 0} von ${a.max_versuche || 24} Versuchen`;
+    `Ziel ${z(a.effektives_ziel_cm || a.ziel_cm)} cm · ${a.versuche || 0} von ${a.max_versuche || 24} Versuchen` + (a.tempobereich ? ` · ${a.tempobereich}` : '');
   const namen = { cerea_lenk_aggr: 'Lenkaggressivität', cerea_d: 'Dämpfung D',
     cerea_i: 'I', cerea_i2: 'I2', cerea_l: 'Vorausschau L' };
   el('automatikProtokoll').replaceChildren(...(a.protokoll || []).slice().reverse().map(p => {
@@ -2273,6 +2339,12 @@ el('btnAutomatikZurueck').onclick = () => automatikBedienen('zurueck');
 function reglerLiveZeigen(s) {
   if (el('sheet').hidden || el('reglerLive').offsetParent === null || !s) return;
   automatikZeigen(s);
+  const k = lenkAufzeichnung.kennzahlen();
+  const d = el('motorDiagnose');
+  if (!k.genug) d.textContent = 'Motordiagnose sammelt während der Fahrt mit Lenkung.';
+  else if (k.vollAnteil >= .2) d.textContent = `Motor ${Math.round(k.vollAnteil*100)} % der Messwerte an ${k.grenzeBekannt ? 'der eingestellten Leistungsgrenze' : 'voller Leistung'}. Bei Nachlauf Höchstleistung oder Mechanik prüfen.`;
+  else if (k.nachlauf >= .3) d.textContent = `Rad folgt etwa ${k.nachlauf.toLocaleString('de-DE', {maximumFractionDigits:1})} s später. Mindestleistung, Motorregelung und Mechanik prüfen.`;
+  else d.textContent = 'Keine anhaltende Leistungsbegrenzung in der Messung. Mehr Motorstärke hilft dann nicht unbedingt.';
   const g = s.guidance || {};
   const a = s.spurausgleich || {};
   const zahl = (x, n) => Number(x).toLocaleString('de-DE', { minimumFractionDigits: n, maximumFractionDigits: n });
@@ -3337,10 +3409,10 @@ async function refreshLists(takt = false) {
     if (!takt || saat.seiteFeld !== feldId) renderSaatplan();
   }
   if (active === 'system') { renderSystem(); renderRohdaten(); renderUpdate(); }
-  if (active === 'lenkung') {
+  if (active === 'lenkung' || active === 'lenkwerkstatt') {
     renderGenauigkeit();
     renderSystem();
-    renderEinrichten();
+    if (active === 'lenkwerkstatt') renderEinrichten();
     if (!settings.geladen) loadSettings();
   }
   if (active === 'daten') { renderBackup(); renderDatenRolle(); }
@@ -4529,7 +4601,7 @@ async function renderEinrichten() {
       taste(anschlagLaeuftE ? 'Anschläge fertig' : 'Anschläge messen', einrichtenAnschlag, !s.fertig);
     }
     if (s.id === 'feinabstimmung') taste('Feinabstimmung starten', einrichtenFeinabstimmung, !s.fertig);
-    if (s.id === 'notaus') taste('Zur Einbau-Liste', () => el('setupList').scrollIntoView({ behavior: 'smooth' }));
+    if (s.id === 'notaus') taste('Zur Einbau-Liste', () => document.querySelector('.tab[data-tab="setup"]').onclick());
     if (s.id === 'freigabe') taste('Lenkung freigeben', einrichtenFreigeben, !s.fertig);
     if (s.id === 'probefahrt') {
       taste('Nur Vorschläge', () => einrichtenProbefahrt('beobachten'), !s.fertig);
@@ -4670,6 +4742,8 @@ el('btnMotorAbbrechen').onclick = async () => {
     einrichtenMelden('Motor angehalten. Werkstattlauf abgebrochen.');
   }
 };
+
+el('btnWerkstattStop').onclick = el('btnMotorAbbrechen').onclick;
 
 el('btnEinrichtenNeu').onclick = async () => {
   if (await api('POST', '/api/lenkung/einrichten/neu')) { einrichtenMelden(''); renderEinrichten(); }
@@ -4937,3 +5011,5 @@ bildschirmWachhalten();
 requestAnimationFrame(render);
 menueAusAdresse();
 setInterval(() => { if (!el('sheet').hidden) refreshLists(true); }, 5000);
+
+Bedienung.installieren(document);

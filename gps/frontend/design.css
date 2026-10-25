@@ -598,3 +598,17 @@ body.tag { --f-flaeche: rgba(23, 140, 70, .38); --f-doppelt: rgba(200, 104, 12, 
   .sheet .close { width: 48px; min-width: 48px; padding: 0; }
   .sheet .menue-navigation { display: none; }
 }
+/* Geführte Fahrt: Ergebnis auf einen Blick, Detailwerte erst auf Wunsch. */
+.sheet .menue-entwurf { flex: 0 0 auto; margin: 0; padding: 8px 20px; line-height: 1.4;
+  color: var(--m-amber); background: color-mix(in srgb, var(--m-amber) 9%, var(--bg)); border-bottom: 1px solid var(--line); }
+.sheet .menue-entwurf[hidden] { display: none; }
+.sheet .probefahrt-inhalt { padding: 16px; }
+.sheet .probefahrt-inhalt ol { margin-top: 0; padding-left: 22px; line-height: 1.6; }
+.sheet .probefahrt-inhalt progress { width: 100%; height: 12px; accent-color: var(--blue-solid); }
+.sheet .probefahrt-ergebnis { overflow-x: auto; }
+.sheet .probefahrt-ergebnis table { width: 100%; border-collapse: collapse; font-size: 14px; }
+.sheet .probefahrt-ergebnis td, .sheet .probefahrt-ergebnis th { padding: 10px 8px; text-align: left; border-bottom: 1px solid var(--line); }
+.sheet .probefahrt-ergebnis td:not(:first-child) { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.sheet .motorstaerke.entwurf { border-color: var(--m-amber); }
+.sheet #motorDiagnose { border-left: 3px solid var(--blue-solid); padding-left: 10px; }
+.sheet .fahrer-wege { margin-top: 16px; }

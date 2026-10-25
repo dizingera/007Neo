@@ -51,6 +51,8 @@ from . import cerearegler
 from .cerearegler import CereaIntegral
 from .laengsneigung import Laengsneigung
 from .lenkautomatik import Lenkautomatik, FELDER as AUTOMATIK_FELDER
+from .actuators import PhidgetOutput
+from .probefahrt import Probefahrt
 from .radmitte import Radmitte
 from .nachlauf import Nachlauf
 import json
@@ -238,6 +240,8 @@ class Engine:
         self._automatik_key = ""
         self._automatik_spur = (None, 0.0)
         self._automatik_holen()
+        self.probefahrt = Probefahrt(lambda b: self.store.set_setting('probefahrt_bericht', b),
+                                    self.store.get_setting('probefahrt_bericht'))
 
     # -- profile ----------------------------------------------------------
 
@@ -357,6 +361,8 @@ class Engine:
     def automatik_bedienen(self, aktion, ziel_cm=3.0):
         auto = self._automatik_holen()
         if aktion == "start":
+            if self.probefahrt.sammelt:
+                raise ValueError("Erst die laufende Probefahrt-Messung beenden")
             if self.profile.bauform != "traktor":
                 raise ValueError("Automatische Abstimmung ist für Traktoren verfügbar")
             if self.steering is None or not self.steering.freigegeben:
@@ -369,9 +375,30 @@ class Engine:
             raise ValueError("Unbekannte Automatik-Aktion")
         return auto.status()
 
+    def _probefahrt_konfig(self):
+        return {"uebung": self.simulator is not None or self.config.gnss.source in ("simulator", "replay"),
+                "traktor": self.store.get_setting('traktor_aktiv'),
+                "geraet": self.store.get_setting('vehicle_profile_active'),
+                "profil": asdict(self.profile),
+                "imu": {**asdict(self.config.imu), "aktiv": self.imu is not None},
+                "motor": {k: getattr(self.config.phidget, k) for k in
+                          ('max_duty', 'min_duty', 'gain_p', 'gain_i', 'gain_d',
+                           'acceleration', 'current_limit_a', 'dead_band_deg', 'feedback',
+                           'encoder_counts_per_deg', 'encoder_invert', 'invert_motor', 'mitte_versatz_deg')}}
+
+    def probefahrt_bedienen(self, aktion):
+        self.probefahrt.pruefen(aktion, self._probefahrt_konfig())
+        if aktion != 'abbrechen':
+            if self.steering is None or not self.steering.freigegeben:
+                raise ValueError('Probefahrt am Traktor mit eingerichteter Lenkung starten')
+            if self.automatik.aktiv:
+                self.automatik.stoppen()
+            self.abstimmung_modus('aus')
+        return self.probefahrt.bedienen(aktion, self._probefahrt_konfig())
+
     def _automatik_beobachten(self, lenkt, fix):
         auto = self._automatik_holen()
-        if not auto.aktiv:
+        if not auto.aktiv and not self.probefahrt.sammelt:
             return
         jetzt = fix.received_at or time.time()
         kontext = (self.field["id"] if self.field else None,
@@ -394,9 +421,21 @@ class Engine:
         auto.beobachten(jetzt, self.guidance.cross_track_m, fix.speed_ms, gueltig,
                         kontext, fix.accuracy_m or 0.03,
                         lage.roll_deg if lage is not None and lage.fresh else 0.0)
+        if self.probefahrt.sammelt:
+            feedback = self.steering.output.feedback
+            self.probefahrt.beobachten(jetzt, self.guidance.cross_track_m, fix.speed_ms,
+                gueltig, kontext, self._probefahrt_konfig(), fix.accuracy_m or .03,
+                lage.roll_deg if lage is not None and lage.fresh else 0.,
+                self.steering.command.angle_deg,
+                feedback.wheel_angle_deg if feedback.fresh else None,
+                feedback.duty if feedback.fresh else None,
+                self.config.phidget.max_duty if isinstance(self.steering.output, PhidgetOutput) else None,
+                True if self.imu is not None and lage.fresh else None)
 
     def abstimmung_modus(self, modus: str) -> dict:
         """Lenk-Assistent aus / nur Vorschläge / stellt selbst nach."""
+        if modus != "aus" and getattr(self, 'probefahrt', None) and self.probefahrt.sammelt:
+            raise ValueError('Erst die laufende Probefahrt-Messung beenden')
         if modus != "aus" and getattr(self, "automatik", None) is not None and self.automatik.aktiv:
             self.automatik.stoppen()
         self.abstimmung.einschalten(modus)
@@ -2072,6 +2111,7 @@ class Engine:
         if not fix.valid:
             if getattr(self, "automatik", None) is not None:
                 self.automatik.unterbrechen("GPS-Ausfall – Versuch zurückgenommen.")
+            self.probefahrt.unterbrechen('GPS-Ausfall')
             self.fix = fix  # den tatsächlichen Fixverlust auch sofort anzeigen
             self.positionsfilter.reset()
             self.rtk_bruecke.zuruecksetzen()
@@ -2597,6 +2637,7 @@ class Engine:
         if age > GPS_STILLSTAND_S:
             if self.automatik is not None:
                 self.automatik.unterbrechen("GPS-Daten fehlen – wartet.")
+            self.probefahrt.unterbrechen('GPS-Daten fehlen')
             # Messlücke: beim Wiederempfang keinen Flächenstreifen von der alten
             # Geräteposition zur neuen zeichnen und keine Strecke dazuerfinden.
             self.tool_position = None
@@ -2722,7 +2763,11 @@ class Engine:
             "genauigkeit": self.genauigkeit.ergebnis(self.steering.abgaben if self.steering else 0,
                                      self.steering.abgabe_gruende if self.steering else None)
                            if self.job else None,
+            "motor_grenzen": {"max_duty": self.config.phidget.max_duty,
+                              "min_duty": self.config.phidget.min_duty,
+                              "eigener_regelkreis": bool(self.steering and isinstance(self.steering.output, PhidgetOutput))},
             "lenkautomatik": self._automatik_holen().status(),
+            "probefahrt": self.probefahrt.status(),
             "spurausgleich": self.spurausgleich,
             "nachlauf": self.nachlauf.ergebnis(),
             "radmitte": {"sammelt": self.radmitte.sammelt, "proben": len(self.radmitte.proben)},

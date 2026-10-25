@@ -83,6 +83,7 @@ class LenkWerkstatt {
       : 'Vor der ersten Änderung wird automatisch eine Traktorsicherung angelegt.';
   }
   kontrollen() {
+    this.el('werkstattForm').dataset.geaendert = this.dirty ? '1' : '';
     const d = this.live,
       alt = this.daten;
     const konflikt = !!(d && alt && d.kontext !== alt.kontext);

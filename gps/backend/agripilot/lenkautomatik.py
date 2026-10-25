@@ -14,6 +14,8 @@ FELDER = ('regelart', 'cerea_lenk_aggr', 'cerea_auffahr_aggr', 'cerea_l',
 FENSTER_S = 20.0
 EINSCHWINGEN_S = 8.0
 MAX_VERSUCHE = 24
+TEMPO_NAMEN = {'langsam': 'bis 6 km/h', 'mittel': '6–10 km/h', 'schnell': 'ab 10 km/h'}
+TEMPO_FELDER = ('cerea_lenk_aggr', 'cerea_d', 'cerea_l', 'cerea_i', 'cerea_i2')
 
 
 class Lenkautomatik:
@@ -35,7 +37,14 @@ class Lenkautomatik:
         self._verworfen = set()
         self._gut = 0
         self._erwartet = dict(lesen())
+        self.tempobereich = None
+        self.tempowerte = {}
+        self._tempo_wunsch = None
         if stand:
+            for k, v in (stand.get('tempowerte') or {}).items():
+                w = v.get('werte', {}) if isinstance(v, dict) else {}
+                if k in TEMPO_NAMEN and all(isinstance(w.get(f), (int, float)) and math.isfinite(w[f]) for f in TEMPO_FELDER):
+                    self.tempowerte[k] = v
             self.ursprung = stand.get('ursprung')
             self.protokoll = list(stand.get('protokoll') or [])[-30:]
             self.ziel_cm = float(stand.get('ziel_cm', 3.0))
@@ -50,7 +59,7 @@ class Lenkautomatik:
     def _sichern(self):
         self.speichern({'aktiv': self.aktiv, 'ursprung': self.ursprung,
                         'versuch': self.versuch, 'protokoll': self.protokoll[-30:],
-                        'ziel_cm': self.ziel_cm})
+                        'ziel_cm': self.ziel_cm, 'tempowerte': self.tempowerte})
 
     def starten(self, ziel_cm=3.0):
         if not math.isfinite(ziel_cm) or not 1.0 <= ziel_cm <= 10.0:
@@ -70,6 +79,8 @@ class Lenkautomatik:
         self._verworfen.clear()
         self._daten.clear()
         self._kontext = None
+        self.tempobereich = None
+        self._tempo_wunsch = None
         # Wahl ist in der Bedienung ausdrücklich angekündigt. Es wird nie scharf geschaltet.
         self.setzen({'regelart': 'cerea'})
         self._erwartet = dict(self.lesen())
@@ -94,6 +105,7 @@ class Lenkautomatik:
         hatte = self.versuch is not None
         self._zurueck(grund)
         self.basis = None
+        self._tempo_wunsch = None
         self.hinweis = grund
         if hatte:
             self._sichern()
@@ -103,12 +115,49 @@ class Lenkautomatik:
             raise ValueError('Noch keine Ausgangswerte gesichert')
         self._zurueck('Optimierung gestoppt')
         if zurueck and self.ursprung:
+            self.tempowerte.clear()
             self.setzen(self.ursprung)
             self._erwartet = dict(self.lesen())
         self.aktiv, self.phase = False, 'aus'
         self.hinweis = ('Ausgangswerte wiederhergestellt.' if zurueck else
                         'Optimierung aus. Bestätigte Einstellungen bleiben erhalten.')
         self._sichern()
+
+    def _tempo_waehlen(self, t, tempo):
+        ziel = 'langsam' if tempo < 6/3.6 else 'mittel' if tempo < 10/3.6 else 'schnell'
+        # Hysterese: GPS-Flattern an einer Grenze darf nicht ständig neu beginnen.
+        if self.tempobereich == 'langsam' and tempo < 6/3.6+.15:
+            ziel = 'langsam'
+        elif self.tempobereich == 'mittel' and 6/3.6-.15 <= tempo < 10/3.6+.15:
+            ziel = 'mittel'
+        elif self.tempobereich == 'schnell' and tempo >= 10/3.6-.15:
+            ziel = 'schnell'
+        if self.tempobereich is None:
+            self.tempobereich = ziel
+        if ziel == self.tempobereich:
+            self._tempo_wunsch = None
+            return True
+        if self._tempo_wunsch is None or self._tempo_wunsch[0] != ziel:
+            self.unterbrechen('Tempo geändert – Vergleich beginnt neu')
+            self._tempo_wunsch = (ziel, t)
+        if t-self._tempo_wunsch[1] < 5:
+            self.hinweis = 'Wartet auf 5 Sekunden stabiles Tempo im neuen Bereich.'
+            return False
+        self.tempobereich = ziel
+        self._tempo_wunsch = None
+        self._kontext = None
+        self._gut = 0
+        return True
+
+    def _tempo_merken(self, messung):
+        if self.tempobereich is None:
+            return False
+        werte = {k: self.lesen()[k] for k in TEMPO_FELDER}
+        if self.tempowerte.get(self.tempobereich, {}).get('werte') == werte:
+            return False
+        self.tempowerte[self.tempobereich] = {'werte': werte, 'rms_cm': messung['effektiv_cm'],
+                                             'tempo_kmh': messung['tempo']*3.6}
+        return True
 
     def beobachten(self, t, quer, tempo, gueltig, kontext, genauigkeit=0.02, neigung=0.0):
         if not self.aktiv:
@@ -129,6 +178,9 @@ class Lenkautomatik:
         if not gueltig or not 0.8 <= tempo <= 6.0 or abs(quer) > 0.7:
             self.unterbrechen('Wartet: RTK, Lenkung an und gerade Spur erforderlich.')
             return
+        if not self._tempo_waehlen(t, tempo):
+            return
+        kontext = (kontext, self.tempobereich)
         if kontext != self._kontext:
             self.unterbrechen('Neue Spur – Vergleich beginnt neu.')
             self._kontext = kontext
@@ -182,6 +234,7 @@ class Lenkautomatik:
                 self._verworfen.clear()
                 self.phase = 'basis'
                 self.hinweis = 'Verbesserung bestätigt und gespeichert.'
+                self._tempo_merken(m)
             else:
                 if vergleichbar:
                     self._verworfen.add(self.versuch['signatur'])
@@ -195,6 +248,8 @@ class Lenkautomatik:
             self._gut += 1
             self.phase = 'überwacht'
             self.hinweis = 'Ziel erreicht – überwacht weiter.' if self._gut >= 2 else 'Gute Spur – bestätigt das Ergebnis.'
+            if self._gut >= 2 and self._tempo_merken(m):
+                self._sichern()
             return
         self._gut = 0
         if self.versuche >= MAX_VERSUCHE:
@@ -216,6 +271,24 @@ class Lenkautomatik:
         else:
             kandidaten = [('cerea_lenk_aggr',min(150.,aggr*1.08)),
                           ('cerea_d',max(.1,d-.05)), ('cerea_lenk_aggr',max(30.,aggr*.9))]
+        # Früher bestätigte Werte sind Vorschläge, kein harter Profilwechsel.
+        # Jeder einzelne Schritt bleibt begrenzt und muss sich erneut bewähren.
+        gemerkt = self.tempowerte.get(self.tempobereich, {}).get('werte', {})
+        vorlagen = []
+        schritte = {'cerea_lenk_aggr': max(1., aggr*.15), 'cerea_d': .05,
+                    'cerea_l': .1, 'cerea_i': .01, 'cerea_i2': .005}
+        for feld in TEMPO_FELDER:
+            if feld not in gemerkt:
+                continue
+            delta = max(-schritte[feld], min(schritte[feld], gemerkt[feld]-w[feld]))
+            grenzen = {'cerea_lenk_aggr': (30., 150.), 'cerea_d': (0., .7),
+                       'cerea_l': (0., 1.), 'cerea_i': (0., .2), 'cerea_i2': (0., .1)}
+            unten, oben = grenzen[feld]
+            v = max(unten, min(oben, w[feld]+delta))
+            if feld == 'cerea_i2':
+                v = min(v, i/2)
+            vorlagen.append((feld, v))
+        kandidaten = vorlagen + kandidaten
         for feld, v in kandidaten:
             v = round(v,4)
             sig = f'{feld}:{v}'
@@ -237,6 +310,10 @@ class Lenkautomatik:
 
     def status(self):
         return {'aktiv':self.aktiv, 'phase':self.phase, 'hinweis':self.hinweis,
+                'tempobereich': TEMPO_NAMEN.get(self.tempobereich),
+                'tempowerte': [{'bereich': TEMPO_NAMEN[k], 'gelernt': k in self.tempowerte,
+                                'rms_cm': self.tempowerte.get(k, {}).get('rms_cm')}
+                               for k in TEMPO_NAMEN],
                 'ziel_cm':self.ziel_cm, 'rueckkehr_moeglich':bool(self.ursprung), 'effektives_ziel_cm':max(self.ziel_cm,(self.letzte or {}).get('rauschen',.02)*150),
                 'messung':self.letzte, 'versuche':self.versuche, 'max_versuche':MAX_VERSUCHE,
                 'sammelt_s':round(self._daten[-1][0]-self._daten[0][0],1) if len(self._daten)>1 else 0,

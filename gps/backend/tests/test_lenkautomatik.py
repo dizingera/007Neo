@@ -156,3 +156,57 @@ class Fahrzeugmodell(unittest.TestCase):
         self.assertLess(mit,.03)
         self.assertLess(mit,ohne*.3)
         self.assertTrue(any(s['aktion']=='übernommen' for s in status['protokoll']))
+
+
+class Tempowerte(unittest.TestCase):
+    setUp = Automatik.setUp
+    fahrt = Automatik.fahrt
+    def test_getrennte_bereiche_werden_bestaetigt_gesichert(self):
+        self.a.starten()
+        self.fahrt(.01, 45, tempo=1.2)
+        self.assertIn('langsam', self.a.tempowerte)
+        self.assertNotIn('schnell', self.a.tempowerte)
+        self.fahrt(.01, 50, tempo=4.)
+        self.assertIn('schnell', self.a.tempowerte)
+        self.assertIn('langsam', self.a.tempowerte)
+        neu=Lenkautomatik(lambda:dict(self.w),self.w.update,lambda b:None,self.gesichert)
+        self.assertEqual(neu.tempowerte,self.a.tempowerte)
+        self.assertFalse(neu.aktiv)
+
+    def test_bereichswechsel_rollt_laufenden_versuch_zurueck(self):
+        self.a.starten()
+        vorher=dict(self.w)
+        self.fahrt(lambda t:.12*math.sin(2*math.pi*t/3),tempo=1.2)
+        self.assertIsNotNone(self.a.versuch)
+        self.fahrt(.1, 1, tempo=4.)
+        self.assertEqual(self.w,vorher)
+        self.assertIsNone(self.a.versuch)
+
+    def test_gemerkte_werte_nur_als_begrenzter_neuer_versuch(self):
+        self.a.starten()
+        w={k:self.w[k] for k in ('cerea_lenk_aggr','cerea_d','cerea_l','cerea_i','cerea_i2')}
+        w['cerea_lenk_aggr']=30.
+        self.a.tempowerte['mittel']={'werte':w,'rms_cm':1.}
+        vorher=self.w['cerea_lenk_aggr']
+        self.fahrt(.1,tempo=2.)
+        self.assertGreaterEqual(self.w['cerea_lenk_aggr'],vorher*.85-.001)
+        self.assertIsNotNone(self.a.versuch)
+        self.a.stoppen(True)
+        self.assertEqual(self.a.tempowerte,{})
+
+    def test_hysterese_verhindert_staendigen_wechsel_an_sechs_kmh(self):
+        self.a.starten()
+        self.fahrt(.01,5,tempo=1.6)
+        for _ in range(40):
+            self.fahrt(.01,.5,tempo=1.65)
+            self.fahrt(.01,.5,tempo=1.7)
+        self.assertEqual(self.a.tempobereich,'langsam')
+        self.assertIsNone(self.a.versuch)
+
+    def test_neuer_tempobereich_braucht_fuenf_stabile_sekunden(self):
+        self.a.starten()
+        self.fahrt(.01,1,tempo=1.2)
+        self.fahrt(.01,4,tempo=4.)
+        self.assertEqual(self.a.tempobereich,'langsam')
+        self.fahrt(.01,2,tempo=4.)
+        self.assertEqual(self.a.tempobereich,'schnell')

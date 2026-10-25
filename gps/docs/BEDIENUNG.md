@@ -2042,3 +2042,54 @@ Update steht immer oben rechts in der Menü-Kopfzeile, auch beim Rollen und auf
 anderen Menüseiten. Der Knopf öffnet direkt die Aktualisierung am Anfang der
 Systemseite. Ein Punkt zeigt eine bekannte neue Version an. Öffnen allein installiert
 kein Update; Suchen und Einspielen verwenden den bisherigen Update-Ablauf.
+
+
+## Fahrverbesserungen (ab 1.5.99)
+
+**Motor-Diagnose:** Unter Maschine → Lenkregler wird während der Fahrt ausgewertet,
+wie oft der eigene Motorregler an der tatsächlich eingestellten Leistungsgrenze
+liegt. 55 % Motorstärke bedeutet: bereits dort kann er ausgelastet sein. Veraltete
+Rückmeldungen werden nicht mitgezählt. Hinweise unterscheiden hohe Auslastung und
+verzögerten Radwinkel; Mindestleistung, Regelung oder Mechanik können geprüft
+werden. Ohne Radbewegung lässt sich keine verlässliche Nachlaufzeit bestimmen.
+Eine höhere Motorstärke ist keine pauschale Lösung für jeden Spurfehler.
+
+**Probefahrt:** Im Lenkregler „Probefahrt · vorher und nachher vergleichen“ öffnen.
+Vorher messen wählen und 30 Sekunden mit RTK, eingeschalteter Lenkung, gleichmäßigem
+Tempo und auf gerader Spur fahren. Die Messung schaltet die Lenkung nicht ein;
+laufende automatische Abstimmung stoppt für eine unverfälschte Messung. Danach
+Einstellungen verbessern oder die Automatik arbeiten lassen. Für Nachher messen
+dasselbe Gespann, dieselbe Spur und Fahrtrichtung sowie ähnliches Tempo wählen.
+Während einer Messung ist automatische Abstimmung gesperrt. GPS-Lücken, Spurwechsel
+oder deutliche Tempo-/Hangänderungen beginnen das Messfenster neu. Eingerichtete
+IMU muss aktuelle Werte liefern. Geänderte Einstellungen während des Fensters
+beenden die Messung, damit kein gemischtes Ergebnis entsteht.
+
+Ergebnisse enthalten effektive Spurabweichung, 95-%-Abweichung, Tempo, GPS-Genauigkeit,
+IMU-Aktualität, Rad-Soll/Ist-Abstand, geschätzten Rad-Nachlauf und Motorauslastung.
+Nur vergleichbare Bedingungen erlauben ein Wirksamkeitsurteil; mindestens 5 %
+bessere effektive Abweichung und keine wesentlich schlechteren großen Abweichungen
+zählen als Verbesserung. Fehlende Rad-/Motorwerte bleiben als „–“ erkennbar.
+Simulatorberichte sind ausdrücklich markiert. Letzter vollständiger Bericht bleibt
+auf diesem Gerät erhalten und kann heruntergeladen werden. Nach Neustart wird
+keine Messfahrt automatisch fortgesetzt. Neue Messfahrt benötigt neues Vorher.
+
+**Zahleneingaben:** Das Scrollrad verändert keine Zahlen mehr, sondern rollt den
+Menüinhalt. Tastatur und Pfeiltasten am Zahlenfeld funktionieren weiter. Ein Hinweis
+oben nennt den Bereich mit noch nicht übernommenen Änderungen; Markierungen und
+vorhandene Speicherknöpfe bleiben erhalten. Ein abgewiesenes Speichern löscht den
+Entwurf nicht.
+
+**Tempowerte:** Die Lenk-Automatik merkt bestätigte Werte getrennt für bis 6,
+6–10 und ab 10 km/h sowie je Traktor-Gerät-Kombination. Bereichsgrenzen besitzen
+Hysterese; nach einem Wechsel werden erst fünf Sekunden stabiler Fahrt abgewartet.
+Früher gelernte Werte werden ausschließlich als begrenzte Einzelversuche erneut
+verglichen, nicht schlagartig umgeschaltet. Auf gerader RTK-Fahrt gelten weiterhin
+die Messbedingungen der Automatik (0,8–6 m/s). Ausgangswerte wiederherstellen löscht
+die Tempowerte dieses Gespanns. Neustart lässt die Automatik ausgeschaltet.
+
+**Fahrer und Werkstatt:** Maschine → Lenkung zeigt die Live-Auswertung und direkte
+Wege zu den Fahrreglern. Motorprüfung, Radmitte, Traktormaße, Kalibrierung und
+Hardwarewerte stehen gesammelt unter Werkstatt → Lenkwerkstatt. Die Suche führt
+auch dorthin und öffnet passende Gruppen. Motor sofort anhalten ist auf beiden
+Lenkseiten erreichbar. Der Update-Knopf bleibt oben sichtbar.

@@ -47,7 +47,10 @@
       lenkt: !!(lenkung.armed && befehl.engaged),
       soll: befehl.engaged ? befehl.angle_deg : (daten.guidance.steer_angle_deg || 0),
       ist,
-      leistung: lenkung.duty != null ? lenkung.duty : null,
+      leistung: lenkung.rueckmeldung_frisch === false ? null : (lenkung.duty != null ? lenkung.duty : null),
+      grenze: daten.motor_grenzen && daten.motor_grenzen.eigener_regelkreis
+        && Number.isFinite(daten.motor_grenzen.max_duty) && daten.motor_grenzen.max_duty > 0
+        ? daten.motor_grenzen.max_duty : null,
       tempo: fix.speed_ms || 0,
     };
   }
@@ -105,10 +108,10 @@
     const periode = durchgaenge >= 2 ? 2 * dauer / durchgaenge : 0;
     const leistungen = punkte.filter((p) => p.leistung != null);
     const vollAnteil = leistungen.length
-      ? leistungen.filter((p) => Math.abs(p.leistung) >= VOLLE_LEISTUNG).length / leistungen.length : 0;
+      ? leistungen.filter((p) => Math.abs(p.leistung) >= VOLLE_LEISTUNG * (Number.isFinite(p.grenze) && p.grenze > 0 ? p.grenze : 1)).length / leistungen.length : 0;
     return {
       n, genug: true, dauer, mittel, effektiv, max, durchgaenge, amplitude, periode,
-      nachlauf: nachlauf(punkte), vollAnteil,
+      nachlauf: nachlauf(punkte), vollAnteil, grenzeBekannt: leistungen.some(p => Number.isFinite(p.grenze) && p.grenze > 0),
     };
   }
 
@@ -194,7 +197,7 @@
       }
     }
     if (k.vollAnteil >= 0.2) {
-      tipps.push(`Motor ${zahl(k.vollAnteil * 100)} % der Zeit bei voller Leistung – er kommt nicht hinterher (Motorregler, Mindestleistung).`);
+      tipps.push(`Motor ${zahl(k.vollAnteil * 100)} % der Messwerte an ${k.grenzeBekannt ? "der eingestellten Leistungsgrenze" : "voller Leistung"}. Bei Nachlauf Höchstleistung und Mechanik prüfen; kriecht er bei kleinen Korrekturen, Mindestleistung prüfen.`);
     }
     return { art, text, tipps };
   }

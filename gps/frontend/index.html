@@ -209,10 +209,11 @@
     </button>
     <button class="close" id="sheetClose" aria-label="Menü schließen"><span aria-hidden="true">✕</span> Schließen</button>
   </div>
+  <p id="menueEntwurf" class="menue-entwurf" role="status" hidden>Änderungen noch nicht übernommen – im geöffneten Bereich auf „Übernehmen“ tippen.</p>
   <div class="sheet-body">
     <!-- Links die Seiten, in drei Gruppen: was der Fahrer im Feld braucht, die
          Maschine, und die Werkstatt. Auf schmalen Geräten wird daraus eine Zeile. -->
-    <label class="menue-seitenwahl" for="menueSeitenwahl">Menübereich<select id="menueSeitenwahl"><optgroup label="Feldarbeit"><option value="fields">Felder</option><option value="lines">Spuren</option><option value="jobs">Arbeiten</option><option value="maschinen">Fernansicht</option><option value="saatplan">Saatplan</option><option value="headland">Vorgewende &amp; Wende</option></optgroup><optgroup label="Maschine"><option value="machine">Traktor &amp; Gerät</option><option value="lenkung">Lenkung</option><option value="lenkregler">Lenkregler</option></optgroup><optgroup label="Werkstatt"><option value="settings">Einstellungen</option><option value="daten">Daten &amp; Geräte</option><option value="system">System</option><option value="setup">Einbau</option></optgroup></select></label>
+    <label class="menue-seitenwahl" for="menueSeitenwahl">Menübereich<select id="menueSeitenwahl"><optgroup label="Feldarbeit"><option value="fields">Felder</option><option value="lines">Spuren</option><option value="jobs">Arbeiten</option><option value="maschinen">Fernansicht</option><option value="saatplan">Saatplan</option><option value="headland">Vorgewende &amp; Wende</option></optgroup><optgroup label="Maschine"><option value="machine">Traktor &amp; Gerät</option><option value="lenkung">Lenkung</option><option value="lenkregler">Lenkregler</option></optgroup><optgroup label="Werkstatt"><option value="lenkwerkstatt">Lenkwerkstatt</option><option value="settings">Einstellungen</option><option value="daten">Daten &amp; Geräte</option><option value="system">System</option><option value="setup">Einbau</option></optgroup></select></label>
     <div class="menue-navigation">
       <div class="menue-bereiche" role="group" aria-label="Menübereiche">
         <button type="button" class="menue-bereich" data-bereich="feld" aria-pressed="true">Feldarbeit</button>
@@ -232,6 +233,7 @@
       <button data-tab="lenkung" data-gruppe="maschine" class="tab" role="tab" aria-selected="false" tabindex="-1"><svg class="tab-symbol" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="2.6"/><path d="M12 14.6V21M9.5 11.3L3.2 10.2M14.5 11.3l6.3-1.1"/></svg><span class="tab-text"><span class="tab-name">Lenkung</span><small>Live, Motortest, Mitte</small></span></button>
       <button data-tab="lenkregler" data-gruppe="maschine" class="tab" role="tab" aria-selected="false" tabindex="-1"><svg class="tab-symbol" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/><path d="M12 3v1.5M12 19.5V21" stroke-dasharray="1.5 1.5"/></svg><span class="tab-text"><span class="tab-name">Lenkregler</span><small>Motorstärke und Spurführung</small></span></button>
       <span class="tab-gruppe" aria-hidden="true">Werkstatt</span>
+      <button data-tab="lenkwerkstatt" data-gruppe="werkstatt" class="tab werkstatt" role="tab" aria-selected="false" tabindex="-1"><svg class="tab-symbol" viewBox="0 0 24 24" aria-hidden="true"><path d="M14.6 3.6a4.5 4.5 0 00-5.4 6.1L3.6 15.3a1.9 1.9 0 002.7 2.7l5.6-5.6a4.5 4.5 0 006.1-5.4l-2.6 2.6-2.5-.4-.4-2.5z"/></svg><span class="tab-text"><span class="tab-name">Lenkwerkstatt</span><small>Motor, Maße, Kalibrierung</small></span></button>
       <button data-tab="settings" data-gruppe="werkstatt" class="tab werkstatt" role="tab" aria-selected="false" tabindex="-1"><svg class="tab-symbol" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1"/><circle cx="15" cy="6" r="2"/><circle cx="9" cy="12" r="2"/><circle cx="17" cy="18" r="2"/></svg><span class="tab-text"><span class="tab-name">Einstellungen</span><small>Alle Werte, Kartenfarben</small></span></button>
       <button data-tab="daten" data-gruppe="werkstatt" class="tab werkstatt" role="tab" aria-selected="false" tabindex="-1"><svg class="tab-symbol" viewBox="0 0 24 24" aria-hidden="true"><path d="M19.5 10A8 8 0 006 6.2L4 8.5M4 4v4.5h4.5M4.5 14A8 8 0 0018 17.8l2-2.3M20 20v-4.5h-4.5"/></svg><span class="tab-text"><span class="tab-name">Daten &amp; Geräte</span><small>Abgleich, Paket, Sicherung</small></span></button>
       <button data-tab="system" data-gruppe="werkstatt" class="tab werkstatt" role="tab" aria-selected="false" tabindex="-1"><svg class="tab-symbol" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12h4l2.5-6 4.5 12 2.5-6H21"/></svg><span class="tab-text"><span class="tab-name">System</span><small>Zustand, Update, Diagnose</small></span></button>
@@ -524,7 +526,7 @@
           <details class="menue-gruppe"><summary>Antenne – gemessen ab Mitte Hinterachse</summary><fieldset>
             <legend>Antenne – gemessen ab Mitte Hinterachse</legend>
             <p class="note ganz">Für den gewählten Traktor misst und bestätigt man die Maße am
-              besten unter <b>Lenkung → Lenkwerkstatt</b>; hier lassen sich auch andere Traktoren pflegen.</p>
+              besten unter <b>Werkstatt → Lenkwerkstatt</b>; hier lassen sich auch andere Traktoren pflegen.</p>
             <label>nach vorn (m)<input type="number" step="0.01" name="antenna_forward_m"></label>
             <label>nach rechts (m)<input type="number" step="0.01" name="antenna_right_m"></label>
             <label>Höhe über Boden (m)<input type="number" step="0.01" name="antenna_height_m"></label>
@@ -663,10 +665,11 @@
       <input id="motorstaerkeRegler" type="range" min="5" max="100" step="1" value="55" disabled>
       <div class="row"><span>5 % · schwach</span><span>100 % · volle Leistung</span></div>
       <button id="btnMotorstaerkeSpeichern" class="primary" disabled>Motorstärke übernehmen</button>
+      <p id="motorDiagnose" class="note" role="status">Motordiagnose sammelt während der Fahrt.</p>
       <p id="motorstaerkeHinweis" role="status">Lädt die gespeicherte Motorstärke …</p>
       <details class="erklaerung"><summary>Wann mehr Motorstärke hilft</summary><p class="note">In kleinen Schritten erhöhen und bei langsamer Fahrt prüfen. Mehr Leistung
         hilft, wenn die bisherige Höchstleistung erreicht wird. Kriecht der Motor auch bei kleinen
-        Korrekturen, unter Lenkung die Mindestleistung prüfen. Stromgrenze und Eingriffserkennung
+        Korrekturen, in der Lenkwerkstatt die Mindestleistung prüfen. Stromgrenze und Eingriffserkennung
         bleiben bestehen. Für den eigenen Motorregelkreis (Phidget21/1065) an diesem Gerät.</p></details>
     </section>
     <section class="karte lenkautomatik" aria-labelledby="automatikTitel">
@@ -684,6 +687,7 @@
       <p id="automatikHinweis" role="status">Bereit zum Abstimmen.</p>
       <progress id="automatikFortschritt" max="20" value="0" aria-label="Vergleichsmessung"></progress>
       <p class="note" id="automatikMessung">Wartet auf eine Messung.</p>
+      <details><summary>Gelernte Tempobereiche</summary><ul id="automatikTempo"></ul><p class="note">Getrennt je Gespann. Gemerkte Werte werden nur in kleinen, erneut verglichenen Schritten angenähert. Kein sprunghafter Wechsel. Rückkehr zu Ausgangswerten löscht die Tempowerte.</p></details>
       <details><summary>Letzte automatische Änderungen</summary><ul id="automatikProtokoll"></ul></details>
       <details class="erklaerung"><summary>So arbeitet die Automatik</summary>
         <p>Am Tablet im Traktor starten. Verwendet den Cerea-Regler und schaltet die Lenkung
@@ -710,6 +714,20 @@
       <span><small>Punkt voraus</small><b id="reglerPunkt">–</b></span>
       <span><small>I + I2</small><b id="reglerIntegral">–</b></span>
     </div>
+    <details class="menue-gruppe probefahrt"><summary>Probefahrt · vorher und nachher vergleichen</summary>
+      <div class="probefahrt-inhalt">
+        <ol><li>Mit RTK und eingeschalteter Lenkung 30 Sekunden gleichmäßig auf einer geraden Spur fahren: Vorher messen.</li>
+          <li>Die Einstellung verbessern oder die Lenk-Automatik arbeiten lassen.</li>
+          <li>Dieselbe Spur in derselben Richtung und mit gleichem Tempo fahren: Nachher messen.</li></ol>
+        <p class="note">Die Messung stellt nichts um und schaltet die Lenkung nicht ein. Laufende automatische Abstimmung wird beim Messbeginn gestoppt. Bei Messlücken oder wechselnden Bedingungen beginnt die Zeit neu.</p>
+        <div class="row"><button id="btnProbefahrtVorher" class="primary">Vorher messen</button>
+          <button id="btnProbefahrtNachher" disabled>Nachher messen</button><button id="btnProbefahrtStop" disabled>Messung beenden</button></div>
+        <p id="probefahrtHinweis" role="status">Bereit für die erste Messung.</p>
+        <progress id="probefahrtFortschritt" max="30" value="0" aria-label="Gültige Messfahrtsekunden"></progress>
+        <div id="probefahrtErgebnis" class="probefahrt-ergebnis"></div>
+        <a id="probefahrtExport" href="/api/probefahrt/bericht" download="AgriPilot-Probefahrt.json" hidden>Abgeschlossenen Prüfbericht herunterladen</a>
+      </div>
+    </details>
     <details class="regler-manuell"><summary>Von Hand einstellen</summary>
     <p class="note regler-hinweis" id="reglerHinweis"></p>
     <div class="regler-werte" id="reglerWerte">
@@ -805,7 +823,13 @@
         hier hat der Lenk-Assistent etwas verstellt. Bewertet werden die letzten 30 s Fahrt mit Lenkung.</p>
       </details>
     </section>
-    <details class="menue-gruppe"><summary>Bisheriger Lenk-Assistent und Motor einmessen</summary><section class="karte" id="lenkAssistent" hidden>
+    <div class="row fahrer-wege"><button id="btnFahrerRegler">Motorstärke und Lenk-Automatik</button><button id="btnFahrerWerkstatt">Lenkwerkstatt öffnen</button></div>
+  </section>
+
+  <section class="tab-panel" data-panel="lenkwerkstatt" hidden>
+    <div class="row lenkung-notaus"><button id="btnWerkstattStop" class="danger" type="button">Motor sofort anhalten</button></div>
+    <p class="note">Einbau, Motorprüfung und Kalibrierung. Für die Fahrt stehen unter Maschine nur Live-Anzeige und Spurregler.</p>
+<details class="menue-gruppe"><summary>Bisheriger Lenk-Assistent und Motor einmessen</summary><section class="karte" id="lenkAssistent" hidden>
       <h3>Lenk-Assistent</h3>
       <p class="note">Auf dem Traktor bestimmt das Tablet die Lenkung und stimmt sie mit seinen
         eigenen Messwerten ab. Der Modus am Büro-Master gilt nur für den Büro-PC.
@@ -1168,6 +1192,7 @@
   <div class="row"><button id="fwSpeichern" class="primary">Arbeitsgrenze speichern</button></div>
 </dialog>
 <script src="feldwerkzeuge.js"></script>
+<script src="bedienung.js"></script>
 <script src="app.js"></script>
 <script>
   /* Nur fuer die Kachel auf dem Android-Tablet. Browser lassen Service Worker

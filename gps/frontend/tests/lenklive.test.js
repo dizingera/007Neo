@@ -87,3 +87,22 @@ test('a slow wheel points Stanley to the predictive mode, and the predictive mod
   assert.strictEqual(schrittKurz({ was: 'regelart', von: 'stanley', nach: 'voraus' }), 'Regelart Vorausschauend');
   assert.strictEqual(schrittKurz({ was: 'lenk_traegheit_s', von: 0.3, nach: 1.2 }), 'Trägheit 0,30→1,20');
 });
+
+
+test('eingestellte Motorgrenze wird als Auslastung erkannt', () => {
+  const p = fahrt(30, () => 1);
+  p.forEach(v => { v.leistung = -.55; v.grenze = .55; });
+  const k = kennzahlen(p);
+  assert.equal(k.vollAnteil, 1);
+  assert.match(befund(k, 'cerea').tipps.join(' '), /eingestellten/);
+  p.forEach(v => { v.leistung = .4; });
+  assert.equal(kennzahlen(p).vollAnteil, 0);
+});
+
+test('Messpunkt übernimmt nur bekannte Motorgrenzen', () => {
+  const p = messpunkt({ time: 1, guidance: { active: true }, steering: { duty: .55 },
+    motor_grenzen: { max_duty: .55, eigener_regelkreis: true } });
+  assert.equal(p.grenze, .55);
+  const fremd = messpunkt({ guidance: {}, motor_grenzen: { max_duty: .55, eigener_regelkreis: false } });
+  assert.equal(fremd.grenze, null);
+});

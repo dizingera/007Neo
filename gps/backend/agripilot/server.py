@@ -1397,6 +1397,21 @@ def create_app(config=None) -> FastAPI:
         store.set_setting(_einrichtung_key(), {})
         return ok({})
 
+    @api.get("/api/probefahrt")
+    async def probefahrt_status():
+        return ok(engine.probefahrt.status())
+
+    @api.post("/api/probefahrt")
+    async def probefahrt_bedienen(payload: dict = Body(...)):
+        return guard(engine.probefahrt_bedienen, str(payload.get('aktion', '')))
+
+    @api.get("/api/probefahrt/bericht")
+    async def probefahrt_bericht():
+        if engine.probefahrt.bericht is None:
+            raise HTTPException(404, 'Noch kein abgeschlossener Vergleich vorhanden')
+        return JSONResponse(engine.probefahrt.bericht, headers={
+            'Content-Disposition': 'attachment; filename="AgriPilot-Probefahrt.json"'})
+
     @api.get("/api/lenkautomatik")
     async def lenkautomatik_status():
         return ok(engine._automatik_holen().status())
