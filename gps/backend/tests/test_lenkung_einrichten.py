@@ -264,11 +264,14 @@ class TraegeDLL(AttrappeDLL):
         self.geschwindigkeit[kanal] = wert.value
         w = wert.value
         soll = 0.0 if abs(w) < self.lb else math.copysign(abs(w) - self.lb, w) * self.fk
-        self.v += (soll - self.v) * self.tr
-        self.rest += self.v
-        schritt = int(self.rest)
-        self.rest -= schritt
-        self.drehgeber += schritt
+        # Zwei Modellschritte je Aufruf: bis 1.5.84 liefen in diesen Tests versehentlich
+        # zwei Regelkreise (start() und der Test je einer) - darauf sind die Werte geeicht.
+        for _ in range(2):
+            self.v += (soll - self.v) * self.tr
+            self.rest += self.v
+            schritt = int(self.rest)
+            self.rest -= schritt
+            self.drehgeber += schritt
         return 0
 
 
@@ -329,3 +332,14 @@ class FeinabstimmungTest(unittest.TestCase):
         self.assertFalse(e["gut"])
         self.assertEqual(e["ende"], {"gain_p": 0.09, "gain_i": 0.01, "gain_d": 0.002, "max_duty": 0.55})
         self.assertEqual(len(e["verlauf"]), 1)
+
+
+def setUpModule():
+    # Diese Tests schalten den Regeltakt selbst (_step / _control_loop), ohne eigenen Faden.
+    from agripilot import actuators as _a
+    _a.REGEL_FADEN = False
+
+
+def tearDownModule():
+    from agripilot import actuators as _a
+    _a.REGEL_FADEN = True

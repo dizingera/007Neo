@@ -1133,7 +1133,9 @@ class HeadingFilter:
         Rückwärts und lenkt nicht; das Scharfschalten ist die Aussage des
         Fahrers, dass es anders ist.
         """
-        if self.rueckwaerts:
+        # Auch im langsamen Fall (gegenlaeufig, unter 1 m/s), sonst bliebe die Lenkung
+        # nach einer Wende von Hand trotz Bestätigung stehen.
+        if self.rueckwaerts or self.gegenlaeufig:
             self._bestaetigt = True
 
     @property

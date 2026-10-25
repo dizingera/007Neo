@@ -2421,6 +2421,10 @@ class Engine:
         # wie Rückwärts: nicht lenken, bis der Kurs wieder passt oder der Fahrer bestätigt.
         self.steering.rueckwaerts = ((self.heading_filter.rueckwaerts or self.heading_filter.gegenlaeufig)
                                      and not self.heading_filter.bestaetigung_offen)
+        # Wie schnell der Sollwinkel wandern darf, gehört zum Traktor (Lenkgeschwindigkeit).
+        # Bis 1.5.84 galten fest 25 °/s, die Einstellung blieb wirkungslos.
+        if self.profile.max_steer_rate_deg_s and self.profile.max_steer_rate_deg_s > 0:
+            self.steering.max_rate_deg_s = float(self.profile.max_steer_rate_deg_s)
         command = self.steering.update(self.guidance, fix, context)
         self._abstimmung_beobachten(command.engaged, fix)
         if self.job is not None:

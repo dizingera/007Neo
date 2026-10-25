@@ -31,6 +31,7 @@ from __future__ import annotations
 import asyncio
 import math
 import struct
+import threading
 import time
 from dataclasses import dataclass
 from typing import Optional
@@ -50,6 +51,15 @@ EINMESS_IMPULS_S = 0.35         # so lang ist ein Impuls beim Einmessen
 EINMESS_REGELTAKT_S = 0.12      # Zugabe, damit der Regelkreis den Impuls sicher durchläuft
 EINMESS_AUSROLLEN_S = 0.25      # nach dem Impuls ausrollen lassen, dann ablesen
 EINMESS_MIN_ZAEHLWERTE = 12     # so viel muss sich der Drehgeber bewegen, damit der Motor als angelaufen gilt
+# Ab 1.5.85: Bleibt der Lenkbefehl so lange aus (Programm hängt, kein GPS), steht der
+# Motor - die 1065 hat unter Phidget21 keinen eigenen Failsafe, der das täte.
+KOMMANDO_FRIST_S = 0.5
+KEIN_BEFEHL = "Kein Lenkbefehl mehr - Motor angehalten"
+# So lange darf die Rückmeldung (Drehgeber, Radwinkelsensor) beim Lenken fehlen,
+# bevor der Ausgang als gestört gilt und die Lenkung pausiert.
+RUECKMELDUNG_FRIST_S = 0.3
+REGEL_TAKT_S = 0.02             # 50 Hz
+REGEL_FADEN = True              # Tests, die den Takt selbst schalten, setzen das auf False
 
 _TREIBER_FEHLT = (
     "Phidget-Treiber fehlt - die Python-Bibliothek allein genügt nicht. "
@@ -295,6 +305,11 @@ class PhidgetOutput(SteerOutput):
         self._encoder_centre = 0.0
         self._override_since: Optional[float] = None
         self.last_error_text = ""
+        self._kommando_at = 0.0                 # monotonic: letzter Lenkbefehl
+        self.mitte_gelernt = False              # „Mitte lernen“ gedrückt, seit verbunden
+        self._ohne_messung_seit: Optional[float] = None
+        self._status_ok = ""
+        self._thread: Optional[threading.Thread] = None
 
     # -- Aufbau -----------------------------------------------------------
 
@@ -334,7 +349,26 @@ class PhidgetOutput(SteerOutput):
             return
 
         self.running = True
-        asyncio.create_task(self._control_loop())
+        self._status_ok = self.status
+        # Der Regelkreis läuft in einem eigenen Faden, nicht in der Ereignisschleife:
+        # rechnet das Programm gerade etwas Größeres (Saatplan, Abgleich), bleibt der
+        # Takt trotzdem bei 50 Hz, und der Motor läuft nicht mit der letzten Leistung weiter.
+        if REGEL_FADEN:
+            self._thread = threading.Thread(target=self._faden, name="lenkmotor", daemon=True)
+            self._thread.start()
+
+    def _faden(self) -> None:
+        letzter = time.monotonic()
+        while self.running:
+            jetzt = time.monotonic()
+            dt = min(0.1, max(0.005, jetzt - letzter))
+            letzter = jetzt
+            try:
+                self._step(dt)
+            except Exception as exc:  # noqa: BLE001
+                self.last_error_text = str(exc)
+                self._safe_stop()
+            time.sleep(max(0.0, REGEL_TAKT_S - (time.monotonic() - jetzt)))
 
     def _oeffnen22(self) -> None:
         # Der native Treiber des Herstellers wird erst hier geladen, nicht beim
@@ -392,6 +426,9 @@ class PhidgetOutput(SteerOutput):
 
     async def stop(self) -> None:
         self.running = False
+        if self._thread is not None:
+            await asyncio.to_thread(self._thread.join, 1.0)
+            self._thread = None
         await self._release()
         self.ready = False
 
@@ -416,6 +453,7 @@ class PhidgetOutput(SteerOutput):
         self._engaged = engaged
         self._target_angle = angle_deg
         self._context = context
+        self._kommando_at = time.monotonic()
         if not engaged:
             self._integral = 0.0
 
@@ -423,22 +461,45 @@ class PhidgetOutput(SteerOutput):
         self._integral = 0.0
         self._last_error = 0.0
         self._override_since = None
-        if self.encoder is not None:
-            # Beim Scharfschalten steht das Rad gerade - das ist die Mitte.
+        if self.encoder is not None and not self.mitte_gelernt:
+            # Ohne gelernte Mitte gilt: beim Scharfschalten steht das Rad gerade.
+            # Mit „Mitte lernen“ bleibt die gelernte - sonst verschob jedes
+            # Scharfschalten (auch mit schräg stehenden Rädern) die Mitte, und die
+            # aus der Fahrt gelernte Radmitte passte nicht mehr dazu.
             try:
                 self._encoder_centre = self.encoder.getPosition()
             except Exception:  # noqa: BLE001
                 pass
 
+    def learn_centre(self) -> dict:
+        """Die aktuelle Radstellung als Geradeaus lernen (Lenkung → Mitte lernen).
+
+        Gilt, solange die Motorsteuerung verbunden bleibt: der Drehgeber zählt
+        relativ, nach dem Abstecken muss sie neu gelernt werden.
+        """
+        if self.encoder is None:
+            if self.was is not None:
+                raise RuntimeError("Der Radwinkelsensor misst die Mitte selbst - "
+                                   "sie steht in den Einstellungen (Mitte des Sensors)")
+            raise RuntimeError("Ohne Drehgeber gibt es keine Mitte zu lernen")
+        try:
+            self._encoder_centre = self.encoder.getPosition()
+        except Exception as exc:  # noqa: BLE001
+            raise RuntimeError(f"Drehgeber nicht lesbar: {exc}") from exc
+        self.config.mitte_versatz_deg = 0.0      # die aus der Fahrt gelernte Korrektur gehörte zur alten Mitte
+        self.mitte_gelernt = True
+        return {"centre_counts": self._encoder_centre}
+
     async def _control_loop(self) -> None:
-        interval = 0.02          # 50 Hz
+        """Derselbe Regelkreis in der Ereignisschleife, mit festem Takt - für Tests,
+        deren nachgebildeter Motor je Aufruf einen Schritt weiterrückt."""
         while self.running:
             try:
-                self._step(interval)
+                self._step(REGEL_TAKT_S)
             except Exception as exc:  # noqa: BLE001
                 self.last_error_text = str(exc)
                 self._safe_stop()
-            await asyncio.sleep(interval)
+            await asyncio.sleep(REGEL_TAKT_S)
 
     async def motortest(self, richtung: int, anteil: float, dauer_s: float) -> dict:
         """Den Motor kurz und schwach in eine Richtung drehen lassen - ein Test
@@ -609,7 +670,16 @@ class PhidgetOutput(SteerOutput):
                      and not self._engaged)
         if regeltest:
             self._regeltest_spur.append((jetzt - self._regeltest_start, measured))
-        if not self._engaged and not regeltest:
+        engaged = self._engaged
+        if engaged and time.monotonic() - self._kommando_at > KOMMANDO_FRIST_S:
+            # Kein frischer Lenkbefehl: nicht mit dem alten Sollwert weiterlenken.
+            engaged = False
+            self._integral = 0.0
+            self.last_error_text = KEIN_BEFEHL
+        elif engaged and self.last_error_text == KEIN_BEFEHL:
+            self.last_error_text = ""
+        self._rueckmeldung_pruefen(measured, engaged)
+        if not engaged and not regeltest:
             self._safe_stop()
             self.feedback = OutputFeedback(wheel_angle_deg=measured, duty=0.0,
                                            received_at=time.time())
@@ -635,6 +705,7 @@ class PhidgetOutput(SteerOutput):
         elif self.mode != "yaw_rate" and abs(error) <= self.config.dead_band_deg:
             duty = 0.0
         duty = _clamp(duty, -self.config.max_duty, self.config.max_duty)
+        rad_duty = duty                 # in Radrichtung (+ rechts), vor der Motor-Umkehr
         if self.config.invert_motor:
             duty = -duty
 
@@ -645,12 +716,41 @@ class PhidgetOutput(SteerOutput):
             self.last_error_text = str(exc)
             return
 
+        # Der Eingriff wird in Radrichtung erkannt: mit der umgekehrten Motorleistung
+        # verglichen (bis 1.5.84) sah bei "Motor umkehren" jedes zügige Nachlaufen des
+        # Rads wie ein Fahrer aus, der dagegenhält - und die Lenkung ging aus.
         self.feedback = OutputFeedback(
             wheel_angle_deg=measured,
-            driver_override=False if regeltest else self._detect_override(measured, duty, dt),
+            driver_override=False if regeltest else self._detect_override(measured, rad_duty, dt),
             duty=duty,
             received_at=time.time(),
         )
+
+    def _rueckmeldung_pruefen(self, measured: Optional[float], engaged: bool) -> None:
+        """Lenken ohne Radwinkel heißt blind lenken: dann gilt der Ausgang als gestört.
+
+        Die Lenkautomatik pausiert dann („Lenkausgang gestört“) und greift wieder,
+        sobald Drehgeber oder Radwinkelsensor wieder Werte liefern.
+        """
+        if self.mode not in ("encoder", "was"):
+            return
+        if measured is not None:
+            self._ohne_messung_seit = None
+            if not self.ready and self.motor is not None and self._status_ok:
+                self.ready = True
+                self.status = self._status_ok
+            return
+        if not engaged:
+            return
+        jetzt = time.monotonic()
+        if self._ohne_messung_seit is None:
+            self._ohne_messung_seit = jetzt
+        elif jetzt - self._ohne_messung_seit > RUECKMELDUNG_FRIST_S and self.ready:
+            self.ready = False
+            self.status = ("Rückmeldung fehlt: " +
+                           ("Drehgeber" if self.mode == "encoder" else "Radwinkelsensor") +
+                           " liefert keine Werte")
+            self.last_error_text = self.status
 
     async def sprung(self, ziel_deg: float, halten_s: float) -> list:
         """Den Regler einen Radwinkel anfahren lassen und mitschreiben."""
@@ -686,9 +786,9 @@ class PhidgetOutput(SteerOutput):
         cfg = self.config
         start = {"gain_p": cfg.gain_p, "gain_i": cfg.gain_i, "gain_d": cfg.gain_d,
                  "max_duty": cfg.max_duty}
-        if self.encoder is not None:
+        if self.encoder is not None and not self.mitte_gelernt:
             self._encoder_centre = self.encoder.getPosition()     # hier ist die Mitte
-        mitte = self.measured_angle() or 0.0
+        mitte = self.measured_angle() or 0.0     # mit gelernter Mitte: von hier aus und wieder hierher
         verlauf = []
         ergebnis = {"gut": False, "text": ""}
         try:
@@ -782,7 +882,8 @@ class PhidgetOutput(SteerOutput):
         if measured is None or abs(duty) < 0.1:
             self._override_since = None
             return False
-        rate = (measured - (self.feedback.wheel_angle_deg or measured)) / max(dt, 1e-3)
+        vorher = self.feedback.wheel_angle_deg
+        rate = (measured - (measured if vorher is None else vorher)) / max(dt, 1e-3)
         against = (rate * duty) < 0 and abs(rate) > 25.0
         if not against:
             self._override_since = None
@@ -807,6 +908,13 @@ class PhidgetOutput(SteerOutput):
             "rueckmeldung": self.mode,
             "hinweis": self.last_error_text,
         })
+        if self.encoder is not None:
+            # Für Lenkung → Am Stand: „Mitte lernen“ mit Ist- und Sollwinkel.
+            gemessen = self.measured_angle()
+            data.update({"mitte_gelernt": self.mitte_gelernt,
+                         "zaehlwerte_je_grad": self.config.encoder_counts_per_deg,
+                         "radwinkel": None if gemessen is None else round(gemessen, 2),
+                         "soll_grad": round(self._target_angle, 2)})
         return data
 
 
@@ -978,7 +1086,9 @@ class PhidgetPositionOutput(SteerOutput):
             self._error_since = None
             return False
         error = abs(self.target_deg - measured)
-        pushing = abs(duty) > self.config.velocity_limit * 0.8
+        # Tastverhältnis -1..1 nahe der Grenze. Bis 1.5.84 stand hier die
+        # Geschwindigkeitsgrenze (Grad/s) als Maßstab - das wurde nie erreicht.
+        pushing = abs(duty) > 0.8
         if error < self.config.override_deg or not pushing:
             self._error_since = None
             return False

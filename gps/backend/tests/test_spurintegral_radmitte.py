@@ -177,3 +177,14 @@ class RadmitteUebernehmen(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def setUpModule():
+    # Diese Tests schalten den Regeltakt selbst (_step / _control_loop), ohne eigenen Faden.
+    from agripilot import actuators as _a
+    _a.REGEL_FADEN = False
+
+
+def tearDownModule():
+    from agripilot import actuators as _a
+    _a.REGEL_FADEN = True

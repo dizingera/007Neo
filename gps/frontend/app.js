@@ -1627,8 +1627,9 @@ el('btnSteer').onclick = async () => {
   const steering = state.live && state.live.steering;
   if (steering && steering.armed && !steering.command.engaged && steering.command.reason === 'Rückwärtsfahrt') {
     // Wartet, weil die Anlage Rückwärts vermutet - ohne Gyro auch nach einer Wende von
-    // Hand. Tippen heißt hier: ich fahre vorwärts (Scharfschalten bestätigt das).
-    if (await api('POST', '/api/steering/arm', { operation: arbeitBezeichnung() })) toast('Vorwärts bestätigt');
+    // Hand. Tippen heißt hier: ich fahre vorwärts. Nicht neu scharf schalten: das lernte
+    // die Radmitte neu, und nach einer Wende von Hand stehen die Räder selten gerade.
+    if (await api('POST', '/api/steering/vorwaerts')) toast('Vorwärts bestätigt');
   } else if (steering && steering.armed) {
     await api('POST', '/api/steering/disarm');
     toast('Lenkung aus');
@@ -4011,7 +4012,8 @@ function renderSystem() {
     el('steerInfo').textContent =
       `${output.zaehlwerte_je_grad} Zählwerte je Grad · ` +
       (output.mitte_gelernt ? `Ist ${(output.radwinkel || 0).toFixed(1)}° · ` +
-        `Soll ${(output.soll_grad || 0).toFixed(1)}°` : 'Mitte noch nicht gelernt');
+        `Soll ${(output.soll_grad || 0).toFixed(1)}°`
+        : 'Mitte noch nicht gelernt – bis dahin gilt die Stellung beim Scharfschalten als gerade');
   }
 
   const rows = [

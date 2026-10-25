@@ -1251,6 +1251,9 @@ def create_app(config=None) -> FastAPI:
             result = output.learn_centre()
         except RuntimeError as exc:
             raise HTTPException(400, str(exc)) from exc
+        if hasattr(output, "mitte_gelernt"):
+            config.save()           # die aus der Fahrt gelernte Radmitte gehörte zur alten Mitte
+            engine.radmitte.zuruecksetzen()
         engine.note("Lenkung: Mitte gelernt")
         return ok(result)
 
@@ -1441,6 +1444,16 @@ def create_app(config=None) -> FastAPI:
     async def disarm_steering():
         application.steering.disarm()
         return ok({"armed": False})
+
+    @api.post("/api/steering/vorwaerts")
+    async def steering_vorwaerts():
+        """Der Fahrer sagt: ich fahre vorwärts (bei „wartet · Rückwärtsfahrt“).
+
+        Anders als neu Scharfschalten lernt das keine neue Radmitte - die Räder
+        stehen nach einer Wende von Hand selten gerade (bis 1.5.84 tat der Knopf genau das).
+        """
+        engine.heading_filter.bestaetige_vorwaerts()
+        return ok({"armed": application.steering.armed})
 
     # -- system -----------------------------------------------------------
 

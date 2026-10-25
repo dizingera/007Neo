@@ -1,5 +1,43 @@
 # Bedienung im Feld
 
+## Lenkmodul geprüft (1.5.85)
+
+Gefunden und behoben:
+
+* **Regelkreis des Lenkmotors im eigenen Faden.** Er lief in derselben Schleife wie
+  alles andere (Saatplan rechnen, Abgleich, Webseite). War sie kurz beschäftigt,
+  schwankte der 50-Hz-Takt – und die 1065 hat unter Phidget21 **keinen Failsafe**:
+  der Motor lief mit der letzten Leistung weiter. Jetzt eigener Faden mit gemessenem
+  Takt, und **kommt 0,5 s kein Lenkbefehl, steht der Motor** („Kein Lenkbefehl mehr –
+  Motor angehalten“).
+* **Falscher „Fahrer hat eingegriffen“ bei „Motor umkehren“.** Die Erkennung verglich
+  die Radbewegung mit der *umgekehrten* Motorleistung: zügiges Nachlaufen des Rads
+  (über 25 °/s) sah wie ein Eingriff aus, die Lenkung ging aus. Jetzt in Radrichtung.
+* **Rückmeldung fällt aus** (Drehgeber/Radwinkelsensor liefert nichts): bisher lenkte
+  der Regler mit Abweichung 0 einfach nicht mehr, die Lenkung zeigte aber „lenkt“.
+  Jetzt nach 0,3 s „Lenkausgang gestört: Rückmeldung fehlt“ – die Lenkung wartet und
+  greift wieder, wenn Werte kommen.
+* **Lenkgeschwindigkeit des Traktors** (`max_steer_rate_deg_s`) war wirkungslos, es
+  galten fest 25 °/s. Jetzt gilt der eingestellte Wert.
+* **„Mitte lernen“ mit Drehgeber an der 1065:** der Knopf meldete „lernt keine Mitte“,
+  und jedes Scharfschalten (und jede Feinabstimmung) setzte die Mitte dorthin, wo das
+  Rad gerade stand. Jetzt: *Lenkung → Am Stand → Mitte lernen* bei geraden Rädern;
+  danach bleibt die Mitte beim Scharfschalten stehen (bis zum Abstecken der 1065).
+  Der aus der Fahrt gelernte Radmitte-Ausgleich wird dabei zurückgesetzt.
+* **„Vorwärts bestätigen“** (Tipp bei „wartet · Rückwärtsfahrt“) schaltete neu scharf
+  und lernte damit die Radmitte neu – nach einer Wende von Hand mit schrägen Rädern.
+  Jetzt ein eigener Befehl ohne neue Mitte; er wirkt auch unter 1 m/s.
+* **Positionsregler-Ausgang** (Phidget22, nicht die 1065): Eingriffserkennung maß das
+  Tastverhältnis an der Geschwindigkeitsgrenze – wurde nie erreicht. Jetzt ab 80 %.
+
+Geprüft, in Ordnung: Lenkautomatik (Pausen, Wiedergreifen, Rate-Begrenzung, Tempo-
+Begrenzung), Stanley/Vorausschauend/Cerea, Dauerversatz- und Cerea-Integral, Hang-
+Vorsteuerung (Vorzeichen), Lenk-Assistent, Nachlauf-Messung, Phidget21-Ansteuerung
+(Prozent, Beschleunigung, Drehgeber, Anhalten beim Beenden).
+
+Bleibt: Die 1065 hat keinen Failsafe in der Hardware – stürzt das ganze Programm
+hart ab, hilft nur der Not-Aus. Nicht am Traktor geprüft.
+
 ## Hangausgleich längs korrigiert und selbst geprüft (ab 1.5.84)
 
 * **Fehler behoben:** Der Hangausgleich längs hatte das falsche Vorzeichen. Bergauf

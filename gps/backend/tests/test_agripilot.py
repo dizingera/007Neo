@@ -965,20 +965,22 @@ class ActuatorTest(unittest.TestCase):
         from agripilot.actuators import PhidgetPositionOutput
         from agripilot.config import PhidgetConfig
 
+        # Gemessen wird am Tastverhältnis (0..1); bis 1.5.84 an der Geschwindigkeitsgrenze,
+        # die mit üblichen Werten (Grad/s) nie erreicht wurde.
         output = PhidgetPositionOutput(
-            PhidgetConfig(override_deg=4.0, velocity_limit=0.5))
+            PhidgetConfig(override_deg=4.0, velocity_limit=50.0))
         output.target_deg = 10.0
 
         # Kleine Abweichung: das ist normales Nachführen
-        self.assertFalse(output._detect_override(9.0, 0.5, True))
+        self.assertFalse(output._detect_override(9.0, 0.9, True))
         # Große Abweichung, aber der Motor drückt kaum - kein Eingriff
         self.assertFalse(output._detect_override(0.0, 0.05, True))
         # Große Abweichung bei voller Leistung, aber noch nicht lange genug
-        self.assertFalse(output._detect_override(0.0, 0.5, True))
+        self.assertFalse(output._detect_override(0.0, 0.9, True))
         output._error_since -= 1.0                 # eine Sekunde später
-        self.assertTrue(output._detect_override(0.0, 0.5, True))
+        self.assertTrue(output._detect_override(0.0, 0.9, True))
         # Nicht scharf: nie ein Eingriff
-        self.assertFalse(output._detect_override(0.0, 0.5, False))
+        self.assertFalse(output._detect_override(0.0, 0.9, False))
 
     def test_learning_the_centre_needs_a_motor(self):
         from agripilot.actuators import PhidgetPositionOutput
@@ -3697,3 +3699,14 @@ class MenueApiTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+def setUpModule():
+    # Diese Tests schalten den Regeltakt selbst (_step / _control_loop), ohne eigenen Faden.
+    from agripilot import actuators as _a
+    _a.REGEL_FADEN = False
+
+
+def tearDownModule():
+    from agripilot import actuators as _a
+    _a.REGEL_FADEN = True
