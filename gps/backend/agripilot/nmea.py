@@ -10,7 +10,7 @@ than raised.
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -182,10 +182,12 @@ class NmeaParser:
 
     def __init__(self) -> None:
         self.fix = Fix()
+        self.rejected_fix: Optional[Fix] = None
         self.last_error: Optional[str] = None
 
     def feed(self, sentence: str) -> Optional[Fix]:
         """Consume one line. Returns the Fix when an epoch is complete."""
+        self.rejected_fix = None
         sentence = sentence.strip()
         if not sentence.startswith(("$", "!")):
             return None
@@ -203,6 +205,14 @@ class NmeaParser:
             return None
         return handler(parts)
 
+    def _reject_position(self) -> None:
+        # Der Parser meldet weiter nur gültige Positionen zurück. Der Empfangsweg
+        # bekommt zusätzlich den Ausfall, damit Motor und Teilbreiten sofort stoppen.
+        # Eine RMC-Wiederkehr belegt GPS, aber noch keinen neuen RTK-Fix.
+        self.fix.fix_quality = 0
+        self.rejected_fix = replace(self.fix, raw=dict(self.fix.raw))
+        return None
+
     # -- sentence handlers -------------------------------------------------
 
     def _handle_gga(self, p: list[str]) -> Optional[Fix]:
@@ -218,7 +228,7 @@ class NmeaParser:
         fix.altitude = _to_float(p[9])
         if len(p) > 13:
             fix.age_of_corrections = _to_float(p[13])
-        return fix if fix.valid else None
+        return fix if fix.valid else self._reject_position()
 
     def _handle_rmc(self, p: list[str]) -> Optional[Fix]:
         if len(p) < 10:
@@ -228,10 +238,10 @@ class NmeaParser:
         fix.utc = _utc_time(p[1], p[9]) or fix.utc
         if active:
             if p[4] not in ("N", "S") or p[6] not in ("E", "W"):
-                return None
+                return self._reject_position()
             lat, lon = _degrees(p[3], p[4]), _degrees(p[5], p[6])
             if lat is None or lon is None:
-                return None  # Alte Position niemals als neue Messung veröffentlichen.
+                return self._reject_position()  # Alte Position niemals als frisch veröffentlichen.
             fix.lat, fix.lon = lat, lon
             speed = _to_float(p[7])
             if speed is not None:
@@ -241,7 +251,7 @@ class NmeaParser:
                 fix.course_deg = course
             if fix.fix_quality == 0:
                 fix.fix_quality = 1  # receiver only sends RMC: assume plain GPS
-        return fix if (active and fix.valid) else None
+        return fix if (active and fix.valid) else self._reject_position()
 
     def _handle_vtg(self, p: list[str]) -> None:
         if len(p) < 8:

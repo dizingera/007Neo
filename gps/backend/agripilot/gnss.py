@@ -17,6 +17,7 @@ import math
 import random
 import time
 from collections import deque
+from dataclasses import replace
 from typing import Awaitable, Callable, Optional
 
 from .geo import LocalPlane
@@ -73,8 +74,12 @@ class GnssSource:
             # Auswertungsfehler mit aufzeichnen, den man gerade sucht.
             self.recorder.nmea(line, self.last_line_at)
         fix = self.parser.feed(line)
+        if fix is None:
+            fix = self.parser.rejected_fix
         if fix is not None:
-            fix.received_at = self.last_line_at
+            # Jede veröffentlichte Messung ist ein eigener Schnappschuss. VTG/GGA
+            # dürfen die bereits an die Engine übergebenen Werte nicht verändern.
+            fix = replace(fix, raw=dict(fix.raw), received_at=self.last_line_at)
             result = self.on_fix(fix)
             if asyncio.iscoroutine(result):
                 await result

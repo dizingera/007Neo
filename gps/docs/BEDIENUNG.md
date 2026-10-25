@@ -1,5 +1,25 @@
 # Bedienung im Feld
 
+## Fixverlust sofort an Lenkung und Teilbreiten melden (1.5.94)
+
+Meldet der Empfänger ausdrücklich einen ungültigen Positionsfix (GGA-Qualität 0
+oder RMC-Status V), wird dieser Ausfall sofort an die Engine weitergegeben.
+Lenkung und Teilbreiten stoppen, eine laufende Wende wird beendet. Nach gültigen
+Folgedaten wird die fehlende Strecke nicht nachträglich als bearbeitet markiert.
+
+Nach einem Fixverlust muss der Empfänger die RTK-Güte neu bestätigen. Eine
+einfache RMC-Wiederkehr übernimmt keinen alten RTK-Status.
+
+Auch bei vollständiger GPS-Stille setzt der Zeitwächter den alten
+Markierungspunkt zurück. Die Wiederkehr verbindet keine Strecke über die Messlücke.
+
+Jede veröffentlichte Positionsmessung ist jetzt ein eigener Schnappschuss.
+Nachfolgende NMEA-Sätze ändern keine bereits übergebenen Messwerte mehr.
+Fehlerhafte Prüfsummen bleiben verworfene Einzelmeldungen; der vorhandene
+Zeitwächter gilt weiterhin, wenn keine gültige Positionsmeldung mehr ankommt.
+
+Über den tatsächlichen Empfangsweg mit Testdaten geprüft, ohne echte Hardware.
+
 ## Beschädigte GPS-Meldungen sicher verwerfen (1.5.93)
 
 Nicht berechenbare oder unendliche Zahlen im GPS-Datenstrom werden verworfen.

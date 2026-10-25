@@ -2503,6 +2503,12 @@ class Engine:
         age = now - self.fix.received_at if (self.fix and self.fix.received_at) else 99.0
         if self.teilbreiten is not None and (self.job is None or age>GPS_STILLSTAND_S):
             self.teilbreiten.wunsch(0,min(32,len(self.sections)))
+        if age > GPS_STILLSTAND_S:
+            # Messlücke: beim Wiederempfang keinen Flächenstreifen von der alten
+            # Geräteposition zur neuen zeichnen und keine Strecke dazuerfinden.
+            self.tool_position = None
+            self.implement_position = None
+            self._last_update_at = None
         if age > GPS_STILLSTAND_S and self.turn is not None:
             # Eine Wende ohne Positionsdaten weiterzuführen hieße, blind auf
             # einem Bogen zu lenken. Sie endet hier, nicht erst beim nächsten Fix.
