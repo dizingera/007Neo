@@ -33,6 +33,7 @@ from .guidance import (
     GuidanceState,
     HeadingFilter,
     ImplementHeading,
+    REGLER_FELDER,
     SCHNEIDWERK,
     TRAKTOR_FELDER,
     VehicleProfile,
@@ -531,6 +532,9 @@ class Engine:
                     if not name:
                         raise ValueError("Der Traktor braucht einen Namen")
                     t["name"] = name
+                if self.config.is_master and any(k in values and values[k] != t.get(k) for k in REGLER_FELDER):
+                    # Im Büro eingestellt: soll auch in der Kabine ankommen (_traktoren_mergen).
+                    t["buero_regler_stand"] = time.time()
                 t.update({k: v for k, v in values.items() if k in TRAKTOR_FELDER})
                 t["stand"] = time.time()
         self.store.set_setting("traktoren", liste)
@@ -573,6 +577,7 @@ class Engine:
             if t["id"] in grab and float(grab[t["id"]]) >= stand:
                 continue
             sauber = {"id": str(t["id"]), "name": str(t["name"]).strip(), "stand": stand,
+                      "buero_regler_stand": float(t.get("buero_regler_stand") or 0.0),
                       **{k: v for k, v in t.items() if k in TRAKTOR_FELDER}}
             alt = lokal.get(t["id"])
             if alt is not None:
@@ -581,6 +586,12 @@ class Engine:
                 # Die Kabine bestimmt ihre Fahrzeug- und Lenkabstimmung. Vom Büro
                 # kommen Namen und Listen, keine Ersatzwerte für den lokalen Einbau.
                 sauber.update({k: alt[k] for k in TRAKTOR_FELDER if k in alt})
+                # Ausnahme ab 1.5.83: den Lenkregler, wenn er im Büro bewusst neu
+                # eingestellt wurde (nicht, was ein anderes Tablet abgestimmt hat).
+                if sauber["buero_regler_stand"] > float(alt.get("buero_regler_stand") or 0.0):
+                    sauber.update({k: t[k] for k in REGLER_FELDER if k in t})
+                else:
+                    sauber["buero_regler_stand"] = float(alt.get("buero_regler_stand") or 0.0)
             if alt is None or stand > float(alt.get("stand") or 0.0):
                 lokal[t["id"]] = sauber
         for kennung, zeit in grab.items():

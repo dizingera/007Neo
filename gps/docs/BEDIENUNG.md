@@ -1,5 +1,19 @@
 # Bedienung im Feld
 
+## Lenkregler im Büro einstellen, Simulator rückwärts (ab 1.5.83)
+
+* **Lenkregler vom Büro in die Kabine:** Bisher behielt das Tablet alle
+  Fahrzeug- und Lenkwerte für sich – im Büro (Master) eingestellte Lenkregler-Werte
+  kamen in der Kabine nie an. Jetzt kommen **Regelart und die sechs Cerea-Werte**
+  beim nächsten Abgleich an, wenn sie am Master bewusst geändert wurden. Was eine
+  Kabine selbst nachstellt (auch der Lenk-Assistent), bleibt in dieser Kabine und
+  wandert nicht zu anderen Tablets. Antenne, Radstand, Lenkschärfe usw. bestimmt
+  weiter das Tablet.
+* **Simulator fährt rückwärts:** Schieber *Simulator km/h* bis −5 (oder
+  `POST /api/simulator {"speed_kmh": -2.5}`). Geprüft: 2,5 km/h rückwärts → Kurs
+  bleibt, „wartet · Rückwärtsfahrt“; 5 km/h → als Rückwärts erkannt; wieder
+  vorwärts → lenkt von selbst.
+
 ## Fehlersuche 1.5.82: langsam rückwärts, „wartet · Rückwärtsfahrt“
 
 * **Langsames Rückwärtsrangieren (0,5–1 m/s, 1,8–3,6 km/h):** Rückwärts wurde erst

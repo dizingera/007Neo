@@ -285,7 +285,10 @@ class SimulatorSource(GnssSource):
         return self.rad_deg + self.mess_korrektur_deg
 
     def set_speed_kmh(self, kmh: float) -> None:
-        self.speed_ms = max(0.0, kmh / 3.6)
+        # Negativ = rückwärts (bis 10 km/h): damit Rückwärtserkennung und Lenkpause
+        # im Simulator prüfbar sind. Der Empfänger meldet dann, wie ein echter, ein
+        # positives Tempo und den Kurs der Bewegung (_rmc).
+        self.speed_ms = max(-10.0 / 3.6, kmh / 3.6)
 
     def teleport(self, east: float, north: float, heading: float) -> None:
         self.east, self.north, self.heading = east, north, heading
@@ -340,7 +343,7 @@ class SimulatorSource(GnssSource):
         grenze = self.lenk_rate_deg_s * dt
         self.rad_deg += max(-grenze, min(grenze, schritt))
         steer = math.radians(self.rad_deg + self.rad_versatz_deg)
-        if abs(steer) > 1e-6 and self.speed_ms > 0.01:
+        if abs(steer) > 1e-6 and abs(self.speed_ms) > 0.01:
             turn_rate = self.speed_ms / self.wheelbase * math.tan(steer)
             self.heading = (self.heading + math.degrees(turn_rate) * dt) % 360.0
         h = math.radians(self.heading)
@@ -357,7 +360,8 @@ class SimulatorSource(GnssSource):
             f"GPRMC,{now.strftime('%H%M%S.%f')[:-3]},A,"
             f"{int(lat_abs):02d}{(lat_abs % 1) * 60:09.6f},{lat_dir},"
             f"{int(lon_abs):03d}{(lon_abs % 1) * 60:09.6f},{lon_dir},"
-            f"{self.speed_ms / 0.514444:.2f},{self.heading:.1f},"
+            f"{abs(self.speed_ms) / 0.514444:.2f},"
+            f"{(self.heading + (180.0 if self.speed_ms < 0 else 0.0)) % 360.0:.1f},"
             f"{now.strftime('%d%m%y')},,,A"
         )
         crc = 0

@@ -159,3 +159,39 @@ class TabletLenkungTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class LenkreglerAusDemBuero(unittest.TestCase):
+    """Ab 1.5.83: den Lenkregler im Büro einstellen, er kommt in der Kabine an -
+    aber nur, was im Büro bewusst eingestellt wurde, nicht die Werte anderer Tablets."""
+
+    def test_buero_setzt_den_lenkregler_fuer_alle_kabinen_ohne_den_einbau_anzufassen(self):
+        with tempfile.TemporaryDirectory() as a, tempfile.TemporaryDirectory() as b, \
+                tempfile.TemporaryDirectory() as c:
+            with geraet(a, "master", "buero") as master, geraet(b, "client", "tablet-a") as links, \
+                    geraet(c, "client", "tablet-b") as rechts:
+                links.post("/api/traktor", json={"antenna_right_m": 0.12, "cerea_lenk_aggr": 70})
+                for _ in range(2):
+                    abgleichen(links, master)
+                    abgleichen(rechts, master)
+                # Was Tablet A für sich eingestellt hat, bleibt bei A.
+                self.assertEqual(profil(links)["cerea_lenk_aggr"], 70)
+                self.assertEqual(profil(rechts)["cerea_lenk_aggr"], 100)
+                # Jetzt stellt das Büro den Lenkregler ein.
+                master.post("/api/traktor", json={"regelart": "cerea", "cerea_lenk_aggr": 80,
+                                                  "cerea_d": 0.3})
+                for _ in range(2):
+                    abgleichen(links, master)
+                    abgleichen(rechts, master)
+                for tablet in (links, rechts):
+                    self.assertEqual(profil(tablet)["regelart"], "cerea")
+                    self.assertEqual(profil(tablet)["cerea_lenk_aggr"], 80)
+                    self.assertEqual(profil(tablet)["cerea_d"], 0.3)
+                self.assertEqual(profil(links)["antenna_right_m"], 0.12)   # Einbau bleibt
+                # Danach stellt Kabine B selbst nach: das bleibt dort und wandert nicht zu A.
+                rechts.post("/api/traktor", json={"cerea_lenk_aggr": 60})
+                for _ in range(2):
+                    abgleichen(rechts, master)
+                    abgleichen(links, master)
+                self.assertEqual(profil(rechts)["cerea_lenk_aggr"], 60)
+                self.assertEqual(profil(links)["cerea_lenk_aggr"], 80)

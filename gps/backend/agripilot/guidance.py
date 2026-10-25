@@ -250,6 +250,11 @@ TRAKTOR_FELDER = (
     "actuator_latency_ms",
 )
 
+# Der Lenkregler (Menü Lenkregler): im Büro eingestellt, kommt er auch in der Kabine
+# an - anders als die übrigen TRAKTOR_FELDER, die das Tablet selbst bestimmt.
+REGLER_FELDER = ("regelart", "cerea_lenk_aggr", "cerea_auffahr_aggr", "cerea_l",
+                 "cerea_i", "cerea_i2", "cerea_d")
+
 # Ein Mähdrescher ist das Fahrzeug, sein Schneidwerk das Gerät - vorn statt hinten.
 # Die Hinterachse des Mähdreschers ist die gelenkte; das Schneidwerk sitzt vor der
 # Antriebsachse, gut fünf Meter vor der Bezugsachse (negativ = vor der Achse).
