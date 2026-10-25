@@ -375,7 +375,7 @@ class Storage:
 
     def get_job(self, job_id: str) -> Optional[dict]:
         row = self.db.execute("SELECT * FROM jobs WHERE id=?", (job_id,)).fetchone()
-        return _job_row(row) if row else None
+        return self._arbeitsstatus(_job_row(row)) if row else None
 
     def get_job_coverage(self, job_id: str) -> Optional[bytes]:
         row = self.db.execute(
@@ -395,7 +395,7 @@ class Storage:
                 "SELECT * FROM jobs WHERE deleted=0 ORDER BY started_at DESC LIMIT ?",
                 (limit,),
             ).fetchall()
-        return [_job_row(r) for r in rows]
+        return [self._arbeitsstatus(_job_row(r)) for r in rows]
 
     def find_resumable_job(self, device_id: str, max_age_s: float) -> Optional[dict]:
         """Die jüngste offene Arbeit dieses Geräts, falls sie frisch genug ist.
@@ -405,10 +405,23 @@ class Storage:
         """
         row = self.db.execute(
             """SELECT * FROM jobs WHERE ended_at IS NULL AND deleted=0
-               AND device_id=? AND updated_at>=? ORDER BY updated_at DESC LIMIT 1""",
+               AND device_id=? AND updated_at>=?
+               AND NOT EXISTS (SELECT 1 FROM settings s WHERE s.key='arbeitsablauf:' || jobs.id
+                   AND json_extract(s.value,'$.pausiert')=1
+                   AND json_extract(s.value,'$.device_id')=jobs.device_id)
+               ORDER BY updated_at DESC LIMIT 1""",
             (device_id, time.time() - max_age_s),
         ).fetchone()
         return _job_row(row) if row else None
+
+    def find_paused_job(self, device_id: str) -> Optional[dict]:
+        row = self.db.execute(
+            "SELECT jobs.* FROM jobs JOIN settings s ON s.key='arbeitsablauf:' || jobs.id "
+            "WHERE jobs.device_id=? AND jobs.deleted=0 AND jobs.ended_at IS NULL "
+            "AND json_extract(s.value,'$.pausiert')=1 "
+            "AND json_extract(s.value,'$.device_id')=jobs.device_id "
+            "ORDER BY s.updated_at DESC LIMIT 1", (device_id,)).fetchone()
+        return self._arbeitsstatus(_job_row(row)) if row else None
 
     def close_orphan_jobs(self, device_id: str, keep_id: Optional[str] = None) -> int:
         """Arbeiten dieses Geräts ohne Ende abschließen - Stromausfall, Neustart.
@@ -421,14 +434,63 @@ class Storage:
         """
         cursor = self.db.execute(
             """UPDATE jobs SET ended_at=updated_at, updated_at=?
-               WHERE ended_at IS NULL AND deleted=0 AND device_id=? AND id IS NOT ?""",
+               WHERE ended_at IS NULL AND deleted=0 AND device_id=? AND id IS NOT ?
+               AND NOT EXISTS (SELECT 1 FROM settings s WHERE s.key='arbeitsablauf:' || jobs.id
+                   AND json_extract(s.value,'$.pausiert')=1
+                   AND json_extract(s.value,'$.device_id')=jobs.device_id)""",
             (time.time(), device_id, keep_id),
         )
         self.db.commit()
         return cursor.rowcount
 
+    def _arbeitsstatus(self, job: dict) -> dict:
+        meta = self.get_setting("arbeitsablauf:" + job["id"], {})
+        job["pausiert"] = bool(meta.get("device_id") == job["device_id"] and meta.get("pausiert") and job.get("ended_at") is None and not job.get("deleted"))
+        job["status"] = "geloescht" if job.get("deleted") else "beendet" if job.get("ended_at") is not None else "pausiert" if job["pausiert"] else "offen"
+        return job
+
+    def arbeitsstatus_setzen(self, job_id: str, *, pausiert: bool, papierkorb: bool = False, _deleted=None) -> dict:
+        """Status und Jobversion atomar schreiben; keine neue Datenbankspalte."""
+        job = self.get_job(job_id)
+        if not job:
+            raise KeyError("Arbeit nicht gefunden")
+        meta = self.get_setting("arbeitsablauf:" + job_id, {})
+        stamp = max(time.time(), job["updated_at"] + .000001, meta.get("zeit", 0) + .000001)
+        value = dict(zeit=stamp, pausiert=bool(pausiert), papierkorb=bool(papierkorb), device_id=job["device_id"])
+        with self.db:
+            if _deleted is None:
+                self.db.execute("UPDATE jobs SET updated_at=? WHERE id=?", (stamp, job_id))
+            else:
+                self.db.execute("UPDATE jobs SET updated_at=?,deleted=? WHERE id=?", (stamp, int(_deleted), job_id))
+            self.db.execute("INSERT INTO settings (key,value,updated_at) VALUES (?,?,?) "
+                            "ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=excluded.updated_at",
+                            ("arbeitsablauf:" + job_id, json.dumps(value), stamp))
+        return self.get_job(job_id)
+
     def delete_job(self, job_id: str) -> None:
-        self._soft_delete("jobs", job_id)
+        job = self.get_job(job_id)
+        if not job or job.get("deleted"):
+            return
+        # Raster und Spurpunkte bleiben erhalten. Nur neue Löschungen werden
+        # ausdrücklich als wiederherstellbar markiert.
+        self.arbeitsstatus_setzen(job_id, pausiert=job.get("ended_at") is None, papierkorb=True, _deleted=True)
+
+    def list_deleted_jobs(self, device_id: Optional[str] = None) -> list[dict]:
+        rows = self.db.execute("SELECT * FROM jobs WHERE deleted=1 ORDER BY updated_at DESC").fetchall()
+        return [self._arbeitsstatus(_job_row(r)) for r in rows
+                if (device_id is None or r["device_id"] == device_id)
+                and self.get_setting("arbeitsablauf:" + r["id"], {}).get("papierkorb") is True]
+
+    def restore_job(self, job_id: str) -> dict:
+        job = self.get_job(job_id)
+        if not job or not job.get("deleted") or not self.get_setting("arbeitsablauf:" + job_id, {}).get("papierkorb"):
+            raise RuntimeError("Diese Arbeit liegt nicht im wiederherstellbaren Papierkorb")
+        field = self.get_field(job["field_id"])
+        if not field or field.get("deleted"):
+            raise RuntimeError("Feld dieser Arbeit fehlt")
+        # Offene wiederhergestellte Arbeiten bleiben pausiert. Der neue
+        # Versionsstempel gewinnt gegen schon verteilte Löschvermerke.
+        return self.arbeitsstatus_setzen(job_id, pausiert=job.get("ended_at") is None, _deleted=False)
 
     # -- track points -----------------------------------------------------
 
@@ -578,6 +640,8 @@ class Storage:
                     except (ValueError, TypeError):
                         pass  # Unvereinbare Raster: vorhandenen Stand behalten.
                 continue
+            if table == "jobs" and existing and not record.get("coverage") and existing["coverage"]:
+                record["coverage"] = existing["coverage"]
             if table == "lines" and "rand_innen" not in record:
                 alt = self.get_line(record["id"])
                 record["rand_innen"] = alt["rand_innen"] if alt else self._randbezug(record)

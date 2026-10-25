@@ -27,6 +27,25 @@ def _punkte(value):
 
 def _wert(key, value):
     """Nur bekannte Datentypen; unbekannte Zusatzfelder werden nicht weitergegeben."""
+    if key.startswith("arbeitskosten:") and _ID.fullmatch(key.split(":", 1)[1]):
+        # Lazy import: arbeitsbericht selbst benutzt Storage; kein Importzyklus
+        # beim Laden der Speicher-/Abgleichmodule.
+        from .arbeitsbericht import KOSTEN_GRENZEN
+        if not isinstance(value, dict) or not _zahl(value.get("aktualisiert_am")) or value["aktualisiert_am"] < 0:
+            raise ValueError("Kostenstand ungültig")
+        out = {"aktualisiert_am": value["aktualisiert_am"]}
+        for feld, grenze in KOSTEN_GRENZEN.items():
+            zahl = value.get(feld)
+            if zahl is not None and (not _zahl(zahl) or not 0 <= zahl <= grenze):
+                raise ValueError("Kostenwert außerhalb des erlaubten Bereichs")
+            out[feld] = zahl
+        return out
+    if key.startswith("arbeitsablauf:") and _ID.fullmatch(key.split(":", 1)[1]):
+        if (not isinstance(value, dict) or not _zahl(value.get("zeit")) or value["zeit"] < 0
+                or not isinstance(value.get("pausiert"), bool) or not isinstance(value.get("papierkorb"), bool)
+                or not isinstance(value.get("device_id"), str) or not _ID.fullmatch(value["device_id"])):
+            raise ValueError("Arbeitsstatus ungültig")
+        return {k: value[k] for k in ("zeit", "pausiert", "papierkorb", "device_id")}
     if key.startswith("grenze_verlauf:") and _ID.fullmatch(key.split(":", 1)[1]):
         if not isinstance(value, list) or len(value) > 100:
             raise ValueError("Grenzverlauf ungültig")
@@ -105,7 +124,7 @@ def _device(store, device_id=None):
 def exportieren(store, since=0, device_id=None):
     """Wire: [{key,value,updated_at,device_id}], streng begrenzte Settings-Auswahl."""
     device = _device(store, device_id)
-    rows = store.db.execute("SELECT key,value,updated_at FROM settings WHERE updated_at>? AND (key LIKE 'grenze_verlauf:%' OR key LIKE 'feld_einfahrt:%' OR key='probefahrt_bericht' OR key LIKE 'probefahrt_fremd:%')", (since,)).fetchall()
+    rows = store.db.execute("SELECT key,value,updated_at FROM settings WHERE updated_at>? AND (key LIKE 'grenze_verlauf:%' OR key LIKE 'feld_einfahrt:%' OR key='probefahrt_bericht' OR key LIKE 'probefahrt_fremd:%' OR key LIKE 'arbeitsablauf:%' OR key LIKE 'arbeitskosten:%')", (since,)).fetchall()
     out = []
     for row in rows:
         key = row["key"]
@@ -113,12 +132,13 @@ def exportieren(store, since=0, device_id=None):
             value = json.loads(row["value"])
             origin = device
             stamp = row["updated_at"]
-            if key.startswith("feld_einfahrt:"):
+            if key.startswith(("feld_einfahrt:", "arbeitsablauf:", "arbeitskosten:")):
                 meta = store.get_setting("zusatzsync_meta", {}).get(key, {})
                 if row["updated_at"] == meta.get("empfang"):
                     stamp = meta["zeit"]
-                if isinstance(value, dict) and _zahl(value.get("zeit")):
-                    stamp = value["zeit"]
+                zeitfeld = "aktualisiert_am" if key.startswith("arbeitskosten:") else "zeit"
+                if isinstance(value, dict) and _zahl(value.get(zeitfeld)):
+                    stamp = value[zeitfeld]
             if key.startswith("probefahrt_fremd:"):
                 origin = key.split(":", 1)[1]
                 key, stamp, value = "probefahrt_bericht", value["updated_at"], value["bericht"]
@@ -144,6 +164,10 @@ def uebernehmen(store, items, device_id=None):
             if len(_json(item)) > 2000000:
                 raise ValueError("Eintrag zu groß")
             value = _wert(key, item["value"])
+            if key.startswith("arbeitsablauf:"):
+                job = store.get_job(key.split(":", 1)[1])
+                if job and job["device_id"] != value["device_id"]:
+                    raise ValueError("Arbeitsstatus gehört zu anderem Gerät")
             if key == "probefahrt_bericht":
                 if origin == own:
                     continue
@@ -163,20 +187,22 @@ def uebernehmen(store, items, device_id=None):
                 local = meta.get(key, {})
                 local_stamp = local.get("zeit", 0) if row and row["updated_at"] == local.get("empfang") else (row["updated_at"] if row else -1)
                 existing = store.get_setting(key)
-                if "zeit" in value:
-                    stamp = value["zeit"]
-                if isinstance(existing, dict) and _zahl(existing.get("zeit")):
-                    local_stamp = existing["zeit"]
+                zeitfeld = "aktualisiert_am" if key.startswith("arbeitskosten:") else "zeit"
+                if zeitfeld in value:
+                    stamp = value[zeitfeld]
+                if isinstance(existing, dict) and _zahl(existing.get(zeitfeld)):
+                    local_stamp = existing[zeitfeld]
                 # Bei gleicher Versionszeit gewinnt die Löschung; alte Geräte
                 # dürfen durch erneutes Senden keinen gelöschten Punkt beleben.
-                deletion_wins_tie = (stamp == local_stamp and value.get("geloescht") is True
-                                     and isinstance(existing, dict) and existing.get("geloescht") is not True)
+                deletion_wins_tie = (stamp == local_stamp and isinstance(existing, dict) and
+                    ((value.get("geloescht") is True and existing.get("geloescht") is not True) or
+                     (key.startswith("arbeitsablauf:") and value.get("pausiert") is True and existing.get("pausiert") is not True)))
                 if stamp < local_stamp or (stamp == local_stamp and not deletion_wins_tie):
                     continue
             if store.get_setting(key) != value:
                 store.set_setting(key, value)
                 result["angewendet"] += 1
-                if key.startswith("feld_einfahrt:"):
+                if key.startswith(("feld_einfahrt:", "arbeitsablauf:", "arbeitskosten:")):
                     meta = store.get_setting("zusatzsync_meta", {})
                     row = store.db.execute("SELECT updated_at FROM settings WHERE key=?", (key,)).fetchone()
                     meta[key] = {"zeit": stamp, "empfang": row["updated_at"]}

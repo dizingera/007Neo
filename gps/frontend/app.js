@@ -112,6 +112,7 @@ function onState(data) {
   reglerKontextPruefen();
   saatKontextPruefen();
   if (window.Arbeitstag) window.Arbeitstag.aktualisieren(data);
+  if(window.Komfort?.instanz)window.Komfort.instanz.live(data);
   if (el("uebungsKennzeichen")) el("uebungsKennzeichen").hidden = !(data.system && data.system.uebung);
   if (typeof updateErfolgPruefen === "function") updateErfolgPruefen(data);
   // Erst den Streifen bis zur neuen Lage malen, dann die Zellen dieser Fahrt
@@ -141,6 +142,7 @@ function onState(data) {
   // die eben im 'init' gemalte Fläche wäre sonst sofort wieder weg.
   const before = previous && previous.field ? previous.field.id : null;
   const now = data.field ? data.field.id : null;
+  if(before!==now&&now&&window.Komfort?.instanz)window.Komfort.instanz.geladen(now);
   if (previous && before !== now) refreshLists();
   // Neue Grenze desselben Feldes (Editor): der gerechnete Saatplan gehörte zur alten Form -
   // neu laden, statt ihn auf der Karte weiter zu zeigen.
@@ -1314,6 +1316,7 @@ function traktorZeichnen(profil) {
 
 async function api(method, url, body) {
   try {
+    if(method==='POST'&&window.Komfort){body=await window.Komfort.vorschau(url,body);if(body===null)return null;}
     const response = await fetch(url, {
       method,
       headers: body ? { 'Content-Type': 'application/json' } : undefined,
@@ -1405,6 +1408,7 @@ el('btnTurn').onclick = async () => {
 
 async function apiRoh(method, url, body) {
   try {
+    if(method==='POST'&&window.Komfort){body=await window.Komfort.vorschau(url,body);if(body===null)return {ok:false,detail:'Nicht übernommen'};}
     const antwort = await fetch(url, {
       method, headers: body ? { 'Content-Type': 'application/json' } : undefined,
       body: body ? JSON.stringify(body) : undefined,
@@ -1667,6 +1671,7 @@ function arbeitBezeichnung() {
 el('btnJob').onclick = async () => {
   if (state.live && state.live.job) {
     const result = await api('POST', '/api/job/stop');
+    if (result && !result.data) { toast('Markierung ist bereits pausiert oder beendet'); return; }
     if (result) {
       toast(result.data.verworfen ? 'Markieren aus – nichts gefahren, Arbeit verworfen'
                                   : `Markieren aus – ${result.data.area_ha.toFixed(2)} ha`);
@@ -3634,7 +3639,11 @@ function renderFields(fields, lines) {
   const jeFeld = {};
   (lines || []).forEach((line) => { (jeFeld[line.field_id] = jeFeld[line.field_id] || []).push(line); });
   host.innerHTML = '';
-  fields.forEach((field) => {
+  const komfort=window.Komfort?.instanz;
+  const filter=komfort?.feldfilter()||{};
+  const prefs=komfort?.vorlieben()||{favoriten:[],zuletzt:[]};
+  const auswahl=window.Komfort?window.Komfort.felderFiltern(fields,filter.suche,prefs.favoriten,filter.nur,prefs.zuletzt):fields;
+  auswahl.forEach((field) => {
     const spuren = jeFeld[field.id] || [];
     const saison = letzteAussaat(spuren);
     const offen = aufgeklappt.has(field.id);
@@ -3688,6 +3697,7 @@ function renderFields(fields, lines) {
     if(punkte){const svg=document.createElementNS('http://www.w3.org/2000/svg','svg');svg.setAttribute('viewBox','0 0 100 100');const polygon=document.createElementNS('http://www.w3.org/2000/svg','polygon');polygon.setAttribute('points',punkte);svg.appendChild(polygon);mini.appendChild(svg);}else mini.textContent='⌁';
     haupt.prepend(mini);
     const badge=document.createElement('span');badge.className='aw-status';badge.textContent=field.id===currentId?'Geladen':field.boundary.length>=3?'Grenze vorhanden':'Grenze fehlt';haupt.prepend(badge);
+    const stern=document.createElement('button');stern.type='button';stern.textContent=prefs.favoriten.includes(field.id)?'★':'☆';stern.setAttribute('aria-label',(prefs.favoriten.includes(field.id)?'Favorit entfernen: ':'Als Favorit merken: ')+field.name);stern.setAttribute('aria-pressed',String(prefs.favoriten.includes(field.id)));stern.onclick=()=>komfort?.favorit(field.id).catch(e=>toast(e.message,true));row.querySelector('.actions').appendChild(stern);
     row.dataset.field=field.id;
     if(offeneAktionen.has(field.id))row.querySelector('.mehr')?.click();
     host.appendChild(row);
@@ -4133,6 +4143,7 @@ el('btnFeldkarteHier').onclick = () => {
 let jobFelderOffen = null;   // aufgeklappte Felder in der Liste der Arbeiten
 
 function renderJobs(jobs, fields) {
+  if(window.Komfort?.instanz)jobs=window.Komfort.jobsFiltern(jobs,window.Komfort.instanz.jobsfilter());
   const host = el('jobList');
   const offeneExporte=new Set([...host.querySelectorAll('[data-job]')].filter(r=>r.querySelector('.aw-details')?.open).map(r=>r.dataset.job));
   host.innerHTML = '';
@@ -4140,7 +4151,7 @@ function renderJobs(jobs, fields) {
   const zusammen = Arbeitsansicht.summe(jobs);
   const ueber = el('arbeitsUebersicht');
   ueber.replaceChildren(Arbeitsansicht.kennzahlen(document, [
-    ['Gespeicherte Arbeiten', String(zusammen.anzahl)], ['Offene Aufträge', String(zusammen.offen)],
+    ['Arbeiten in Auswahl', String(zusammen.anzahl)], ['Offene Aufträge', String(zusammen.offen)],
     ['Bearbeitet · alle Durchgänge', Arbeitsansicht.zahl(zusammen.flaeche) + ' ha']]));
   // Je Feld ein Abschnitt, die zuletzt bearbeiteten Felder zuerst.
   const gruppen = new Map();
@@ -5192,7 +5203,8 @@ setInterval(() => { if (!el('sheet').hidden) refreshLists(true); }, 5000);
 Bedienung.installieren(document);
 
 /* Tagesübersicht verwendet dieselben Bedienwege und Navigation wie die übrigen Seiten. */
+const komfortAnsicht=window.Komfort.installieren({api,getState:()=>state.live,aktualisieren:()=>refreshLists(),melden:toast,oeffnen:ziel=>{el('sheet').hidden=false;const t=document.querySelector(`.tab[data-tab="${ziel}"]`);if(t)t.onclick();}});
 const arbeitstagAnsicht = window.Arbeitstag.installieren({api, getState: () => state.live,
   oeffnen: ziel => { if(ziel === "kabine"){menueSchliessen(); el("btnJob").focus(); return;} const t = document.querySelector(`.tab[data-tab="${ziel}"]`); if(t)t.onclick(); },
   melden: text => toast(text)});
-document.querySelector('.tab[data-tab="arbeitstag"]').addEventListener('click', () => arbeitstagAnsicht.neuLaden());
+document.querySelector('.tab[data-tab="arbeitstag"]').addEventListener('click', () => {arbeitstagAnsicht.neuLaden();komfortAnsicht.laden().catch(e=>toast(e.message,true));});

@@ -11,6 +11,16 @@
     if(d&&typeof d==='object'&&(d.ok===false||d.gut===false||d.erfolg===false||d.fehler))return null;
     const p=String(url).split('?')[0], a=body&&body.aktion;
     if(p==='/api/settings')return d&&d.gespeichert>0?'Einstellungen gespeichert':null;
+    if(p==='/api/komfort')return 'Bedienvorlieben gespeichert';
+    if(p==='/api/arbeitsstart')return 'Arbeit gestartet – Lenkung bleibt aus';
+    if(p==='/api/arbeitstag/pause')return 'Arbeit pausiert';
+    if(p==='/api/arbeitstag/fortsetzen')return 'Auftrag fortgesetzt – Lenkung bleibt aus';
+    if(/^\/api\/jobs\/[^/]+\/kosten$/.test(p))return 'Verbrauch und Kosten gespeichert';
+    if(/^\/api\/papierkorb\/[^/]+\/wiederherstellen$/.test(p))return 'Arbeit wiederhergestellt';
+    if(p==='/api/ausbau/fahrserie')return a==='abbrechen'?'Messung abgebrochen':'Messung vorbereitet – Fahrbedingungen beachten';
+    if(p==='/api/ausbau/abnahme')return 'Prüfstand bestätigt';
+    if(p==='/api/ausbau/plaene/start')return 'Planprüfung gestartet';
+    if(p==='/api/ausbau/plaene/abbrechen')return 'Abbruch der Planprüfung angefordert';
     if(p==='/api/traktor')return 'Traktorwerte übernommen';
     if(p==='/api/profile')return 'Gerätewerte übernommen';
     if(p==='/api/headland')return 'Vorgewende-Einstellungen übernommen';

@@ -16,6 +16,7 @@
 <link rel="stylesheet" href="style.css">
 <link rel="stylesheet" href="design.css">
 <link rel="stylesheet" href="arbeitstag.css">
+<link rel="stylesheet" href="komfort.css">
 </head>
 <body>
 
@@ -184,6 +185,7 @@
       <button class="taste lenk" id="btnSteer" role="switch" aria-checked="false" aria-label="Lenkung" title="Lenkung"><i></i><svg class="symbol" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="2.6"/><path d="M12 14.6V21M9.5 11.3L3.2 10.2M14.5 11.3l6.3-1.1"/></svg><span><small id="steerText">aus</small></span></button>
     </div>
   </nav>
+  <nav id="komfortSchnell" class="komfort-schnell" aria-label="Persönliche Schnellzugriffe"></nav>
 </main>
 
 <!-- Menü-Ebenen -->
@@ -247,7 +249,7 @@
     </div>
     <div class="panels">
 
-  <section class="tab-panel" data-panel="arbeitstag" hidden><div id="arbeitstagInhalt"></div></section>
+  <section class="tab-panel" data-panel="arbeitstag" hidden><div id="komfortInhalt"></div><details class="komfort-gruppe"><summary>Weitere Tagesprüfungen &amp; Verlauf</summary><div id="arbeitstagInhalt"></div></details></section>
   <section class="tab-panel" data-panel="fields">
     <div class="row">
       <input id="newFieldName" placeholder="Name des Feldes, z.B. Oberes Feld">
@@ -300,6 +302,7 @@
         <button id="btnFeldkarteLaden" class="primary">Laden</button>
       </div>
     </div>
+    <div class="komfort-filter"><label>Feld suchen<input id="komfortFeldSuche" type="search" placeholder="Feldname"></label><label class="komfort-check"><input id="komfortNurFavoriten" type="checkbox">Nur Favoriten</label><span class="note">Zuletzt verwendete Felder stehen zuerst.</span></div>
     <div class="list" id="fieldList"></div>
   </section>
 
@@ -354,6 +357,7 @@
         Abgleich an alle Geräte. Eine laufende Arbeit wird nie gelöscht.</p>
     </details>
     <div id="arbeitsUebersicht"></div>
+    <div class="komfort-filter"><label>Tätigkeit oder Maschine<input id="komfortJobSuche" type="search"></label><label>Feld<select id="komfortJobFeld"><option value="">Alle Felder</option></select></label><label>Status<select id="komfortJobStatus"><option value="">Alle Arbeiten</option><option value="offen">Offene Aufträge</option><option value="pausiert">Pausiert</option><option value="fertig">Abgeschlossen</option></select></label><label>Von<input id="komfortJobVon" type="date"></label><label>Bis<input id="komfortJobBis" type="date"></label></div>
     <div class="list" id="jobList"></div>
     <div class="row">
       <button id="btnJobsAlleLoeschen" class="danger abgesetzt" hidden>Alle Arbeiten löschen</button>
@@ -1204,6 +1208,7 @@
 <script src="umriss.js"></script>
 <script src="rueckmeldung.js"></script>
 <script src="arbeitsansicht.js"></script>
+<script src="komfort.js"></script>
 <script src="app.js"></script>
 <script>
   /* Nur fuer die Kachel auf dem Android-Tablet. Browser lassen Service Worker

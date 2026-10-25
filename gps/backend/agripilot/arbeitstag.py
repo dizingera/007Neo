@@ -14,9 +14,9 @@ def im_stand(engine):
     if engine.steering and engine.steering.armed:
         raise RuntimeError("Erst die Lenkung ausschalten")
     fix = engine.fix
-    if fix is None or not fix.valid or not fix.received_at or time.time()-fix.received_at > 2:
+    if fix is None or not fix.valid or not fix.received_at or not math.isfinite(fix.received_at) or not 0 <= time.time()-fix.received_at <= 2:
         raise RuntimeError("Frische Position zum Prüfen des Stillstands erforderlich")
-    if abs(fix.speed_ms) > .15:
+    if not math.isfinite(fix.speed_ms) or abs(fix.speed_ms) > .15:
         raise RuntimeError("Die Maschine muss stehen")
 
 
@@ -154,10 +154,15 @@ def fortsetzen(engine, job_id):
     if j.get("line_id"): engine.load_line(j["line_id"])
     engine._last_track_point = None
     engine._last_update_at = None
+    engine.tool_position = None
+    engine.implement_position = None
+    engine._genau_at = None
     engine._tb_ventil = []
     engine.genauigkeit.zuruecksetzen(engine.steering.abgaben if engine.steering else 0,
                                    engine.steering.abgabe_gruende if engine.steering else None)
+    j = engine.store.arbeitsstatus_setzen(job_id, pausiert=False)
     engine.job = j
+    engine.paused_job = None
     engine.coverage = coverage
     engine.coverage.applied_area_m2 += (j.get("overlap_ha") or 0)*10000
     engine.distance_m = j.get("distance_m") or 0
@@ -166,3 +171,35 @@ def fortsetzen(engine, job_id):
     engine._remember_session()
     engine.note("Offene Arbeit fortgesetzt; Lenkung bleibt aus")
     return j
+
+
+def pausieren(engine):
+    """Nur Aufzeichnung anhalten; Lenkung weder ausschalten noch freigeben.
+
+    Darf wie das bisherige Beenden auch während der Fahrt die Aufzeichnung
+    stoppen. Fortsetzen und Wiederherstellen brauchen frischen Stillstand.
+    """
+    return engine.pause_job()
+
+
+def papierkorb(store, device_id=None):
+    jobs = store.list_deleted_jobs(device_id)
+    namen = {f["id"]: f["name"] for f in store.list_fields()}
+    for job in jobs:
+        job["feld"] = namen.get(job["field_id"], "Gelöschtes Feld")
+        job["wiederherstellbar"] = job["field_id"] in namen
+    return {"jobs": jobs, "hinweis": "Nur seit Einführung des Papierkorbs erhaltene Löschungen. Wiederherstellen startet keine Arbeit."}
+
+
+def wiederherstellen(engine, job_id):
+    im_stand(engine)
+    job = engine.store.get_job(job_id)
+    if not job or job["device_id"] != engine.config.network.device_id:
+        raise RuntimeError("Diese Arbeit gehört zu einem anderen Gerät oder fehlt")
+    if engine.job is not None:
+        raise RuntimeError("Erst die laufende Arbeit pausieren oder beenden")
+    job = engine.store.restore_job(job_id)
+    if job["pausiert"]:
+        engine.paused_job = job
+    engine.note("Arbeit wiederhergestellt; Aufzeichnung bleibt angehalten")
+    return job

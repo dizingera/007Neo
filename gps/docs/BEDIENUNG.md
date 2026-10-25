@@ -2240,3 +2240,27 @@ Die Meldung erscheint erst nach einer angenommenen Antwort des Geräts beziehung
 ## Arbeits- und Feldübersicht (1.5.103)
 
 Arbeiten erscheinen als lesbare Karten je Feld. Status, Tätigkeit, Datum, Fläche, Arbeitsdauer, Strecke und Überlappung sind getrennt dargestellt. Export und weitere Aktionen lassen sich bei Bedarf aufklappen. Offen bedeutet gespeicherter, noch nicht abgeschlossener Auftrag; nur der aktuell aktive Auftrag heißt In Arbeit. Die Flächensumme über mehrere Durchgänge ist ausdrücklich kein Fertigstellungsgrad des Feldes. Felder zeigen einen kleinen Umriss ihrer Grenze und den Ladezustand. Im Arbeitstag steht die aktuelle Feldarbeit direkt oben.
+
+
+## Arbeitszentrale und Ausbau 1–16 (1.5.104)
+
+Unter **Arbeitstag** steht die Arbeitszentrale. Nur der Arbeitsstart ist anfangs aufgeklappt; weitere Bereiche öffnen sich bei Bedarf. Die bisherigen Tagesprüfungen und der Verlauf liegen darunter zusammengefasst.
+
+1. **Geführte Probefahrt:** Geradeausfahrt, langsame Fahrt, Arbeitsgeschwindigkeit, Hang und Wiederanfahrt jeweils mit vorhandener 30-Sekunden-Vorher/Nachher-Messung vergleichen. Strecke und Hinweise vor jeder Messung bestätigen. Lenkung und Geschwindigkeit bedient der Fahrer. Die Wiederanfahrt misst den stabilen Abschnitt nach manuellem Anfahren. Übungen und reale Ergebnisse bleiben getrennt.
+2. **Alle gespeicherten Saatpläne prüfen:** Entwürfe und gespeicherte Saisonplanspuren werden mit ihrer gespeicherten Breite im Hintergrund geprüft. Fortschritt, Befunde und Kartenpunkte sind sichtbar; die Prüfung lässt sich abbrechen. Begrenzte oder unvollständige Prüfungen sind gekennzeichnet. Sie sind keine vollständige Fahrbarkeits- oder Kollisionsfreigabe.
+3. **Arbeitsstart:** Feld, vorhandenen Traktor und Gerät sowie Tätigkeit wählen. Die eingetragene Arbeitsbreite steht in der Zusammenfassung und muss geprüft werden. Erst Arbeit starten beginnt die Aufzeichnung; die Lenkung bleibt ausgeschaltet.
+4. **Restfläche je Arbeitsgang:** In der Feldchronik einen Arbeitsgang wählen. Bearbeitete Rasterzellen werden an der Feldgrenze beschnitten; die Summe mehrerer Durchgänge ist kein Feldfortschritt. Alte Karten enthalten keine räumliche Überlappungshistorie. Begrenzte Kartendarstellung ist als unbekannt gekennzeichnet; vollständige berechnete Flächen können trotzdem vorliegen.
+5. **Pause:** Arbeit pausieren hält die Aufzeichnung an, erhält dieselbe ID und beendet den Auftrag nicht. Sie bleibt nach Neustart pausiert. Zum Fortsetzen denselben offenen eigenen Auftrag auswählen, passendes Gespann herstellen und im Stand ausdrücklich fortsetzen. Pausieren ist kein Abschalten der Lenkung; die Lenkung hat ihre eigene Taste.
+6. **Suche und Favoriten:** Felder nach Namen suchen, mit Stern merken und auf Favoriten begrenzen. Zuletzt geladene Felder stehen zuerst. Arbeiten nach Feld, Tätigkeit/Maschine, Zeitraum und Status einschließlich Pause filtern.
+7. **Papierkorb:** Neu gelöschte Arbeiten behalten Raster und lokale Spurpunkte. Im Papierkorb am ursprünglichen Gerät wiederherstellen; Aufzeichnung startet dadurch nicht. Bereits früher endgültig entfernte Daten werden nicht nachträglich rekonstruiert. Wiederherstellungsstände werden gegen ältere Löschvermerke abgeglichen.
+8. **Gespann-Prüfstand:** Aktuelle reale Vergleichsmessungen und ausdrückliche Fahrerbestätigung kennzeichnen den geprüften Stand. Relevante Änderungen an Gespann, Regler, Sensor-/Motoranbindung oder Kalibrierung machen ihn veraltet. Ein Simulator kann keine reale Abnahme erhalten. Diese Kennzeichnung ersetzt keine Sicherheitsfreigabe.
+9. **Feldchronik:** Feld und Saison wählen; Tätigkeiten, Zeitpunkt, Status, Fläche und Gerät erscheinen als Zeitstrahl.
+10. **PDF-Feldbericht:** Gewähltes Feld und Saison als druckbaren Bericht mit echtem Feldumriss, Arbeitsgängen, Kennzahlen und optionalen Kosten herunterladen. CSV bleibt zusätzlich vorhanden.
+11. **Verbrauch und Kosten:** Dieselmenge und -preis, Betriebsmittel gesamt und Arbeitskosten pro Stunde manuell eintragen. Leere Angaben bleiben unbekannt. Gesamtkosten und Kosten je Hektar sind aus diesen Angaben berechnet und als Schätzung gekennzeichnet. Kosten werden beim Datenabgleich mitgeführt; die Eingabe erfolgt am ursprünglichen Gerät im Stand.
+12. **Tätigkeitsvorlagen:** Vorhandene Startauswahl mit Bezeichnung speichern. Die Vorlage schlägt vorhandene Maschinen vor, verändert aber keine Arbeitsbreite. Vorlagen können entfernt werden.
+13. **Restzeit:** Eine Schätzung erscheint erst mit ausreichender gespeicherter Flächenabdeckung und mindestens zwei Minuten aufgezeichneter Arbeitszeit. Sie ist keine Zusage für die tatsächliche Dauer; Randbedingungen und Wendemanöver können sie verändern.
+14. **Änderungsvorschau:** Beim Übernehmen von Geräte-, Traktor- und Systemeinstellungen zeigt ein Dialog Bisher/Neu. Erst Änderungen übernehmen speichert. Geschützte Werte bleiben maskiert. Zwischenzeitlich geänderte Stände werden zurückgewiesen.
+15. **Schnellzugriffe:** Im Stand bis zu drei unterschiedliche Menüzugriffe wählen. Sie erscheinen direkt in der Kabine. Favoriten, Vorlagen und Schnellzugriffe gehören zu diesem Gerät.
+16. **Verbindungsverlauf:** GPS, RTK, IMU und Master-Abgleich werden getrennt mit Zeitpunkten protokolliert. Ausfälle zwischen Neustarts oder ohne Beobachtung bleiben unbekannt; der Verlauf ist keine lückenlose Rohdatenaufzeichnung.
+
+Die vorgeschlagenen Punkte17–22 sind nicht Teil dieser Version. Eine reale Probefahrt und physische Kabinenabnahme sind durch Softwaretests nicht ersetzt.

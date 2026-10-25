@@ -212,6 +212,7 @@ class Engine:
         verwaist = store.close_orphan_jobs(
             config.network.device_id,
             self._resumable_job["id"] if self._resumable_job else None)
+        self.paused_job = store.find_paused_job(config.network.device_id)
         self._checkpoint_at = 0.0
         self._kurs_warnung = ""
         self.feld_vorschlag: Optional[dict] = None
@@ -2085,6 +2086,18 @@ class Engine:
             raise RuntimeError("Kein Feld ausgewählt")
         if self.job is not None:
             return self.job
+        self.coverage = CoverageMap(cell_size=0.5)
+        # Aufzeichnung und Navigationsgeometrie sind getrennt: eine neue
+        # Arbeit darf die aktuelle GPS-/Geräteposition nicht verschwinden
+        # lassen (Wendeplanung und der erste echte Arbeitsstreifen nutzen sie).
+        # Nur ein alter/ungültiger Zeitanker darf keine neue Fläche verbinden.
+        fix = self.fix
+        if (fix is None or not fix.valid or not fix.received_at
+                or not math.isfinite(fix.received_at)
+                or not 0 <= time.time() - fix.received_at <= GPS_STILLSTAND_S):
+            self._last_update_at = None
+        self._genau_at = None
+        self._last_track_point = None
         self._tb_ventil = []              # neue Arbeit: Ventile ab dem jetzigen Befehl
         self.job = self.store.start_job(
             self.field["id"], self.config.network.device_id,
@@ -2101,6 +2114,33 @@ class Engine:
         self._checkpoint_at = time.time()
         self._remember_session()
         return self.job
+
+    def pause_job(self) -> dict:
+        if self.job is None:
+            raise RuntimeError("Keine laufende Arbeit zum Pausieren")
+        if self.job["device_id"] != self.config.network.device_id:
+            raise RuntimeError("Diese Arbeit gehört zu einem anderen Gerät")
+        self._flush_track(force=True)
+        self.warte_auf_sicherung()
+        # Explizite Bedienaktion: Schreibfehler vor der Erfolgsantwort melden,
+        # statt nur eine Hintergrund-Checkpoint-Meldung zu hinterlassen.
+        self.store.update_job(
+            self.job["id"], distance_m=self.distance_m,
+            area_ha=self.coverage.area_ha,
+            overlap_ha=self.coverage.overlap_m2 / 10_000.0,
+            working_time_s=self.working_time_s, coverage=self.coverage.pack(),
+            genauigkeit=self._genauigkeit_json())
+        job = self.store.arbeitsstatus_setzen(self.job["id"], pausiert=True)
+        self.job = None
+        self.paused_job = job
+        self._last_track_point = None
+        self._last_update_at = None
+        self._tb_ventil = []
+        if self.teilbreiten is not None:
+            self.teilbreiten.wunsch(0, min(32, len(self.sections)))
+        self._remember_session()
+        self.note("Arbeit pausiert; zum Weiterarbeiten ausdrücklich fortsetzen")
+        return job
 
     def stop_job(self) -> Optional[dict]:
         if self.job is None:
@@ -2752,6 +2792,7 @@ class Engine:
             "auto_sections": self.auto_sections,
             "teilbreiten_modus": self.teilbreiten_modus,
             "teilbreiten_vorlauf": self.teilbreiten_vorlauf(),
+            "pausierte_arbeit": self.paused_job,
             "job": {
                 **self.job,
                 "area_ha": self.coverage.area_ha,

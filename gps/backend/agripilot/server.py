@@ -299,6 +299,7 @@ class Application:
         await self.teilbreiten.start()
         self.tasks.append(asyncio.create_task(self._broadcast_loop()))
         self.tasks.append(asyncio.create_task(self._backup_loop()))
+        if getattr(self,"diagnose16",None):self.tasks.append(asyncio.create_task(self._diagnose16_loop()))
         if self.config.server.update_online and update_module.als_programm():
             self.tasks.append(asyncio.create_task(self._online_loop()))
 
@@ -454,6 +455,7 @@ class Application:
             await self.relay.stop()
         for task in self.tasks + self._quellen_tasks + self._korrektur_tasks:
             task.cancel()
+        if getattr(self,"diagnose16",None):await asyncio.to_thread(self.diagnose16.schliessen)
         self.store.close()
 
     def korrektur_status(self) -> dict:
@@ -515,6 +517,16 @@ class Application:
 
     # -- live broadcast ---------------------------------------------------
 
+    async def _diagnose16_loop(self) -> None:
+        while True:
+            await asyncio.sleep(1)
+            try:self.diagnose16.beobachten()
+            except (ValueError,RuntimeError,OSError,sqlite3.Error):
+                jetzt=time.monotonic()
+                if jetzt-getattr(self,'_diagnose16_fehler',-100)>30:
+                    self._diagnose16_fehler=jetzt
+                    self.engine.note('Diagnoseverlauf nicht gespeichert – Überwachung läuft weiter')
+
     async def _broadcast_loop(self) -> None:
         interval = 1.0 / max(1.0, self.config.server.update_hz)
         while True:
@@ -548,18 +560,24 @@ class Application:
                 self.engine.coverage.drain_new_cells()
                 self.engine.coverage.drain_fremde_zellen()
                 continue
-            message = json.dumps({
-                "type": "state",
-                **self.engine.state(),
-                "system": self.system_status(),
-                "new_cells": self.engine.coverage.drain_new_cells(),
-                "fremde_zellen": self.engine.coverage.drain_fremde_zellen(),
-            })
+            message = json.dumps(self._live_message())
             for websocket in list(self.clients):
                 try:
                     await websocket.send_text(message)
                 except Exception:  # noqa: BLE001
                     self.clients.discard(websocket)
+
+    def _live_message(self):
+        # Eine neue/fortgesetzte Arbeit ersetzt das Raster. Zuwachszellen allein
+        # könnten die Anzeige des vorherigen Auftrags nicht entfernen.
+        neu=getattr(self,'_gesendete_karte',None) is not self.engine.coverage
+        bild={'type':'init' if neu else 'state',**self.engine.state(),
+              'system':self.system_status(),
+              'new_cells':self.engine.coverage.drain_new_cells(),
+              'fremde_zellen':self.engine.coverage.drain_fremde_zellen()}
+        if neu:bild['cells']=self.engine.coverage.cells_for_display()
+        self._gesendete_karte=self.engine.coverage
+        return bild
 
     def checklist_input(self) -> dict:
         """Das Wenige, das die Beobachtung braucht - zehnmal je Sekunde.
@@ -689,6 +707,8 @@ def create_app(config=None) -> FastAPI:
 
     from . import betrieb_api
     betrieb_api.einbauen(api, application, ok, guard)
+    from . import ausbau_api
+    ausbau_api.einbauen(api, application, ok, guard)
 
     # -- live state -------------------------------------------------------
 
@@ -759,6 +779,9 @@ def create_app(config=None) -> FastAPI:
     @api.post("/api/fields/{field_id}/load")
     async def load_field(field_id: str, with_coverage: bool = True):
         result = guard(engine.load_field, field_id)
+        if isinstance(result,JSONResponse) and result.status_code>=400:return result
+        from .arbeitskomfort import besucht
+        besucht(store,field_id)
         if with_coverage:
             # Pick up what has already been worked here today, including work
             # another tractor synced over - that is the point of the master.
@@ -1129,7 +1152,11 @@ def create_app(config=None) -> FastAPI:
     @api.post("/api/profile")
     async def update_profile(payload: dict = Body(...)):
         from dataclasses import asdict
-        return guard(lambda: asdict(engine.update_profile(payload)))
+        def aendern():
+            from .arbeitskomfort import vorschau_pruefen
+            vorschau_pruefen(application,'/api/profile',payload)
+            return asdict(engine.update_profile({k:v for k,v in payload.items() if k!='_vorschau'}))
+        return guard(aendern)
 
     @api.get("/api/profiles")
     async def list_profiles() -> list[dict]:
@@ -1175,6 +1202,8 @@ def create_app(config=None) -> FastAPI:
         """Den gewählten Traktor ändern: Name, Antenne, Lenkung - und Bauform: wird er
         zum Mähdrescher, kommt das Schneidwerk als Gerät gleich mit."""
         def aendern():
+            from .arbeitskomfort import vorschau_pruefen
+            vorschau_pruefen(application,'/api/traktor',payload)
             erwartet = payload.get("erwartete_traktor_id")
             if erwartet is not None and erwartet != engine.aktiver_traktor()["id"]:
                 raise ValueError("Traktor wurde gewechselt – Lenkregler neu laden")
@@ -1726,6 +1755,9 @@ def create_app(config=None) -> FastAPI:
 
     @api.post("/api/settings")
     async def post_settings(payload: dict = Body(...)):
+        from .arbeitskomfort import vorschau_pruefen
+        try:vorschau_pruefen(application,'/api/settings',payload)
+        except ValueError as exc:raise HTTPException(409,str(exc)) from exc
         """Geänderte Werte prüfen, setzen und in die Konfigurationsdatei schreiben.
 
         Erst prüfen, dann setzen: eine halb übernommene Konfiguration wäre

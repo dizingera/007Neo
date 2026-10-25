@@ -80,3 +80,13 @@ test('Genauere Bestätigung während Alarm wird nur einmal nach der Quittierung 
  assert.equal(u.inhalt(),'Störung');u.box.children[2].onclick();
  assert.equal(u.inhalt(),'Motorstärke 60 % übernommen');u.flush(6000);assert.equal(u.box.hidden,true);
 });
+
+
+// Neue Bedienwege benötigen ebenso eine angenommene Antwort.
+test('Arbeitszentrale bestätigt angenommene Aktionen und keine abgewiesene Messung',()=>{
+ const R=require('../rueckmeldung.js');
+ assert.equal(R.erfolgstext('POST','/api/arbeitstag/pause',{}, {ok:true,data:{pausiert:true}}),'Arbeit pausiert');
+ assert.equal(R.erfolgstext('POST','/api/ausbau/fahrserie',{aktion:'vorher'}, {ok:false}),null);
+ assert.match(R.erfolgstext('POST','/api/ausbau/fahrserie',{aktion:'vorher'}, {ok:true,data:{}}),/vorbereitet/);
+ assert.equal(R.erfolgstext('GET','/api/ausbau/diagnose',null,{ok:true,data:{}}),null);
+});
