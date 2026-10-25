@@ -14,15 +14,64 @@ legen (Pfade stehen in Menü → Daten & Geräte).
 
 from __future__ import annotations
 
+import shutil
 import sqlite3
 import tempfile
 import time
 import zipfile
+import zlib
 from pathlib import Path
 from typing import Optional
 
 PREFIX = "agripilot-"
 SUFFIX = ".zip"
+
+
+def pruefen(pfad: Path) -> dict:
+    """ZIP isoliert prüfen, ohne produktive Daten oder Konfiguration anzufassen.
+
+    Nur der eindeutig benannte Datenbankeintrag wird auf einen selbst gewählten
+    temporären Pfad gestreamt. Archivpfade werden niemals entpackt. Zählungen
+    enthalten aktive Datensätze; gelöschte Synchronisationsstände zählen nicht.
+    """
+    ergebnis = {"ok": False, "fehler": "", "zeit": time.time(),
+                "felder": 0, "auftraege": 0}
+    try:
+        with tempfile.TemporaryDirectory() as arbeit:
+            kopie = Path(arbeit) / "pruefung.db"
+            with zipfile.ZipFile(pfad) as archiv:
+                eintraege = [i for i in archiv.infolist()
+                             if i.filename == "agripilot.db"]
+                if len(eintraege) != 1 or eintraege[0].is_dir():
+                    raise ValueError("agripilot.db fehlt oder ist mehrfach vorhanden")
+                # Streamen statt extract/extractall: auch fremde Pfade und
+                # Konfigurationseinträge im ZIP werden nicht geschrieben/gelesen.
+                with archiv.open(eintraege[0]) as quelle, kopie.open("wb") as ziel:
+                    shutil.copyfileobj(quelle, ziel)
+            verbindung = sqlite3.connect(kopie.as_uri() + "?mode=ro", uri=True)
+            try:
+                verbindung.execute("PRAGMA query_only = ON")
+                verbindung.execute("PRAGMA trusted_schema = OFF")
+                if verbindung.execute("PRAGMA integrity_check").fetchall() != [("ok",)]:
+                    raise ValueError("SQLite-Integritätsprüfung fehlgeschlagen")
+                tabellen = {r[0] for r in verbindung.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table'")}
+                erwartet = {"fields", "lines", "jobs", "track_points", "devices", "settings"}
+                if not erwartet.issubset(tabellen):
+                    raise ValueError("Erwartete AgriPilot-Tabellen fehlen")
+                felder = verbindung.execute(
+                    "SELECT COUNT(*) FROM fields WHERE deleted = 0").fetchone()[0]
+                auftraege = verbindung.execute(
+                    "SELECT COUNT(*) FROM jobs WHERE deleted = 0").fetchone()[0]
+                ergebnis.update(ok=True, felder=felder, auftraege=auftraege)
+            finally:
+                verbindung.close()
+    except (OSError, sqlite3.Error, zipfile.BadZipFile, RuntimeError,
+            ValueError, EOFError, NotImplementedError, zlib.error):
+        # Keine SQLite-/Archivmeldungen übernehmen: manipulierte Namen oder
+        # Dateiinhalte dürfen nicht versehentlich im Status landen.
+        ergebnis["fehler"] = "Sicherung nicht lesbar, beschädigt oder keine AgriPilot-Datenbank"
+    return ergebnis
 
 
 def sichern(db_path: Path, config_path: Optional[Path], ziele: list[Path],
@@ -47,6 +96,14 @@ def sichern(db_path: Path, config_path: Optional[Path], ziele: list[Path],
                 archiv.write(config_path, "config.yaml")
         groesse = zip_pfad.stat().st_size
         ergebnis["bytes"] = groesse
+        ergebnis["pruefung"] = pruefen(zip_pfad)
+        if not ergebnis["pruefung"]["ok"]:
+            ergebnis["ok"] = False
+            ergebnis["fehler"] = ergebnis["pruefung"]["fehler"]
+            ergebnis["ziele"] = [
+                {"ordner": str(ziel), "ok": False,
+                 "fehler": ergebnis["fehler"]} for ziel in ziele]
+            return ergebnis
         for ziel in ziele:
             eintrag = {"ordner": str(ziel), "ok": False, "fehler": ""}
             try:

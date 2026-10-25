@@ -713,6 +713,8 @@ def dienst() -> int:
 
 def main(argv: Optional[list[str]] = None) -> int:
     parser = argparse.ArgumentParser(prog="AgriPilot")
+    parser.add_argument("--uebung", action="store_true", help="Getrennte Übung ohne Hardware starten")
+    parser.add_argument("--uebungsdaten", default="")
     parser.add_argument("--dienst", action="store_true", help="Programm starten (so startet es Windows)")
     parser.add_argument("--installieren", action="store_true", help="einrichten (Standard bei Doppelklick)")
     parser.add_argument("--ziel", default=STANDARD_ZIEL)
@@ -733,6 +735,9 @@ def main(argv: Optional[list[str]] = None) -> int:
                         help="beim Deinstallieren mit --still auch Felder, Spuren und Einstellungen löschen")
     parser.add_argument("--version", action="store_true")
     args = parser.parse_args(argv)
+    if args.uebung:
+        from .uebung import main as uebung_main
+        return uebung_main(args.uebungsdaten or None)
     if args.version:
         from . import __version__
         print(__version__)

@@ -109,6 +109,9 @@ function onState(data) {
   lenkAufzeichnung.aufnehmen(data);
   glaettungNachfuehren(previous, data);
   state.live = data;
+  if (window.Arbeitstag) window.Arbeitstag.aktualisieren(data);
+  if (el("uebungsKennzeichen")) el("uebungsKennzeichen").hidden = !(data.system && data.system.uebung);
+  if (typeof updateErfolgPruefen === "function") updateErfolgPruefen(data);
   // Erst den Streifen bis zur neuen Lage malen, dann die Zellen dieser Fahrt
   // merken - sonst hielte er seine eigene Spur für eine Überlappung.
   const jetzt = performance.now();
@@ -1118,6 +1121,7 @@ function drawVehicle() {
     geraetZeichnen(s, profil, implement, geraetRechts, geraetVor);
     traktorZeichnen(profil);
   }
+  if (window.Umriss) window.Umriss.zeichnen(ctx, profil, [geraetRechts, geraetVor, implement.heading], state.view.scale, s.field && s.field.boundary, pose);
   ctx.restore();
 }
 
@@ -2787,6 +2791,15 @@ el('autoSections').onchange = (event) =>
 
 /* Aktualisierung: Paket einspielen, aus dem Repo holen, neu starten, zurück. */
 let updateVersion = '';
+function updateErfolgPruefen(s) {
+  let erwartet; try { erwartet = localStorage.getItem('agripilot.update-erwartet'); } catch (_) {}
+  if (!erwartet || !s.system) return;
+  if (s.system.version === erwartet) {
+    try { localStorage.removeItem('agripilot.update-erwartet'); } catch (_) {}
+    el('updateOnlineInfo').textContent = `Update abgeschlossen: Version ${erwartet} läuft und antwortet.`;
+    toast(`Update abgeschlossen – Version ${erwartet} läuft`);
+  }
+}
 async function renderUpdate() {
   try {
     const stand = await (await fetch('/api/update')).json();
@@ -2879,6 +2892,7 @@ async function onlineEinspielen(neu) {
   const antwort = await api('POST', '/api/update/online');
   if (!antwort) { info.textContent = ''; return; }
   if (antwort.data.schon_aktuell) { info.textContent = 'Schon auf dem neuesten Stand.'; return; }
+  try { localStorage.setItem('agripilot.update-erwartet', antwort.data.version); } catch (_) {}
   info.textContent = `Version ${antwort.data.version} wird eingespielt. Das Programm startet neu - ` +
     'diese Seite verbindet sich von selbst wieder (etwa eine Minute).';
   el('btnUpdateHaupt').hidden = true;
@@ -5013,3 +5027,9 @@ menueAusAdresse();
 setInterval(() => { if (!el('sheet').hidden) refreshLists(true); }, 5000);
 
 Bedienung.installieren(document);
+
+/* Tagesübersicht verwendet dieselben Bedienwege und Navigation wie die übrigen Seiten. */
+const arbeitstagAnsicht = window.Arbeitstag.installieren({api, getState: () => state.live,
+  oeffnen: ziel => { if(ziel === "kabine"){menueSchliessen(); el("btnJob").focus(); return;} const t = document.querySelector(`.tab[data-tab="${ziel}"]`); if(t)t.onclick(); },
+  melden: text => toast(text)});
+document.querySelector('.tab[data-tab="arbeitstag"]').addEventListener('click', () => arbeitstagAnsicht.neuLaden());

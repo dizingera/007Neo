@@ -2093,3 +2093,77 @@ Wege zu den Fahrreglern. Motorprüfung, Radmitte, Traktormaße, Kalibrierung und
 Hardwarewerte stehen gesammelt unter Werkstatt → Lenkwerkstatt. Die Suche führt
 auch dorthin und öffnet passende Gruppen. Motor sofort anhalten ist auf beiden
 Lenkseiten erreichbar. Der Update-Knopf bleibt oben sichtbar.
+
+
+## Arbeitstag – Start, Verlauf und Abschluss (1.5.100)
+
+Unter **Feldarbeit → Arbeitstag** stehen Tagesstart, Archiv und Verlauf in drei
+aufklappbaren Gruppen. Die kompakten Anzeigen oben trennen GPS, IMU, Motor,
+Gespann und Spur. Die darunter stehende RTK-Prüfung verlangt ebenfalls frische
+Positionsdaten. Ein Anzeigeausgang ist kein angeschlossener Lenkmotor. Die Seite
+zeigt Bereitschaftshinweise; die bisherige Einbauprüfung und Lenkfreigabe gelten weiter.
+
+**Gespann prüfen** zeigt Traktor, Gerät, Bauform, Front-/Heckanbau, Arbeitsbreite,
+Versatz, Antennenmaße und gemessene Ausdehnungen zusammen. Ein Mähdrescher nutzt
+seine bereits vorhandene Bauform und ein Schneidwerk vorne. Arbeitsbreiten trägt
+der Betreiber ein. Die gestrichelten Gespannrechtecke auf der Fahrkarte nutzen die
+gemessenen Maße; ohne vollständige Maße werden sie nicht erfunden. Orange markiert
+einen außerhalb liegenden Rechteckstützpunkt. Das ist keine Kollisionsvermeidung
+und keine vollständige Überstandsprüfung zwischen den Stützpunkten.
+
+**Offline-Bereitschaft & Feldeinstieg:** Feld und Spur bleiben gerätelokal nutzbar.
+Luftbilder sind davon getrennt und können fehlen; RTK hat seine eigene Verbindung.
+Eine Einfahrt lässt sich mit frischer Position im Stillstand speichern oder löschen.
+Die kleine Karte zeigt Einfahrt und Spuranfang, daneben steht die Startrichtung.
+Diese Orientierung ist keine automatische Straßenführung.
+
+**Feldplan prüfen** arbeitet mit dem gespeicherten Plan und markiert Kreuzungen
+Hauptfeld/Vorgewende, deutlich zu enge parallele Runden, geprüfte Punkte außerhalb
+der Grenze und kurze Hauptfeldstücke. Bestehende Rand-/Reststreifenhinweise bleiben
+erhalten. Fehlende Daten und Aufwandsgrenzen werden als unvollständige Prüfung
+angezeigt. Eine vollständige Restflächen-, Maschinenhüllen- oder Wendeverbindungs-
+prüfung wird damit nicht behauptet; für geplante Wenden gilt die vorhandene
+Gespannprüfung. Ein Feldwechsel verwirft veraltete Planantworten.
+
+**Arbeitsabschluss & Saisonarchiv:** Die laufende Arbeit zeigt Fläche, Überlappung,
+Strecke und Arbeitszeit. Zur Arbeitsansicht führt zurück zum Markieren-Schalter.
+Offene eigene Arbeiten können im Stillstand bei ausgeschalteter Lenkung und
+passendem Gespann fortgesetzt werden. Abgeschlossene oder fremde Arbeiten werden
+nicht wieder geöffnet. Das Archiv filtert nach Jahr und exportiert einen CSV-
+Feldbericht. Die Flächensumme zählt mehrere Arbeitsgänge mehrfach, keine unbekannten
+Fehlstellen als gemessen ausweisen.
+
+**Unterbrechungen & Einstellungen:** Das Betriebsbuch speichert Zustandswechsel
+statt jeden Messzyklus: Pause, ausgeschaltet oder Störung mit Grund, Zeitpunkt,
+Dauer und verfügbaren Messwerten. Enden nach einem Prozessabbruch bleiben unbekannt.
+Profil-/Reglerwerte und ausgewählte Motorwerte erhalten vorher/nachher, Quelle und
+Gespannbezug. Wiederherstellen geht nur mit passendem Gespann im Stillstand ohne
+laufende Arbeit und ohne Lenkfreigabe. Der Wiederherstellungsvorgang bleibt im Verlauf.
+
+**Abgleich:** Grenzverlauf, gespeicherte Einfahrt und Vergleichsberichte werden
+zusätzlich abgeglichen. Fremde Berichte überschreiben den eigenen Bericht nicht.
+Eine gelöschte Einfahrt bleibt gegenüber älteren Wiederholungen gelöscht. Parallel
+geänderte Felder, Spuren und Aufträge werden mit beiden Fassungen im lokalen
+Konfliktarchiv gesichert; der bisherige neuere Stand bleibt zunächst wirksam.
+Die Oberfläche bietet eine bewusste Auswahl. Wurde der Datensatz inzwischen erneut
+geändert, wird eine veraltete Konfliktauflösung abgelehnt. Vereinigte bearbeitete
+Flächen bleiben bei der Metadatenauswahl erhalten.
+
+**Sicherungen prüfen:** Jede neue Sicherung wird vor Verteilung isoliert als SQLite-
+Datenbank geprüft. Erst ein positives Ergebnis wird veröffentlicht. Im Arbeitstag
+kann die neueste vorhandene Sicherung nochmals gelesen und geprüft werden; echte
+Daten werden dabei nicht ersetzt. Prüfzeit und Inhaltszahlen bleiben gespeichert.
+Der Online-Updateabschluss wird erst nach einer Antwort der erwarteten neuen Version
+angezeigt.
+
+**Große Tasten** speichert die Kabinenansicht auf diesem Browser. Der Updateknopf
+bleibt oben erreichbar; die bestehende Tag-/Nachtansicht bleibt nutzbar. Eine echte
+Prüfung bei Sonne, mit Handschuhen und Erschütterung ist am Traktor durchzuführen.
+
+**Getrennte Übung öffnen** startet am PC eine eigene lokale Instanz mit eigenem
+Datenordner und synthetischem Beispielfeld. Sie verwendet Simulator, keine echten
+Motor-/Teilbreitenausgänge und keinen Abgleich. Hardwareeinstellungen und Änderungen
+am gemeinsamen Programmstand sind dort gesperrt. Eine deutliche Übungskennzeichnung
+bleibt auf der Fahransicht. Von einem entfernten Tablet wird der lokale PC-Start
+nicht ausgelöst. Echte Vergleichsfahrt und Rohdatenaufzeichnung bleiben verlinkt;
+eine reale Fahrabnahme ersetzt der Übungsmodus nicht.

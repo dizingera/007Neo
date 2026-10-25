@@ -1,0 +1,44 @@
+/* Ausschließlich Arbeitstag; verwendet die vorhandenen Tag-/Nachtfarben. */
+.sheet #arbeitstagInhalt { color: var(--text); font: inherit; }
+.sheet .arbeitstag .at-kopf, .sheet .arbeitstag .at-aktionen { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; }
+.sheet .arbeitstag .at-kopf h2 { flex: 1; margin: 0; }
+.sheet .arbeitstag button, .sheet .arbeitstag select, .sheet .arbeitstag summary, .sheet .arbeitstag .at-link, .sheet .arbeitstag .at-kabine { min-height: 48px; box-sizing: border-box; }
+.sheet .arbeitstag button, .sheet .arbeitstag select, .sheet .arbeitstag .at-link { font: inherit; font-weight: 600; padding: 12px 16px; border: 2px solid var(--line); border-radius: 8px; background: var(--panel-2); color: var(--text); }
+.sheet .arbeitstag button, .sheet .arbeitstag summary, .sheet .arbeitstag .at-kabine { cursor: pointer; }
+.sheet .arbeitstag button:disabled { opacity: .6; cursor: wait; }
+.sheet .arbeitstag :is(button, select, summary, a, input):focus-visible { outline: 3px solid var(--blau); outline-offset: 3px; }
+.sheet .arbeitstag .at-schnell { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; margin: 20px 0; }
+.sheet .arbeitstag .at-kurz { display: grid; gap: 8px; padding: 14px; border: 2px solid var(--line); border-radius: 8px; background: var(--panel); overflow-wrap: anywhere; }
+.sheet .arbeitstag .at-status { display: inline-block; font-weight: 700; }
+.sheet .arbeitstag .at-ok { color: var(--leucht); }
+.sheet .arbeitstag .at-warnung { color: var(--amber); }
+.sheet .arbeitstag .at-fehler { color: var(--rot); font-weight: 700; }
+.sheet .arbeitstag .at-hinweis { padding: 12px; background: var(--panel-2); border-left: 4px solid currentColor; overflow-wrap: anywhere; }
+.sheet .arbeitstag details { margin: 12px 0; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }
+.sheet .arbeitstag summary { padding: 14px 16px; font-size: 18px; font-weight: 700; }
+.sheet .arbeitstag .at-gruppe, .sheet .arbeitstag details > :not(summary) { margin: 12px 16px; }
+.sheet .arbeitstag .at-checks { list-style: none; padding: 0; }
+.sheet .arbeitstag .at-checks > li, .sheet .arbeitstag .at-eintrag { border-bottom: 1px solid var(--line); padding: 12px 0; overflow-wrap: anywhere; }
+.sheet .arbeitstag .at-checks strong { margin-right: 16px; }
+.sheet .arbeitstag dl { display: grid; grid-template-columns: minmax(130px, 1fr) 2fr; gap: 8px 18px; }
+.sheet .arbeitstag dt { font-weight: 600; }
+.sheet .arbeitstag dd { margin: 0; overflow-wrap: anywhere; }
+.sheet .arbeitstag label { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin: 12px 0; }
+.sheet .arbeitstag input[type=checkbox] { width: 26px; height: 26px; margin: 10px; }
+.sheet .arbeitstag .at-link { display: inline-flex; align-items: center; margin: 12px 0; }
+.sheet .arbeitstag .at-uebung { font-weight: 700; border: 2px solid var(--amber); padding: 14px; }
+.sheet .arbeitstag canvas { display: block; width: 100%; height: auto; background: var(--panel-2); border: 1px solid var(--line); }
+body.kabine-gross .sheet :is(button, select, summary, .tab, .taste) { min-height: 60px; font-size: max(18px, 1em); }
+body.kabine-gross .sheet .arbeitstag .at-link { min-height: 60px; font-size: 18px; }
+@media (max-width: 650px) {
+  .sheet .arbeitstag .at-schnell { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .sheet .arbeitstag dl { grid-template-columns: 1fr; }
+  .sheet .arbeitstag dd { margin-bottom: 12px; }
+}
+@media print {
+  .sheet .arbeitstag button, .sheet .arbeitstag .at-kabine { display: none; }
+  .sheet .arbeitstag { color: black; background: white; }
+}
+
+/* Fahrtasten liegen außerhalb des Menüs; gleiche Mindestgröße in der Kabinenansicht. */
+body.kabine-gross .taste { min-width: 48px; min-height: 48px; }

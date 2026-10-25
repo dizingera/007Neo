@@ -286,7 +286,7 @@ class Application:
             self.engine.note(f"Letzter Stand nicht lesbar: {exc}")
         self._quellen_starten()
 
-        if cfg.is_master:
+        if cfg.is_master and cfg.network.device_id != "uebung-lokal":
             # The master owns the caster connection and re-serves it.
             self.relay = RtcmRelay(cfg.network.rtcm_relay_port)
             await self.relay.start()
@@ -402,6 +402,8 @@ class Application:
             backup_module.sichern, self.config.db_path, self.config.path,
             self.backup_ordner(), self.config.server.backup_keep)
         self.letzte_sicherung = ergebnis
+        if ergebnis.get("pruefung"):
+            self.store.set_setting("sicherung_pruefung", ergebnis["pruefung"])
         fehler = [f"{z['ordner']}: {z['fehler']}" for z in ergebnis["ziele"] if z["fehler"]]
         if fehler:
             self.engine.note(("Sicherung fehlgeschlagen: " if not ergebnis["ok"]
@@ -413,7 +415,8 @@ class Application:
         for ordner in self.backup_ordner():
             orte.append({"ordner": str(ordner), "letzte": backup_module.letzte(ordner),
                          "vorhanden": ordner.is_dir()})
-        return {"orte": orte, "letzter_lauf": getattr(self, "letzte_sicherung", None)}
+        return {"orte": orte, "letzter_lauf": getattr(self, "letzte_sicherung", None),
+                "pruefung": self.store.get_setting("sicherung_pruefung")}
 
     async def _backup_loop(self) -> None:
         """Einmal am Tag, beim Start gleich mit - ein Tablet läuft nicht rund um die Uhr."""
@@ -517,6 +520,16 @@ class Application:
             await asyncio.sleep(interval)
             # Auch ohne Zuschauer: die Lenkung muss überwacht bleiben.
             self.engine.tick()
+            self.engine.betriebsbuch.observation({
+                "steering": {**self.steering.status(),
+                             "engaged": self.steering.command.engaged,
+                             "reason": self.steering.command.reason},
+                "guidance": self.engine.guidance.to_dict(),
+                "fix": self.engine.fix.to_dict() if self.engine.fix else None,
+                "imu": {"healthy": bool(self.imu and self.imu.healthy)},
+                "field": {"id": self.engine.field["id"]} if self.engine.field else None,
+                "job": {"id": self.engine.job["id"]} if self.engine.job else None,
+            })
             # Und die Inbetriebnahme liest mit, auch wenn niemand hinsieht:
             # ein Fix, der nur beim Hinschauen steht, ist keiner.
             self.checklist.beobachten(self.checklist_input())
@@ -565,6 +578,7 @@ class Application:
     def system_status(self) -> dict[str, Any]:
         return {
             "version": VERSION,
+            "uebung": self.config.network.device_id == "uebung-lokal",
             "adressen": self.eigene_adressen(),
             "arbeitercode": self.config.network.sync_token if self.config.is_master else "",
             "update_online": (getattr(self, "online_stand", None) or {}).get("neu")
@@ -633,6 +647,8 @@ def create_app(config=None) -> FastAPI:
         aber nicht die Bedienung: Lenkung scharf schalten, Einstellungen, Datenpakete.
         Im eigenen Netz fällt die Sperre nicht auf.
         """
+        if config.network.device_id == "uebung-lokal" and ((request.url.path.startswith("/api/sync") and not request.url.path.startswith("/api/sync/konflikte")) or (request.method != "GET" and (request.url.path.startswith("/api/update/") or request.url.path in ("/api/settings", "/api/geraete/uebernehmen")))):
+            return JSONResponse({"detail": "Übung: kein Abgleich mit echten Geräten"}, status_code=403)
         von_aussen = any(k in request.headers for k in ("cf-connecting-ip", "cf-ray", "x-forwarded-for"))
         if (von_aussen and request.url.path not in VON_AUSSEN_ERLAUBT
                 and not request.url.path.startswith("/api/sync/luftbild/")):
@@ -661,6 +677,9 @@ def create_app(config=None) -> FastAPI:
         try: return await asyncio.to_thread(fn,*args)
         except (RuntimeError,ValueError,KeyError) as exc:
             raise HTTPException(400,str(exc)) from exc
+
+    from . import betrieb_api
+    betrieb_api.einbauen(api, application, ok, guard)
 
     # -- live state -------------------------------------------------------
 
@@ -1660,6 +1679,7 @@ def create_app(config=None) -> FastAPI:
         Erst prüfen, dann setzen: eine halb übernommene Konfiguration wäre
         schlimmer als eine abgelehnte.
         """
+        vorher_buch = settings_module.werte(config)
         aenderungen = payload.get("aenderungen")
         if not isinstance(aenderungen, dict):
             raise HTTPException(400, "Keine Änderungen übergeben")
@@ -1676,6 +1696,7 @@ def create_app(config=None) -> FastAPI:
             ergebnis = settings_module.uebernehmen(config, aenderungen, motor_fertig)
         except settings_module.EinstellungsFehler as exc:
             raise HTTPException(400, str(exc)) from exc
+        engine._einstellung_buchen(vorher_buch, settings_module.werte(config), "fahrer")
         if ergebnis["gespeichert"]:
             engine.note(f"Einstellungen geändert ({ergebnis['gespeichert']})")
         # Empfänger und Sensor werden im Betrieb neu gebaut - ein Neustart
@@ -1875,7 +1896,10 @@ def create_app(config=None) -> FastAPI:
         if payload.get("maschinen"):
             engine.profile_merge(payload["maschinen"])
         since = float(payload.get("since", 0.0))
+        from . import zusatzsync
+        zusatz = zusatzsync.exchange(store, payload.get("zusatzdaten"), since, device_id=config.network.device_id)
         return {
+            **zusatz,
             "server_time": time.time(),
             "applied": applied,
             "changes": sync.collect_changes(store, since),

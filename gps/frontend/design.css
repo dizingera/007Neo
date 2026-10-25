@@ -612,3 +612,10 @@ body.tag { --f-flaeche: rgba(23, 140, 70, .38); --f-doppelt: rgba(200, 104, 12, 
 .sheet .motorstaerke.entwurf { border-color: var(--m-amber); }
 .sheet #motorDiagnose { border-left: 3px solid var(--blue-solid); padding-left: 10px; }
 .sheet .fahrer-wege { margin-top: 16px; }
+
+.uebungs-kennzeichen{position:absolute;top:110px;left:50%;transform:translateX(-50%);z-index:8;background:#63320a;color:#fff5dd;padding:8px 14px;border:2px solid #ffbc66;border-radius:8px;font-weight:700;pointer-events:none;text-align:center;max-width:90vw}
+.uebungs-kennzeichen[hidden]{display:none}
+
+/* Flex-Kinder dürfen auf schmalen Kabinendisplays nicht über die Bildschirmhöhe wachsen. */
+.sheet .panels{min-height:0;overflow:hidden}
+.sheet .tab-panel{min-height:0;overscroll-behavior:contain}

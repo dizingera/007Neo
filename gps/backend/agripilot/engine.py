@@ -16,6 +16,7 @@ where the tool actually is, so what the screen shows is what the field gets.
 
 from __future__ import annotations
 from . import feldwerkzeuge, gespann
+from .betriebsbuch import Betriebsbuch
 
 import asyncio
 import math
@@ -201,6 +202,7 @@ class Engine:
         self.working_time_s = 0.0
         self.session_started_at = time.time()
         self.messages: list[str] = []
+        self.betriebsbuch = Betriebsbuch(store)
         # Was beim letzten Mal offen blieb (Zündung aus statt „Arbeit beenden"),
         # wird jetzt abgeschlossen - sonst steht es ewig als „läuft" in der Liste.
         # Die jüngste frische Arbeit bleibt offen: resume_session() setzt sie fort
@@ -331,6 +333,7 @@ class Engine:
         # Nur Spurreglerwerte ändern; Gerätegeometrie, laufende Wende und
         # Teilbreiten bleiben dabei unberührt.
         sauber = {k: v for k, v in werte.items() if k in AUTOMATIK_FELDER}
+        vorher = asdict(self.profile)
         self.profile = replace(self.profile, **sauber)
         self.store.set_setting("vehicle_profile", asdict(self.profile))
         aktiv = self.store.get_setting("vehicle_profile_active")
@@ -338,6 +341,13 @@ class Engine:
         self.store.set_setting("vehicle_profiles", [
             {**p, **sauber} if p["id"] == aktiv else p for p in profile])
         self._traktor_schreiben({k: getattr(self.profile, k) for k in TRAKTOR_FELDER}, False)
+
+        self._einstellung_buchen(vorher, asdict(self.profile), "automatik")
+
+    def _einstellung_buchen(self, vorher, nachher, quelle):
+        self.betriebsbuch.einstellung_aendern(vorher, nachher, quelle, {
+            "traktor_id": self.store.get_setting("traktor_aktiv"),
+            "geraet_id": self.store.get_setting("vehicle_profile_active")})
 
     def _automatik_holen(self):
         self.list_profiles()
@@ -466,12 +476,13 @@ class Engine:
             self.store.set_setting("lenkabstimmung", {
                 "modus": self.abstimmung.modus, "ausgangswerte": self.abstimmung.ausgangswerte})
 
-    def update_profile(self, values: dict, stempeln: bool = True) -> VehicleProfile:
+    def update_profile(self, values: dict, stempeln: bool = True, quelle: str | None = None) -> VehicleProfile:
         """Das Gespann ändern. Antenne und Lenkung gehen an den gewählten Traktor, der Rest
         an die gewählte Maschine (das Gerät)."""
         fields = VehicleProfile.__dataclass_fields__
         self.list_profiles()          # legt auf einem frischen Gerät die erste Maschine an
         current = asdict(self.profile)
+        vorher = dict(current)
         values = dict(values)
         if getattr(self, "automatik", None) is not None and self.automatik.aktiv:
             self.automatik.stoppen()
@@ -502,6 +513,7 @@ class Engine:
         if self.turn is not None: self.stop_turn("Gespann geändert")
         self.turn_preview=[]
         self.turn_preview_ok=False
+        self._einstellung_buchen(vorher, current, quelle or ("fahrer" if stempeln else "sync"))
         return self.profile
 
     # -- Traktoren ----------------------------------------------------------

@@ -15,6 +15,7 @@
 <link rel="stylesheet" href="fonts/fonts.css">
 <link rel="stylesheet" href="style.css">
 <link rel="stylesheet" href="design.css">
+<link rel="stylesheet" href="arbeitstag.css">
 </head>
 <body>
 
@@ -72,6 +73,7 @@
   <!-- Unten links nur die Zahlen, die man beim Fahren braucht - flach, damit
        die Mitte frei bleibt: dort stehen Traktor, Gerät und Feld. -->
   <div class="ruf" id="ruf"></div>
+  <div id="uebungsKennzeichen" class="uebungs-kennzeichen" hidden>ÜBUNG · getrennte Daten · kein echter Motor</div>
   <!-- Die Lizenz des Luftbilds verlangt die Quellenangabe, solange es zu sehen ist. -->
   <div class="luftbild-quelle" id="luftbildQuelle" hidden></div>
   <!-- Hindernis voraus: rot, groß, mitten im Blick - unter dem Lichtbalken. -->
@@ -213,7 +215,7 @@
   <div class="sheet-body">
     <!-- Links die Seiten, in drei Gruppen: was der Fahrer im Feld braucht, die
          Maschine, und die Werkstatt. Auf schmalen Geräten wird daraus eine Zeile. -->
-    <label class="menue-seitenwahl" for="menueSeitenwahl">Menübereich<select id="menueSeitenwahl"><optgroup label="Feldarbeit"><option value="fields">Felder</option><option value="lines">Spuren</option><option value="jobs">Arbeiten</option><option value="maschinen">Fernansicht</option><option value="saatplan">Saatplan</option><option value="headland">Vorgewende &amp; Wende</option></optgroup><optgroup label="Maschine"><option value="machine">Traktor &amp; Gerät</option><option value="lenkung">Lenkung</option><option value="lenkregler">Lenkregler</option></optgroup><optgroup label="Werkstatt"><option value="lenkwerkstatt">Lenkwerkstatt</option><option value="settings">Einstellungen</option><option value="daten">Daten &amp; Geräte</option><option value="system">System</option><option value="setup">Einbau</option></optgroup></select></label>
+    <label class="menue-seitenwahl" for="menueSeitenwahl">Menübereich<select id="menueSeitenwahl"><optgroup label="Feldarbeit"><option value="arbeitstag">Arbeitstag</option><option value="fields">Felder</option><option value="lines">Spuren</option><option value="jobs">Arbeiten</option><option value="maschinen">Fernansicht</option><option value="saatplan">Saatplan</option><option value="headland">Vorgewende &amp; Wende</option></optgroup><optgroup label="Maschine"><option value="machine">Traktor &amp; Gerät</option><option value="lenkung">Lenkung</option><option value="lenkregler">Lenkregler</option></optgroup><optgroup label="Werkstatt"><option value="lenkwerkstatt">Lenkwerkstatt</option><option value="settings">Einstellungen</option><option value="daten">Daten &amp; Geräte</option><option value="system">System</option><option value="setup">Einbau</option></optgroup></select></label>
     <div class="menue-navigation">
       <div class="menue-bereiche" role="group" aria-label="Menübereiche">
         <button type="button" class="menue-bereich" data-bereich="feld" aria-pressed="true">Feldarbeit</button>
@@ -222,6 +224,7 @@
       </div>
     <nav class="tabs" role="tablist" aria-label="Menü-Seiten" aria-orientation="vertical">
       <span class="tab-gruppe" aria-hidden="true">Im Feld</span>
+      <button data-tab="arbeitstag" data-gruppe="feld" class="tab" role="tab" aria-selected="false" tabindex="-1"><svg class="tab-symbol" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h16v17H4zM8 2v4M16 2v4M7 12l3 3 6-6"/></svg><span class="tab-text"><span class="tab-name">Arbeitstag</span><small>Start, Verlauf und Abschluss</small></span></button>
       <button data-tab="fields" data-gruppe="feld" class="tab active" role="tab" aria-selected="true"><svg class="tab-symbol" viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 8.5L10 4l10.5 3.5-2 11.5L5 20z"/><path d="M8 13h9"/></svg><span class="tab-text"><span class="tab-name">Felder</span><small>Grenze, Shapefile, Luftbild</small></span></button>
       <button data-tab="lines" data-gruppe="feld" class="tab" role="tab" aria-selected="false" tabindex="-1"><svg class="tab-symbol" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 21L9 3M12 21V3M18 21L15 3"/></svg><span class="tab-text"><span class="tab-name">Spuren</span><small>AB, Kontur, Fahrgassen</small></span></button>
       <button data-tab="jobs" data-gruppe="feld" class="tab" role="tab" aria-selected="false" tabindex="-1"><svg class="tab-symbol" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 4V3h6v1M8.5 11.5l2 2 4.5-4.5M8.5 17h7"/></svg><span class="tab-text"><span class="tab-name">Arbeiten</span><small>Liste, Export, Löschen</small></span></button>
@@ -244,6 +247,7 @@
     </div>
     <div class="panels">
 
+  <section class="tab-panel" data-panel="arbeitstag" hidden><div id="arbeitstagInhalt"></div></section>
   <section class="tab-panel" data-panel="fields">
     <div class="row">
       <input id="newFieldName" placeholder="Name des Feldes, z.B. Oberes Feld">
@@ -1193,6 +1197,8 @@
 </dialog>
 <script src="feldwerkzeuge.js"></script>
 <script src="bedienung.js"></script>
+<script src="arbeitstag.js"></script>
+<script src="umriss.js"></script>
 <script src="app.js"></script>
 <script>
   /* Nur fuer die Kachel auf dem Android-Tablet. Browser lassen Service Worker

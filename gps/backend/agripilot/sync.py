@@ -23,6 +23,7 @@ import time
 from typing import Optional
 
 from .coverage import CoverageMap
+from . import zusatzsync
 from .storage import SYNCED_TABLES, Storage
 
 
@@ -62,9 +63,19 @@ def apply_changes(store: Storage, changes: dict) -> dict:
     for table, records in (changes or {}).items():
         if table not in SYNCED_TABLES:
             continue
+        for record in records:
+            zusatzsync.konflikt_sichern(store, table, record)
         if table == "jobs":
             records = [_merge_job_coverage(store, r) for r in records]
         applied[table] = store.apply_remote(table, records)
+        if table in ("fields", "lines", "jobs"):
+            for record in records:
+                current = store.db.execute(
+                    f"SELECT updated_at FROM {table} WHERE id=?", (record["id"],)).fetchone()
+                if current and current["updated_at"] == record.get("updated_at"):
+                    key = f"sync_remote_stand:{table}:{record['id']}"
+                    if store.get_setting(key) != current["updated_at"]:
+                        store.set_setting(key, current["updated_at"])
     return applied
 
 
@@ -110,6 +121,10 @@ class SyncClient:
         self.store.set_setting("sync_cursor", value)
 
     async def run(self) -> None:
+        if self.config.network.device_id == "uebung-lokal":
+            self.status = "Übungsmodus – kein Datenabgleich"
+            self.running = False
+            return
         self.running = True
         live = asyncio.create_task(self.live_schleife())
         try:
@@ -126,6 +141,8 @@ class SyncClient:
             await asyncio.sleep(LIVE_TAKT_S)
 
     async def live_once(self) -> bool:
+        if self.config.network.device_id == "uebung-lokal":
+            return False
         if self.engine is None:
             return False
         try:
@@ -153,6 +170,9 @@ class SyncClient:
             return False
 
     async def sync_once(self) -> dict:
+        if self.config.network.device_id == "uebung-lokal":
+            self.status = "Übungsmodus – kein Datenabgleich"
+            return {"ok": False, "error": self.status}
         try:
             import httpx
         except ImportError:
@@ -170,6 +190,7 @@ class SyncClient:
             },
             "since": since,
             "changes": collect_changes(self.store, push_since),
+            "zusatzdaten": zusatzsync.exportieren(self.store, push_since, self.config.network.device_id),
         }
         if self.engine is not None:
             payload["maschinen"] = self.engine.profile_export()
@@ -183,6 +204,7 @@ class SyncClient:
                 response.raise_for_status()
                 data = response.json()
             apply_changes(self.store, data.get("changes", {}))
+            zusatzsync.uebernehmen(self.store, data.get("zusatzdaten", []), self.config.network.device_id)
             if self.engine is not None and data.get("maschinen"):
                 self.engine.profile_merge(data["maschinen"])
             if self.engine is not None:
@@ -209,7 +231,20 @@ class SyncClient:
         self.running = False
 
     def status_dict(self) -> dict:
+        push = float(self.store.get_setting("sync_push_cursor", 0.0))
+        pending = {table: self.store.db.execute(
+            f"SELECT COUNT(*) FROM {table} WHERE updated_at>? OR id IN "
+            "(SELECT record_id FROM sync_received WHERE table_name=? AND received_at>?)",
+            (push, table, push)).fetchone()[0] for table in SYNCED_TABLES}
+        pending["zusatzdaten"] = self.store.db.execute(
+            "SELECT COUNT(*) FROM settings WHERE updated_at>? AND (key LIKE 'grenze_verlauf:%' "
+            "OR key LIKE 'feld_einfahrt:%' OR key='probefahrt_bericht' OR key LIKE 'probefahrt_fremd:%')",
+            (push,)).fetchone()[0]
+        conflicts = self.store.get_setting("sync_konflikte", [])
         return {
+            "pending": pending,
+            "pending_count": sum(pending.values()),
+            "conflicts_count": sum(c.get("status") == "offen" for c in conflicts),
             "role": self.config.network.role,
             "master_url": self.config.network.master_url,
             "status": self.status,
