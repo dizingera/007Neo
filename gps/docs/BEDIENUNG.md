@@ -1,5 +1,20 @@
 # Bedienung im Feld
 
+## Bearbeitete Fläche beim Abgleich erhalten (1.5.92)
+
+Zusätzliche Zellen derselben Arbeit werden auch aus einem älteren oder gleich
+alten Arbeitsstand übernommen. Die neueren Angaben zur Arbeit bleiben erhalten.
+Die vereinigte Karte erreicht beim nächsten Abgleich auch weitere Geräte.
+Wiederholungen derselben Karte erzeugen keine fortlaufenden Änderungen.
+
+Neuere Angaben ohne Karte löschen die vorhandene Fläche nicht mehr. Ist eine
+ankommende Karte beschädigt oder hat sie eine andere Rastergröße, bleibt die
+bereits vorhandene Karte erhalten. Gelöschte Arbeiten werden nicht durch einen
+älteren Flächenstand wiederhergestellt.
+
+Mit getrennten Testdatenbanken und einer dritten Gegenstelle geprüft.
+Keine produktiven Arbeitsdaten zur Prüfung verändert.
+
 ## Ungültige Lenkdaten stoppen den Ausgang (1.5.91)
 
 Nicht berechenbare oder unendliche Werte für Sollwinkel, Spurabweichung, Tempo,

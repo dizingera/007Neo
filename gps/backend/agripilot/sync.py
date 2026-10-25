@@ -71,16 +71,17 @@ def apply_changes(store: Storage, changes: dict) -> dict:
 def _merge_job_coverage(store: Storage, record: dict) -> dict:
     """Union an incoming job's coverage with whatever we already hold for it."""
     incoming = record.get("coverage")
-    if not incoming:
-        return record
     existing_blob = store.get_job_coverage(record["id"])
     if not existing_blob:
         return record
+    if not incoming:
+        # Neuere Angaben ohne Karte dürfen bereits bearbeitete Fläche nicht löschen.
+        return {**record, "coverage": base64.b64encode(existing_blob).decode()}
     try:
         merged = CoverageMap.unpack(existing_blob)
         merged.merge(CoverageMap.unpack(base64.b64decode(incoming)))
-    except (ValueError, Exception):  # noqa: BLE001
-        return record
+    except Exception:  # noqa: BLE001 - vorhandene Karte bei fehlerhafter Gegenstelle erhalten
+        return {**record, "coverage": base64.b64encode(existing_blob).decode()}
     return {**record, "coverage": base64.b64encode(merged.pack()).decode()}
 
 

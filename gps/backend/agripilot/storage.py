@@ -547,9 +547,36 @@ class Storage:
                 import base64
                 record["coverage"] = base64.b64decode(record["coverage"])
             existing = self.db.execute(
-                f"SELECT updated_at FROM {table} WHERE id=?", (record["id"],)
+                f"SELECT * FROM {table} WHERE id=?", (record["id"],)
             ).fetchone()
             if existing and existing["updated_at"] >= record.get("updated_at", 0):
+                # Flächen sind tatsächlich geleistete Arbeit. Auch ein älterer
+                # Stand darf neue Zellen beitragen; die neueren Metadaten bleiben.
+                if (table == "jobs" and record.get("coverage")
+                        and not existing["deleted"] and not record.get("deleted")):
+                    from .coverage import CoverageMap
+                    try:
+                        alt = CoverageMap.unpack(existing["coverage"]) if existing["coverage"] else None
+                        neu = CoverageMap.unpack(record["coverage"])
+                        if alt is not None:
+                            vorher = set(alt.cells)
+                            alt.merge(neu)
+                            neu = alt
+                        else:
+                            vorher = set()
+                        if neu.cells != vorher:
+                            self.db.execute("UPDATE jobs SET coverage=? WHERE id=?",
+                                            (neu.pack(), record["id"]))
+                            # Eigene Empfangszeit macht die Vereinigung für weitere
+                            # Gegenstellen sichtbar, ohne Metadaten umzudatieren.
+                            self.db.execute(
+                                "INSERT INTO sync_received (table_name, record_id, received_at) VALUES (?, ?, ?) "
+                                "ON CONFLICT(table_name, record_id) DO UPDATE SET received_at=excluded.received_at",
+                                (table, record["id"], time.time()),
+                            )
+                            applied += 1
+                    except (ValueError, TypeError):
+                        pass  # Unvereinbare Raster: vorhandenen Stand behalten.
                 continue
             if table == "lines" and "rand_innen" not in record:
                 alt = self.get_line(record["id"])
