@@ -1,5 +1,11 @@
 # Bedienung im Feld
 
+## Werkstattläufe sicher abbrechen (1.5.87)
+
+„Lenkung aus“ beendet jetzt auch Motortest, Einmessen und Feinabstimmung. Ein Abbruch stoppt alle weiteren Impulse; bei abgebrochener Feinabstimmung werden die Ausgangswerte wiederhergestellt. Werkstattläufe und automatische Lenkung sind gegenseitig gesperrt (Prüfbefund F1).
+
+Nicht am echten Traktor geprüft.
+
 ## Abschalten überholt jeden alten Motorbefehl (1.5.86)
 
 „Lenkung aus“ setzt die Motorleistung sofort auf null. Der Motorfaden verwirft zuvor berechnete Befehle, sobald ein neuer Befehl eingetroffen ist. Gegenprobe mit gezielt angehaltenem Regelthread ergänzt (Prüfbefund F5).

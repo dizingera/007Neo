@@ -120,6 +120,8 @@ class SteeringController:
         if not self.output.ready:
             self.armed = False
             return f"Lenkausgang nicht bereit: {self.output.status}"
+        if getattr(self.output, "werkstatt_aktiv", False):
+            return "Werkstattlauf aktiv - erst abbrechen"
         self.armed = True
         self._last_angle = 0.0
         self._last_angle_at = 0.0
@@ -141,6 +143,7 @@ class SteeringController:
                 self._abgabe(reason)
         self.armed = False
         self.command = SteerCommand(reason=reason)
+        self.output.abbrechen()
         self.output.command(False, 0.0, SteerContext())
 
     def pausieren(self, reason: str) -> None:

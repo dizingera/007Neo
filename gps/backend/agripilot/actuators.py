@@ -34,6 +34,8 @@ import struct
 import threading
 import time
 from dataclasses import dataclass
+from contextlib import asynccontextmanager
+from functools import wraps
 from typing import Optional
 
 # Telegramm an eine externe Lenkplatine: Kennung, Version, Flags, Winkel in
@@ -154,6 +156,9 @@ class SteerOutput:
     def command(self, engaged: bool, angle_deg: float, context: SteerContext) -> None:
         """Wird bei jeder Position aufgerufen - auch beim Abschalten."""
 
+    def abbrechen(self, grund: str = "Werkstattlauf abgebrochen") -> None:
+        """Alle eigenständigen Bewegungen beenden (auch ohne scharfe Lenkung)."""
+
     def on_arm(self) -> None:
         """Beim Scharfschalten: Regler zurücksetzen, Mitte lernen."""
 
@@ -254,6 +259,14 @@ class UdpOutput(SteerOutput):
         )
 
 
+def _werkstattlauf(methode):
+    @wraps(methode)
+    async def lauf(self, *args, **kwargs):
+        async with self._werkstatt():
+            return await methode(self, *args, **kwargs)
+    return lauf
+
+
 class PhidgetOutput(SteerOutput):
     """Gleichstrom-Lenkmotor an einer Phidget-Motorsteuerung.
 
@@ -312,6 +325,10 @@ class PhidgetOutput(SteerOutput):
         self._thread: Optional[threading.Thread] = None
         self._motor_lock = threading.RLock()
         self._kommando_generation = 0
+        self._werkstatt_task = None
+        self._werkstatt_loop = None
+        self._werkstatt_event = None
+        self._werkstatt_grund = ""
 
     # -- Aufbau -----------------------------------------------------------
 
@@ -427,6 +444,7 @@ class PhidgetOutput(SteerOutput):
             self._encoder_centre = self.encoder.getPosition()
 
     async def stop(self) -> None:
+        self.abbrechen("Werkstattlauf beim Beenden abgebrochen")
         self.running = False
         if self._thread is not None:
             await asyncio.to_thread(self._thread.join, 1.0)
@@ -450,6 +468,61 @@ class PhidgetOutput(SteerOutput):
         self.motor = self.was = self.encoder = None
 
     # -- Betrieb ----------------------------------------------------------
+    @property
+    def werkstatt_aktiv(self) -> bool:
+        return self._werkstatt_task is not None
+
+    @asynccontextmanager
+    async def _werkstatt(self):
+        task = asyncio.current_task()
+        if self._werkstatt_task is task:
+            self._werkstatt_pruefen()
+            yield
+            return
+        with self._motor_lock:
+            if self.werkstatt_aktiv:
+                raise RuntimeError("Es läuft bereits ein Werkstattlauf - erst abbrechen")
+            if self._engaged:
+                raise RuntimeError("Die Lenkung ist scharf - erst ausschalten")
+            self._werkstatt_task = task
+            self._werkstatt_loop = asyncio.get_running_loop()
+            self._werkstatt_event = asyncio.Event()
+            self._werkstatt_grund = ""
+        try:
+            yield
+        finally:
+            with self._motor_lock:
+                self._kommando_generation += 1
+                self._test_bis = self._test_duty = 0.0
+                self._regeltest_ziel = None
+                self._regeltest_bis = 0.0
+                self._safe_stop()
+                self._werkstatt_task = self._werkstatt_loop = self._werkstatt_event = None
+
+    def _werkstatt_pruefen(self) -> None:
+        if self._werkstatt_grund:
+            raise RuntimeError(self._werkstatt_grund)
+
+    async def _werkstatt_warten(self, dauer_s: float) -> None:
+        self._werkstatt_pruefen()
+        try:
+            await asyncio.wait_for(self._werkstatt_event.wait(), dauer_s)
+        except asyncio.TimeoutError:
+            pass
+        self._werkstatt_pruefen()
+
+    def abbrechen(self, grund: str = "Werkstattlauf abgebrochen") -> None:
+        with self._motor_lock:
+            self._kommando_generation += 1
+            self._engaged = False
+            self._test_bis = self._test_duty = 0.0
+            self._regeltest_ziel = None
+            self._regeltest_bis = 0.0
+            self._integral = self._last_error = 0.0
+            if self.werkstatt_aktiv:
+                self._werkstatt_grund = grund
+                self._werkstatt_loop.call_soon_threadsafe(self._werkstatt_event.set)
+            self._safe_stop()
 
     def command(self, engaged: bool, angle_deg: float, context: SteerContext) -> None:
         with self._motor_lock:
@@ -507,6 +580,7 @@ class PhidgetOutput(SteerOutput):
                 self._safe_stop()
             await asyncio.sleep(REGEL_TAKT_S)
 
+    @_werkstattlauf
     async def motortest(self, richtung: int, anteil: float, dauer_s: float) -> dict:
         """Den Motor kurz und schwach in eine Richtung drehen lassen - ein Test
         der Verbindung, nicht der Lenkung.
@@ -528,7 +602,7 @@ class PhidgetOutput(SteerOutput):
         self._test_duty = vorzeichen * anteil
         self._test_strom_max = 0.0
         self._test_bis = time.time() + dauer_s
-        await asyncio.sleep(dauer_s + 0.2)
+        await self._werkstatt_warten(dauer_s + 0.2)
         self._test_bis = 0.0
         self._safe_stop()
         nachher = self._drehgeber_roh()
@@ -552,13 +626,14 @@ class PhidgetOutput(SteerOutput):
         vorher = self._drehgeber_roh()
         self._test_duty = vorzeichen * (-1.0 if self.config.invert_motor else 1.0) * anteil
         self._test_bis = time.time() + dauer_s
-        await asyncio.sleep(dauer_s + EINMESS_REGELTAKT_S)
+        await self._werkstatt_warten(dauer_s + EINMESS_REGELTAKT_S)
         self._test_bis = 0.0
         self._safe_stop()
-        await asyncio.sleep(EINMESS_AUSROLLEN_S)   # ausrollen lassen, dann ablesen
+        await self._werkstatt_warten(EINMESS_AUSROLLEN_S)   # ausrollen lassen, dann ablesen
         nachher = self._drehgeber_roh()
         return None if vorher is None or nachher is None else nachher - vorher
 
+    @_werkstattlauf
     async def einmessen(self) -> dict:
         """Den Motor am Stand einmessen: ab welcher Leistung er anläuft.
 
@@ -601,6 +676,7 @@ class PhidgetOutput(SteerOutput):
                         "bewegt - Motor, Kupplung oder Drehgeber prüfen."),
         }
 
+    @_werkstattlauf
     async def richtung_testen(self, anteil: float = 0.2, dauer_s: float = 0.4) -> dict:
         """Ein Impuls "nach rechts" (so wie der Regler es meint, mit der
         eingestellten Motor-Umkehr). Zurück: wie weit der Drehgeber roh gezählt hat."""
@@ -767,6 +843,7 @@ class PhidgetOutput(SteerOutput):
                            " liefert keine Werte")
             self.last_error_text = self.status
 
+    @_werkstattlauf
     async def sprung(self, ziel_deg: float, halten_s: float) -> list:
         """Den Regler einen Radwinkel anfahren lassen und mitschreiben."""
         self._integral = 0.0
@@ -776,13 +853,14 @@ class PhidgetOutput(SteerOutput):
         self._regeltest_ziel = float(ziel_deg)
         self._regeltest_bis = self._regeltest_start + halten_s
         try:
-            await asyncio.sleep(halten_s + 0.05)
+            await self._werkstatt_warten(halten_s + 0.05)
         finally:
             self._regeltest_ziel = None
             self._regeltest_bis = 0.0
             self._safe_stop()
         return list(self._regeltest_spur)
 
+    @_werkstattlauf
     async def feinabstimmen(self, sprung_deg: float = FEIN_SPRUNG_DEG,
                             durchgaenge: int = FEIN_DURCHGAENGE) -> dict:
         """P/I/D des Motorreglers am Stand einstellen (siehe lenkung_einrichten).
@@ -806,6 +884,7 @@ class PhidgetOutput(SteerOutput):
         mitte = self.measured_angle() or 0.0     # mit gelernter Mitte: von hier aus und wieder hierher
         verlauf = []
         ergebnis = {"gut": False, "text": ""}
+        uebernehmen = False
         try:
             for _ in range(int(durchgaenge)):
                 hin = await self.sprung(mitte + sprung_deg, FEIN_HALTEN_S)
@@ -831,11 +910,12 @@ class PhidgetOutput(SteerOutput):
                     ergebnis = {**ergebnis, "gut": True,
                                 "text": f"Schneller geht es mit diesem Motor nicht ohne Überschwingen: "
                                         f"90 % nach {bestes['anstieg_s']:.2f} s. Diese Werte gelten."}
+            uebernehmen = bool(ergebnis.get("gut"))
         finally:
             self._safe_stop()
-        if not ergebnis.get("gut"):
-            cfg.gain_p, cfg.gain_i, cfg.gain_d = start["gain_p"], start["gain_i"], start["gain_d"]
-            cfg.max_duty = start["max_duty"]
+            if not uebernehmen:
+                cfg.gain_p, cfg.gain_i, cfg.gain_d = start["gain_p"], start["gain_i"], start["gain_d"]
+                cfg.max_duty = start["max_duty"]
         return {"gut": bool(ergebnis.get("gut")), "text": ergebnis["text"], "start": start,
                 "ende": {"gain_p": cfg.gain_p, "gain_i": cfg.gain_i, "gain_d": cfg.gain_d,
                          "max_duty": cfg.max_duty},

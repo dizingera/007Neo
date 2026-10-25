@@ -14,7 +14,7 @@ def ausgang(**werte):
     cfg = dict(feedback="encoder", gain_p=.1, gain_i=0., gain_d=0., min_duty=0.)
     cfg.update(werte)
     a = PhidgetOutput(PhidgetConfig(**cfg))
-    a.motor = mock.Mock()
+    a.motor = mock.Mock(spec=["setTargetVelocity", "resetFailsafe"])
     a.ready = True
     a._status_ok = a.status = "bereit"
     a.measured_angle = mock.Mock(return_value=0.)
@@ -58,3 +58,55 @@ class Abschalten(unittest.TestCase):
         self.assertFalse(fehler)
         self.assertFalse(s.armed)
         self.assertEqual(a.motor.setTargetVelocity.call_args.args[0], 0.)
+
+
+class WerkstattAbbruch(unittest.IsolatedAsyncioTestCase):
+    async def test_aus_beendet_impuls_und_laesst_keine_leistung_nach(self):
+        a = ausgang()
+        s = SteeringController(SteeringConfig(enabled=True), a)
+        task = asyncio.create_task(a.motortest(1, .25, 1.))
+        await asyncio.sleep(0)
+        a._step(.02)
+        self.assertGreater(a.motor.setTargetVelocity.call_args.args[0], 0.)
+        try:
+            s.disarm()
+            a._step(.02)
+            self.assertEqual(a.motor.setTargetVelocity.call_args.args[0], 0.)
+            with self.assertRaisesRegex(RuntimeError, "abgebrochen"):
+                await task
+        finally:
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+
+    async def test_aus_beendet_feinabstimmung_und_stellt_werte_zurueck(self):
+        a = ausgang()
+        s = SteeringController(SteeringConfig(enabled=True), a)
+        start = (a.config.gain_p, a.config.max_duty)
+        task = asyncio.create_task(a.feinabstimmen())
+        await asyncio.sleep(0)
+        try:
+            a.config.gain_p, a.config.max_duty = 2., .9
+            s.disarm()
+            a._step(.02)
+            self.assertEqual(a.motor.setTargetVelocity.call_args.args[0], 0.)
+            with self.assertRaisesRegex(RuntimeError, "abgebrochen"):
+                await task
+            self.assertEqual((a.config.gain_p, a.config.max_duty), start)
+        finally:
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+
+    async def test_nur_ein_werkstattlauf_und_keine_automatik_daneben(self):
+        a = ausgang()
+        s = SteeringController(SteeringConfig(enabled=True), a)
+        task = asyncio.create_task(a.motortest(1, .25, 1.))
+        await asyncio.sleep(0)
+        try:
+            self.assertNotEqual(s.arm(), "scharf")
+            self.assertFalse(s.armed)
+            with self.assertRaisesRegex(RuntimeError, "Werkstatt"):
+                await a.motortest(-1, .25, .1)
+        finally:
+            s.disarm()
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)

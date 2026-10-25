@@ -4535,6 +4535,12 @@ async function einrichtenFeinabstimmung() {
   renderEinrichten();
 }
 
+el('btnMotorAbbrechen').onclick = async () => {
+  if (await api('POST', '/api/steering/disarm')) {
+    einrichtenMelden('Motor angehalten. Werkstattlauf abgebrochen.');
+  }
+};
+
 el('btnEinrichtenNeu').onclick = async () => {
   if (await api('POST', '/api/lenkung/einrichten/neu')) { einrichtenMelden(''); renderEinrichten(); }
 };
