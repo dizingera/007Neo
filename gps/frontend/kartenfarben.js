@@ -14,11 +14,12 @@
   }
   const farbeGueltig = (wert) => typeof wert === 'string' && /^#[0-9a-f]{6}$/i.test(wert);
   class Kartenfarben {
-    constructor({ el, speicher, stil, geaendert }) {
+    constructor({ el, speicher, stil, geaendert, rueckmeldung = () => {} }) {
       this.el = el;
       this.speicher = speicher;
       this.stil = stil;
       this.geaendert = geaendert;
+      this.rueckmeldung = rueckmeldung;
       this.thema = 'nacht';
       this.farben = { nacht: {}, tag: {} };
       this.entwuerfe = {};
@@ -121,6 +122,7 @@
           ? 'Kartenfarben in diesem Browser gespeichert.'
           : 'Für diese Sitzung übernommen; der Browser konnte die Farben nicht speichern.',
       );
+      this.rueckmeldung(gespeichert ? 'Kartenfarben in diesem Browser gespeichert' : 'Kartenfarben nicht gespeichert – nur für diese Sitzung übernommen', !gespeichert);
     }
     zuruecksetzen() {
       this.farben[this.thema] = {};
@@ -133,6 +135,7 @@
           ? 'Standardfarben für diese Ansicht wiederhergestellt.'
           : 'Standardfarben für diese Sitzung; der Browser konnte die Änderung nicht speichern.',
       );
+      this.rueckmeldung(gespeichert ? 'Standardfarben wiederhergestellt und gespeichert' : 'Standardfarben nicht gespeichert – nur für diese Sitzung übernommen', !gespeichert);
     }
   }
   const modul = { Kartenfarben };

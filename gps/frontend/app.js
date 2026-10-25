@@ -1319,11 +1319,17 @@ async function api(method, url, body) {
       headers: body ? { 'Content-Type': 'application/json' } : undefined,
       body: body ? JSON.stringify(body) : undefined,
     });
-    const data = await response.json().catch(() => ({}));
+    let jsonGueltig = true;
+    const data = await response.json().catch(() => { jsonGueltig = false; return {}; });
     if (!response.ok) {
-      toast(data.detail || `Fehler ${response.status}`, true);
+      toast(data && data.detail || `Fehler ${response.status}`, true);
       return null;
     }
+    if (!jsonGueltig || !data || typeof data !== 'object' || data.ok === false || (String(method).toUpperCase() !== 'GET' && data.ok !== true)) {
+      toast(data && data.detail || 'Keine gültige Bestätigung erhalten – Vorgang nicht bestätigt', true);
+      return null;
+    }
+    if (window.Rueckmeldung) window.Rueckmeldung.vormerken(method, url, body, data);
     return data;
   } catch (error) {
     toast('Gerät nicht erreichbar', true);
@@ -1333,6 +1339,7 @@ async function api(method, url, body) {
 
 let toastTimer = null;
 function toast(message, isError) {
+  if (window.Rueckmeldung) { window.Rueckmeldung.anzeigen(message, isError); return; }
   const box = el('toast');
   box.textContent = message;
   box.className = 'toast' + (isError ? ' error' : '');
@@ -1402,9 +1409,18 @@ async function apiRoh(method, url, body) {
       method, headers: body ? { 'Content-Type': 'application/json' } : undefined,
       body: body ? JSON.stringify(body) : undefined,
     });
-    const daten = await antwort.json().catch(() => ({}));
+    let jsonGueltig = true;
+    const daten = await antwort.json().catch(() => { jsonGueltig = false; return {}; });
+    if (antwort.ok && (!jsonGueltig || !daten || typeof daten !== "object" || daten.ok === false || (String(method).toUpperCase() !== "GET" && daten.ok !== true))) {
+      const detail = daten && daten.detail || "Keine gültige Bestätigung erhalten – nicht gespeichert";
+      if (window.Rueckmeldung) window.Rueckmeldung.anzeigen(detail, true);
+      return {ok:false, detail};
+    }
+    if (antwort.ok && window.Rueckmeldung) window.Rueckmeldung.vormerken(method, url, body, daten);
+    if (!antwort.ok && window.Rueckmeldung) window.Rueckmeldung.anzeigen(daten.detail || `Fehler ${antwort.status}`, true);
     return { ok: antwort.ok, data: daten.data, detail: daten.detail };
   } catch (fehler) {
+    if (window.Rueckmeldung) window.Rueckmeldung.anzeigen('Nicht gespeichert – Gerät nicht erreichbar', true);
     return { ok: false, detail: 'Gerät nicht erreichbar' };
   }
 }
@@ -4317,7 +4333,12 @@ async function renderBackup() {
 
 el('btnBackup').onclick = async () => {
   const ergebnis = await api('POST', '/api/backup');
-  if (ergebnis) toast('Gesichert');
+  if (ergebnis) {
+    const d = ergebnis.data;
+    const teilweise = d && Array.isArray(d.ziele) && d.ziele.some(z => !z.ok);
+    toast(!d || !d.ok ? 'Sicherung fehlgeschlagen – Speicher prüfen' : teilweise
+      ? 'Sicherung nur teilweise erstellt – Sicherungsziele prüfen' : 'Sicherung erfolgreich erstellt', !d || !d.ok || teilweise);
+  }
   renderBackup();
 };
 
@@ -5143,6 +5164,7 @@ kartenfarben = new window.KartenfarbenModul.Kartenfarben({
   speicher: {getItem: key => localStorage.getItem(key), setItem: (key, wert) => localStorage.setItem(key, wert)},
   stil: document.body.style,
   geaendert: () => {farbenLesen(); zeichnenAnfordern();},
+  rueckmeldung: (text, fehler) => toast(text, fehler),
 });
 farbenLesen();
 tagSetzen(gemerkt('agripilot.tag') === '1');

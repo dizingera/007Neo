@@ -2228,3 +2228,10 @@ erwartete Traktor-ID mitsenden; abweichende aktuelle Auswahl wird abgewiesen.
 Ein Lenkausgangsfehler aus aktiver Führung erzeugt ebenfalls einen Alarm statt nur
 einer gewöhnlichen Pausemeldung. Nicht endliche Radwinkel bleiben auch bei
 abgeschalteter Lenkung in HTTP-/WebSocket-Ausgaben unbekannt und gültiges JSON.
+
+
+## Sichtbare Speicherbestätigungen (1.5.102)
+
+Nach erfolgreichem Speichern, Übernehmen oder Bestätigen erscheint eine gut sichtbare Meldung mit grünem Haken für sechs Sekunden. Das gilt auch in geöffneten Editoren. Über das Kreuz lässt sich die Meldung früher schließen. Es ist kein zusätzlicher Bestätigungsklick nötig.
+
+Die Meldung erscheint erst nach einer angenommenen Antwort des Geräts beziehungsweise nach erfolgreichem Speichern der Kartenfarben im Browser. Fehler und nur teilweise gelungene Sicherungen erhalten keine Erfolgsbestätigung. Fehlermeldungen bleiben neun Sekunden sichtbar; spätere Speicherbestätigungen warten, bis die Fehlermeldung verschwindet oder geschlossen wird.

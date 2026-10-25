@@ -49,3 +49,16 @@ test('Flächenfarben bleiben durchsichtig und getrennt für Tag und Nacht erhalt
  neu.k.themaSetzen('tag');assert.equal(neu.stil.size,0);neu.k.speichern();assert.equal(neu.stil.get('--f-doppelt'),'rgba(200,104,12,0.64)');
  neu.k.zuruecksetzen();neu.k.themaSetzen('nacht');assert.equal(neu.stil.get('--f-doppelt'),'rgba(171,205,239,0.72)');
 });
+
+
+test('Farbspeicherung bestätigt Erfolg und meldet fehlenden Browserspeicher als Fehler',()=>{
+  for(const fehler of [false,true]){
+    const u=umgebung(new Map(),fehler),meldungen=[];u.k.rueckmeldung=(text,err)=>meldungen.push({text,err});
+    u.k.speichern();assert.equal(meldungen.length,1);assert.equal(meldungen[0].err,fehler);
+    assert.match(meldungen[0].text,fehler?/nicht gespeichert/:/gespeichert/);
+  }
+});
+test('Standardfarben erhalten ebenfalls eine echte Speicherbestätigung',()=>{
+  const u=umgebung(),meldungen=[];u.k.rueckmeldung=(text,err)=>meldungen.push({text,err});
+  u.k.zuruecksetzen();assert.equal(meldungen[0].err,false);assert.match(meldungen[0].text,/wiederhergestellt und gespeichert/);
+});

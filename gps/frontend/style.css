@@ -746,3 +746,17 @@ label.button { display: inline-flex; align-items: center; cursor: pointer; }
 .sheet .item .sub { white-space: pre-line; }
 
 #lenkLiveArbeit { white-space: pre-line; }
+
+/* Rückmeldungen stehen auch über Editoren und innerhalb nativer Dialoge. */
+.toast.rueckmeldung{position:fixed;top:104px;left:50%;transform:translateX(-50%);z-index:2000;display:flex;align-items:center;gap:12px;max-width:min(760px,calc(100vw - 32px));box-sizing:border-box;padding:12px 14px;background:var(--panel-2);color:var(--text,#f2f5f6);font-size:18px;line-height:1.4;box-shadow:0 10px 35px #0008}
+.toast.rueckmeldung.erfolg{border-color:#5dff8e;background:#102e20;color:#effff3}
+.toast.rueckmeldung .rueckmeldung-symbol{flex:none;font-size:28px;font-weight:800;line-height:1}
+.toast.rueckmeldung.erfolg .rueckmeldung-symbol{color:#5dff8e}
+.toast.rueckmeldung .rueckmeldung-text{overflow-wrap:anywhere}
+.toast.rueckmeldung .rueckmeldung-zu{flex:none;min-width:44px;min-height:44px;padding:0;border:1px solid currentColor;background:transparent;color:inherit;font-size:28px;line-height:1;border-radius:8px;margin-left:6px}
+.toast.rueckmeldung.error{background:#3b1717;color:#ffb8b1;border-color:#ff7a72}
+body.tag .toast.rueckmeldung.erfolg{background:#e8f8ed;color:#104329;border-color:#176f3a}
+body.tag .toast.rueckmeldung.erfolg .rueckmeldung-symbol{color:#176f3a}
+@media(max-width:650px){.toast.rueckmeldung{top:140px;left:16px;right:16px;transform:none;max-width:none;font-size:16px}}
+
+.toast.rueckmeldung[hidden]{display:none}
