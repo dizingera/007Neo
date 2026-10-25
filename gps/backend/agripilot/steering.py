@@ -166,6 +166,22 @@ class SteeringController:
         context.speed_ms = fix.speed_ms
         context.cross_track_m = guidance.cross_track_m
 
+        # NaN besteht Vergleiche mit Tempo-/Abstandsgrenzen; der Ratenbegrenzer
+        # kann daraus sogar einen endlichen, aber unbeabsichtigten Einschlag machen.
+        # Auch die AUS-Nachricht muss nur endliche Zahlen enthalten (UDP-Kodierung).
+        zahlen = (now, fix.speed_ms, fix.received_at, fix.lat, fix.lon,
+                  guidance.cross_track_m, guidance.steer_angle_deg, context.wheelbase_m)
+        ungueltig = any(not isinstance(wert, (int, float)) or not math.isfinite(wert)
+                        for wert in zahlen)
+        if ungueltig:
+            if self.command.engaged:
+                self.disengage_count += 1
+                self._abgabe("Ungültige Lenkdaten")
+            self.command = SteerCommand(reason="Ungültige Lenkdaten")
+            self._last_angle, self._last_angle_at = 0.0, 0.0
+            self.output.command(False, 0.0, SteerContext())
+            return self.command
+
         blocked = self._blocking_reason(guidance, fix, now)
         if blocked:
             if self.command.engaged:

@@ -1,5 +1,16 @@
 # Bedienung im Feld
 
+## Ungültige Lenkdaten stoppen den Ausgang (1.5.91)
+
+Nicht berechenbare oder unendliche Werte für Sollwinkel, Spurabweichung, Tempo,
+Zeitstempel, Position oder Radstand lösen sofort einen AUS-Befehl aus.
+Der Knopf zeigt „Ungültige Lenkdaten“. Die normale Tempo-Verzögerung gilt hier
+nicht. Der AUS-Befehl enthält ausschließlich endliche Werte, damit auch ein
+UDP-Ausgang ihn übertragen kann. Sobald die Daten wieder gültig sind, gelten
+die normalen Freigabebedingungen.
+
+Nicht am echten Traktor geprüft.
+
 ## Fahrer-Eingriff bleibt wirksam (1.5.90)
 
 Ein erkannter Eingriff stoppt den Motor bereits im 50-Hz-Regelfaden. Das Signal bleibt über weitere Positionsmeldungen und AUS-Befehle erhalten; erst bewusstes neues Scharfschalten gibt die Lenkung wieder frei (Prüfbefund F6).
