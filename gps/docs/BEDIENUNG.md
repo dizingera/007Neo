@@ -1,5 +1,11 @@
 # Bedienung im Feld
 
+## Abschalten überholt jeden alten Motorbefehl (1.5.86)
+
+„Lenkung aus“ setzt die Motorleistung sofort auf null. Der Motorfaden verwirft zuvor berechnete Befehle, sobald ein neuer Befehl eingetroffen ist. Gegenprobe mit gezielt angehaltenem Regelthread ergänzt (Prüfbefund F5).
+
+Nicht am echten Traktor geprüft.
+
 ## Lenkmodul geprüft (1.5.85)
 
 Gefunden und behoben:

@@ -310,6 +310,8 @@ class PhidgetOutput(SteerOutput):
         self._ohne_messung_seit: Optional[float] = None
         self._status_ok = ""
         self._thread: Optional[threading.Thread] = None
+        self._motor_lock = threading.RLock()
+        self._kommando_generation = 0
 
     # -- Aufbau -----------------------------------------------------------
 
@@ -450,12 +452,16 @@ class PhidgetOutput(SteerOutput):
     # -- Betrieb ----------------------------------------------------------
 
     def command(self, engaged: bool, angle_deg: float, context: SteerContext) -> None:
-        self._engaged = engaged
-        self._target_angle = angle_deg
-        self._context = context
-        self._kommando_at = time.monotonic()
-        if not engaged:
-            self._integral = 0.0
+        with self._motor_lock:
+            self._kommando_generation += 1
+            self._engaged = engaged
+            self._target_angle = angle_deg
+            self._context = context
+            self._kommando_at = time.monotonic()
+            if not engaged:
+                self._integral = 0.0
+                self._last_error = 0.0
+                self._safe_stop()
 
     def on_arm(self) -> None:
         self._integral = 0.0
@@ -646,6 +652,8 @@ class PhidgetOutput(SteerOutput):
         return None
 
     def _step(self, dt: float) -> None:
+        with self._motor_lock:
+            generation = self._kommando_generation
         if self.motor is None:
             return
         if self._anschlag is not None:
@@ -655,8 +663,11 @@ class PhidgetOutput(SteerOutput):
                 self._anschlag[1] = max(self._anschlag[1], roh)
         if time.time() < self._test_bis and not self._engaged:
             try:
-                self.motor.setTargetVelocity(self._test_duty)
-                self.motor.resetFailsafe()
+                with self._motor_lock:
+                    if generation != self._kommando_generation:
+                        return
+                    self.motor.setTargetVelocity(self._test_duty)
+                    self.motor.resetFailsafe()
                 diagnose = getattr(self.motor, "diagnose", None)
                 if diagnose is not None:
                     self._test_strom_max = max(self._test_strom_max, diagnose().get("strom_a", 0.0))
@@ -710,8 +721,12 @@ class PhidgetOutput(SteerOutput):
             duty = -duty
 
         try:
-            self.motor.setTargetVelocity(duty)
-            self.motor.resetFailsafe()
+            with self._motor_lock:
+                # Ein bereits berechneter Wert darf ein späteres AUS nicht überholen.
+                if generation != self._kommando_generation:
+                    return
+                self.motor.setTargetVelocity(duty)
+                self.motor.resetFailsafe()
         except Exception as exc:  # noqa: BLE001
             self.last_error_text = str(exc)
             return
@@ -897,8 +912,9 @@ class PhidgetOutput(SteerOutput):
         if self.motor is None:
             return
         try:
-            self.motor.setTargetVelocity(0.0)
-            self.motor.resetFailsafe()
+            with self._motor_lock:
+                self.motor.setTargetVelocity(0.0)
+                self.motor.resetFailsafe()
         except Exception:  # noqa: BLE001
             pass
 
