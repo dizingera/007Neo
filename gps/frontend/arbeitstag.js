@@ -171,6 +171,7 @@
     gross.append(schalter, doc.createTextNode('Große Tasten')); kopf.appendChild(gross); host.appendChild(kopf);
     const status = n('p', 'Wird geladen …', 'at-hinweis'); status.setAttribute('role', 'status'); host.appendChild(status);
     const uebung = n('p', undefined, 'at-uebung'); uebung.hidden = true; host.appendChild(uebung);
+    const aktuell = n('section', undefined, 'aw-aktuell'); host.appendChild(aktuell);
     const schnell = n('div', undefined, 'at-schnell'); host.appendChild(schnell);
     const checkBox = n('ul', undefined, 'at-checks'), keineChecks = n('p', 'Noch keine Bereitschaftsprüfung verfügbar.');
     ['Bereit zur Arbeit', 'Arbeit abschließen & Archiv', 'Verlauf & Datenschutz / Abgleich'].forEach((titel, i) => {
@@ -183,6 +184,12 @@
       kontextPruefen();
       const tag = cache.tag || {};
       bereitschaft(tag);
+      if (typeof window !== 'undefined' && window.Arbeitsansicht) {
+        const A=window.Arbeitsansicht,j=tag.arbeit;
+        aktuell.replaceChildren(n('span',j?'Aktuelle Feldarbeit':'Feldarbeit','aw-status'),n('h3',j?j.operation||'Arbeit':'Noch keine Arbeit gestartet'));
+        if(j){const v=A.arbeit(j,true);aktuell.appendChild(A.kennzahlen(doc,[['Bearbeitet',v.flaeche],['Arbeitsdauer',v.dauer],['Strecke',v.strecke]]));}
+        else p(aktuell,'Feld und Tätigkeit auswählen. Mit Markieren in der Kabine beginnt die Aufzeichnung.');
+      }
       // Nur angezeigte Daten vergleichen. Ladezeit und reine Hintergrundwerte sind kein Rendergrund.
       const anzeige = {tag: Object.fromEntries(['gespann', 'offline', 'einstieg', 'arbeit', 'sicherung', 'abgleich', 'uebung'].map(k => [k, tag[k]])),
         buch: cache.buch, archiv: cache.archiv, konflikte: cache.konflikte, plan};

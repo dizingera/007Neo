@@ -3544,6 +3544,7 @@ async function refreshLists(takt = false) {
   }
   if (active === 'maschinen') renderFlotte();
   if (active === 'jobs') {
+    if(takt && el('jobList').contains(document.activeElement))return;
     const [jobs, fields] = await Promise.all([
       fetch('/api/jobs').then((r) => r.json()), fetch('/api/fields').then((r) => r.json())]);
     renderJobs(jobs, fields);
@@ -3640,7 +3641,7 @@ function renderFields(fields, lines) {
     const row = item({
       active: field.id === currentId,
       title: field.name,
-      sub: `${field.area_ha.toFixed(2)} ha` +
+      sub: `${Arbeitsansicht.zahl(field.area_ha)} ha` +
            (field.boundary.length ? ` · ${field.boundary.length} Grenzpunkte` : ' · keine Grenze') +
            (field.working_boundary?.length?' · Arbeitsgrenze aktiv':'') +
            ` · ${spuren.length} ${spuren.length === 1 ? 'Spur' : 'Spuren'}` +
@@ -3680,6 +3681,13 @@ function renderFields(fields, lines) {
         }],
       ],
     });
+    row.classList.add('aw-feld');
+    const haupt=row.querySelector('.main');
+    const mini=document.createElement('div');mini.className='aw-umriss';mini.setAttribute('aria-hidden','true');
+    const punkte=Arbeitsansicht.umriss(field.boundary);
+    if(punkte){const svg=document.createElementNS('http://www.w3.org/2000/svg','svg');svg.setAttribute('viewBox','0 0 100 100');const polygon=document.createElementNS('http://www.w3.org/2000/svg','polygon');polygon.setAttribute('points',punkte);svg.appendChild(polygon);mini.appendChild(svg);}else mini.textContent='⌁';
+    haupt.prepend(mini);
+    const badge=document.createElement('span');badge.className='aw-status';badge.textContent=field.id===currentId?'Geladen':field.boundary.length>=3?'Grenze vorhanden':'Grenze fehlt';haupt.prepend(badge);
     row.dataset.field=field.id;
     if(offeneAktionen.has(field.id))row.querySelector('.mehr')?.click();
     host.appendChild(row);
@@ -4126,8 +4134,14 @@ let jobFelderOffen = null;   // aufgeklappte Felder in der Liste der Arbeiten
 
 function renderJobs(jobs, fields) {
   const host = el('jobList');
+  const offeneExporte=new Set([...host.querySelectorAll('[data-job]')].filter(r=>r.querySelector('.aw-details')?.open).map(r=>r.dataset.job));
   host.innerHTML = '';
   const namen = Object.fromEntries((fields || []).map((f) => [f.id, f.name]));
+  const zusammen = Arbeitsansicht.summe(jobs);
+  const ueber = el('arbeitsUebersicht');
+  ueber.replaceChildren(Arbeitsansicht.kennzahlen(document, [
+    ['Gespeicherte Arbeiten', String(zusammen.anzahl)], ['Offene Aufträge', String(zusammen.offen)],
+    ['Bearbeitet · alle Durchgänge', Arbeitsansicht.zahl(zusammen.flaeche) + ' ha']]));
   // Je Feld ein Abschnitt, die zuletzt bearbeiteten Felder zuerst.
   const gruppen = new Map();
   jobs.forEach((job) => {
@@ -4135,26 +4149,24 @@ function renderJobs(jobs, fields) {
     gruppen.get(job.field_id).push(job);
   });
   gruppen.forEach((liste, fieldId) => {
-    const ha = liste.reduce((summe, job) => summe + job.area_ha, 0);
-    const minuten = liste.reduce((summe, job) =>
-      summe + (job.ended_at ? (job.ended_at - job.started_at) / 60 : 0), 0);
+    const ha = Arbeitsansicht.summe(liste).flaeche;
     if (!jobFelderOffen) jobFelderOffen = new Set([fieldId]);   // beim ersten Mal: das neueste Feld
     const offen = jobFelderOffen.has(fieldId);
     const kopf = document.createElement('button');
     kopf.type = 'button';
-    kopf.className = 'gruppe klapp';
+    kopf.className = 'gruppe klapp aw-feldkopf';
     kopf.setAttribute('aria-expanded', String(offen));
     kopf.innerHTML = '<b></b><span></span>';
     kopf.querySelector('b').textContent = `${offen ? '▾' : '▸'} ${namen[fieldId] || 'Unbekanntes Feld'}`;
     kopf.querySelector('span').textContent =
-      `${liste.length} ${liste.length === 1 ? 'Arbeit' : 'Arbeiten'} · ${ha.toFixed(2)} ha · ${(minuten / 60).toFixed(1)} h`;
+      `${liste.length} ${liste.length === 1 ? 'Arbeit' : 'Arbeiten'} · ${Arbeitsansicht.zahl(ha)} ha über alle Durchgänge`;
     kopf.onclick = () => {
       if (offen) jobFelderOffen.delete(fieldId); else jobFelderOffen.add(fieldId);
       renderJobs(jobs, fields);
     };
     host.appendChild(kopf);
     if (!offen) return;
-    liste.forEach((job) => host.appendChild(jobZeile(job)));
+    liste.forEach((job) => {const zeile=jobZeile(job);const details=zeile.querySelector('.aw-details');if(details)details.open=offeneExporte.has(String(job.id));host.appendChild(zeile);});
     const fertige = liste.filter((job) => job.ended_at).length;
     if (fertige > 1) {
       const zeile = document.createElement('div');
@@ -4270,18 +4282,19 @@ async function renderGenauigkeit() {
 
 function jobZeile(job) {
   const started = new Date(job.started_at * 1000);
-  const minutes = job.ended_at ? (job.ended_at - job.started_at) / 60 : null;
-  const row = item({
-    title: `${job.operation || 'Arbeit'} · ${job.area_ha.toFixed(2)} ha`,
-    sub: `${started.toLocaleString('de-DE')} · ${job.vehicle || 'Traktor'}` +
-         (minutes ? ` · ${minutes.toFixed(0)} min` : ' · läuft') +
-         ` · ${(job.distance_m / 1000).toFixed(1)} km` +
-         (job.overlap_ha ? ` · ${job.overlap_ha.toFixed(2)} ha doppelt` : '') +
-         (job.genauigkeit ? `\nLenkung: ${genauigkeitText(job.genauigkeit)}` : ''),
-    actions: [],
-  });
+  const ansicht = Arbeitsansicht.arbeit(job, state.live?.job?.id === job.id);
+  const row = item({title: job.operation || 'Arbeit', sub: ansicht.datum + ' · ' + (job.vehicle || 'Traktor'), actions: []});
+  row.classList.add('aw-arbeit');
+  if(ansicht.aktiv)row.classList.add('aw-laeuft');
+  const haupt = row.querySelector('.main');
+  const status = document.createElement('span'); status.className='aw-status';status.textContent=ansicht.status;
+  haupt.prepend(status);
+  haupt.appendChild(Arbeitsansicht.kennzahlen(document,[['Bearbeitet',ansicht.flaeche],['Arbeitsdauer',ansicht.dauer],['Strecke',ansicht.strecke],['Überlappung',ansicht.doppelt]]));
+  if(job.genauigkeit){const g=document.createElement('p');g.className='note';g.textContent='Lenkung: '+genauigkeitText(job.genauigkeit);haupt.appendChild(g);}
   row.dataset.job = job.id;
   const actions = row.querySelector('.actions');
+  const details=document.createElement('details');details.className='aw-details';
+  const summary=document.createElement('summary');summary.textContent='Export & weitere Aktionen';details.append(summary,actions);row.appendChild(details);
   if(job.ended_at){const b=document.createElement('button');b.textContent='Arbeitslinie übernehmen';b.onclick=()=>feldwerkzeuge.referenz(job);actions.appendChild(b);}
   if (job.ended_at && job.area_ha > 0) {
     const knopf = document.createElement('button');

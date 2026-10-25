@@ -227,7 +227,7 @@
       <button data-tab="arbeitstag" data-gruppe="feld" class="tab" role="tab" aria-selected="false" tabindex="-1"><svg class="tab-symbol" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h16v17H4zM8 2v4M16 2v4M7 12l3 3 6-6"/></svg><span class="tab-text"><span class="tab-name">Arbeitstag</span><small>Start, Verlauf und Abschluss</small></span></button>
       <button data-tab="fields" data-gruppe="feld" class="tab active" role="tab" aria-selected="true"><svg class="tab-symbol" viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 8.5L10 4l10.5 3.5-2 11.5L5 20z"/><path d="M8 13h9"/></svg><span class="tab-text"><span class="tab-name">Felder</span><small>Grenze, Shapefile, Luftbild</small></span></button>
       <button data-tab="lines" data-gruppe="feld" class="tab" role="tab" aria-selected="false" tabindex="-1"><svg class="tab-symbol" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 21L9 3M12 21V3M18 21L15 3"/></svg><span class="tab-text"><span class="tab-name">Spuren</span><small>AB, Kontur, Fahrgassen</small></span></button>
-      <button data-tab="jobs" data-gruppe="feld" class="tab" role="tab" aria-selected="false" tabindex="-1"><svg class="tab-symbol" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 4V3h6v1M8.5 11.5l2 2 4.5-4.5M8.5 17h7"/></svg><span class="tab-text"><span class="tab-name">Arbeiten</span><small>Liste, Export, Löschen</small></span></button>
+      <button data-tab="jobs" data-gruppe="feld" class="tab" role="tab" aria-selected="false" tabindex="-1"><svg class="tab-symbol" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 4V3h6v1M8.5 11.5l2 2 4.5-4.5M8.5 17h7"/></svg><span class="tab-text"><span class="tab-name">Arbeiten</span><small>Felder, Tätigkeiten, Verlauf</small></span></button>
       <button data-tab="maschinen" data-gruppe="feld" class="tab" role="tab" aria-selected="false" tabindex="-1"><svg class="tab-symbol" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4.5"/><path d="M12 12l5.5-5.5"/></svg><span class="tab-text"><span class="tab-name">Fernansicht</span><small>Wo die anderen fahren</small></span></button>
       <button data-tab="saatplan" data-gruppe="feld" class="tab" role="tab" aria-selected="false" tabindex="-1"><svg class="tab-symbol" viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="1.5"/><path d="M9.3 4v16M14.7 4v16" stroke-dasharray="2.2 2.2"/><path d="M4 9h16"/></svg><span class="tab-text"><span class="tab-name">Saatplan</span><small>Säspuren und Fahrgassen</small></span></button>
       <button data-tab="headland" data-gruppe="feld" class="tab" role="tab" aria-selected="false" tabindex="-1"><svg class="tab-symbol" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 20V10a5 5 0 0110 0v3"/><path d="M14 11l3 3 3-3"/></svg><span class="tab-text"><span class="tab-name">Vorgewende &amp; Wende</span><small>Breite, Wendeart</small></span></button>
@@ -333,14 +333,16 @@
 
   <section class="tab-panel" data-panel="jobs" hidden>
     <div class="row">
-      <input id="arbeitName" placeholder="Bezeichnung der nächsten Arbeit, z.B. Grubbern">
-      <a class="button" id="btnJobsCsv" href="/api/jobs.csv">Alle Arbeiten als CSV</a>
+      <label class="aw-naechste" for="arbeitName">Nächste Tätigkeit<input id="arbeitName" placeholder="z. B. Grubbern"></label>
     </div>
+    <details class="aw-gesamtexport"><summary>Gesamtexport &amp; MyTerra</summary>
     <div class="row">
+      <a class="button" id="btnJobsCsv" href="/api/jobs.csv">Alle Arbeiten als CSV</a>
       <button id="btnMyterraExport" class="primary">Neue Arbeiten für MyTerra exportieren</button>
       <label class="switch"><input type="checkbox" id="myterraAlle"> auch schon übergebene</label>
     </div>
     <p class="note" id="myterraInfo" role="status" aria-atomic="true">MyTerra: wird geladen …</p>
+    </details>
     <details class="erklaerung">
       <summary>Erklärung</summary>
       <p>Die Bezeichnung steht später in der Liste und im CSV fürs Büro. Sie wird gemerkt,
@@ -351,6 +353,7 @@
         unten. Die Fläche verschwindet dann auch aus der Karte, und das Löschen geht beim
         Abgleich an alle Geräte. Eine laufende Arbeit wird nie gelöscht.</p>
     </details>
+    <div id="arbeitsUebersicht"></div>
     <div class="list" id="jobList"></div>
     <div class="row">
       <button id="btnJobsAlleLoeschen" class="danger abgesetzt" hidden>Alle Arbeiten löschen</button>
@@ -1200,6 +1203,7 @@
 <script src="arbeitstag.js"></script>
 <script src="umriss.js"></script>
 <script src="rueckmeldung.js"></script>
+<script src="arbeitsansicht.js"></script>
 <script src="app.js"></script>
 <script>
   /* Nur fuer die Kachel auf dem Android-Tablet. Browser lassen Service Worker
