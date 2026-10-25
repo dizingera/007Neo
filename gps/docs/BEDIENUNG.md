@@ -2017,3 +2017,15 @@ wenn der Regler bisher an diese Grenze kam. Für Kriechen bei kleinen Korrekture
 die Mindestleistung unter Lenkung prüfen. Stromgrenze, Not-Aus und Eingriffserkennung
 bleiben unverändert. Die Einstellung gilt lokal für die angeschlossene Motorsteuerung.
 Bestehende Einstellungen werden durch das Update nicht pauschal erhöht.
+
+
+## Übersichtlichere Menüs (ab 1.5.97)
+
+Die Seitenleiste zeigt klare Namen in den Gruppen Im Feld, Maschine und Werkstatt.
+Auf schmalen Displays wechselt die Auswahl „Menübereich“ zwischen allen Seiten.
+Motorstärke und Lenk-Automatik stehen auf breiten Displays nebeneinander;
+Erklärungen und manuelle Regler lassen sich aufklappen. Bei Traktor und Gerät
+sind Maße, Anbau und Abstimmung nach Themen aufgeteilt. Auswahl, Name und
+Übernehmen bleiben direkt sichtbar. Die Menüsuchfunktion öffnet auch zugeklappte
+Gruppen. In der Lenkung sind Werkstatt, Radmitte und ältere Assistenz separat
+aufklappbar; Motor sofort anhalten steht oberhalb und bleibt beim Rollen erreichbar.

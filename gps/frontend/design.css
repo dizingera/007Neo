@@ -493,3 +493,70 @@ body.tag { --f-flaeche: rgba(23, 140, 70, .38); --f-doppelt: rgba(200, 104, 12, 
 .sheet .motorstaerke input[type="range"] { width: 100%; min-height: 48px; }
 .sheet .motorstaerke output { font-weight: 700; }
 .sheet .motorstaerke .row { justify-content: space-between; margin-bottom: 14px; }
+/* Menü 1.5.97: erst Aufgabe wählen, dann gezielt die zugehörigen Werte öffnen. */
+.sheet .tab-panel { padding: 20px 24px; scroll-padding-block: 20px; }
+.sheet .tabs { width: 232px; flex: 0 0 232px; padding: 8px; gap: 2px; }
+.sheet .tab { min-height: 48px; padding: 7px 10px; border-radius: 8px; }
+.sheet .tab .tab-name { font-size: 15px; }
+.sheet .tab small { display: none; }
+.sheet .tab-gruppe { margin: 12px 10px 6px; font-size: 11px; letter-spacing: .09em; }
+.sheet .tab .tab-symbol { width: 30px; height: 30px; }
+.sheet .sheet-head { min-height: 72px; }
+.sheet .menue-seitenwahl { display: none; }
+.sheet .karte { padding: 18px; gap: 12px; border-radius: 10px; align-content: start; }
+.sheet .karte > p { margin: 0; line-height: 1.5; }
+.sheet .karte > h3 { font-size: 19px; margin: 0; }
+.sheet .karten { gap: 16px; margin-bottom: 18px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 380px), 1fr)); }
+.sheet .row { gap: 10px; margin-bottom: 14px; flex-wrap: wrap; }
+.sheet .note { margin: 6px 0 12px; line-height: 1.5; }
+.sheet .abschnitt { margin: 22px 0 12px; padding-top: 18px; }
+.sheet .formular, .sheet .grid { gap: 14px; }
+.sheet .formular > .menue-gruppe { grid-column: 1 / -1; }
+.sheet .menue-gruppe, .sheet .regler-manuell { border: 1px solid var(--line); border-radius: 10px;
+  margin-bottom: 10px; background: var(--panel); min-width: 0; }
+.sheet .menue-gruppe > summary, .sheet .regler-manuell > summary { min-height: 52px; padding: 14px 16px;
+  cursor: pointer; font-size: 16px; font-weight: 600; line-height: 1.5; color: var(--text); }
+.sheet .menue-gruppe[open] > summary, .sheet .regler-manuell[open] > summary { border-bottom: 1px solid var(--line); }
+.sheet .formular .menue-gruppe > fieldset { margin: 0; padding: 16px; border: 0; }
+.sheet .formular .menue-gruppe > fieldset > legend { display: none; }
+.sheet .menue-werkstatt > .karte { border: 0; }
+.sheet .menue-werkstatt > .karte > h3 { display: none; }
+.sheet .regler-manuell > :not(summary) { margin-inline: 16px; }
+.sheet .regler-manuell > :last-child { margin-bottom: 16px; }
+.sheet .lenkregler-uebersicht { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr);
+  gap: 16px; align-items: start; margin-bottom: 16px; }
+.sheet .lenkregler-uebersicht > .karte { margin: 0; }
+.sheet .motorstaerke input[type="range"] { min-height: 48px; margin: 0; }
+.sheet .motorstaerke output { font-size: 24px; font-variant-numeric: tabular-nums; }
+.sheet .motorstaerke .row { margin: 0; font-size: 13px; color: var(--muted); }
+.sheet .lenkautomatik #automatikHinweis { font-size: 16px; line-height: 1.5; }
+.sheet .automatik-bedienung { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.sheet .automatik-bedienung label { grid-column: 1 / -1; display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.sheet .automatik-bedienung select { width: auto; min-width: 100px; }
+.sheet .automatik-bedienung #btnAutomatikZurueck { grid-column: 1 / -1; }
+.sheet .erklaerung { margin: 0; }
+.sheet .lenkung-notaus { justify-content: flex-end; }
+.sheet .setting-group { margin-bottom: 10px; border-radius: 10px; }
+.sheet .setting-group > summary { min-height: 52px; padding: 14px 16px; font-size: 16px; }
+.sheet .setting-field { padding: 14px 16px; }
+.sheet .setting-field .help { line-height: 1.5; }
+.sheet .item { padding: 14px 16px; gap: 12px; }
+.sheet button, .sheet .button { min-height: 48px; }
+@media (max-width: 1000px) {
+  .sheet .lenkregler-uebersicht { grid-template-columns: 1fr; }
+  .sheet .tabs { width: 210px; flex-basis: 210px; }
+}
+@media (max-width: 760px) {
+  .sheet .tabs { display: none; }
+  .sheet .menue-seitenwahl { display: flex; flex-direction: column; gap: 4px; padding: 10px 16px;
+    border-bottom: 1px solid var(--line); background: var(--ui-nav); font-size: 12px; color: var(--muted); }
+  .sheet .menue-seitenwahl select { width: 100%; min-height: 48px; font-size: 16px; color: var(--text); }
+  .sheet .tab-panel { padding: 16px; }
+  .sheet .karte { padding: 16px; }
+  .sheet .sticky-save { margin: -16px -16px 16px; }
+  .sheet .sheet-head { min-height: 64px; }
+}
+
+.sheet .formular > .menue-gruppe { margin-bottom: 0; }
+.sheet .lenkung-notaus { position: sticky; top: -4px; z-index: 3; padding-block: 6px; background: var(--bg); }
+.sheet .tab-panel[data-panel="lenkung"] > .menue-gruppe > .karte { border: 0; }

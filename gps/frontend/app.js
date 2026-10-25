@@ -1752,6 +1752,10 @@ function menueAusAdresse() {
 window.addEventListener('hashchange', menueAusAdresse);
 el('sheetClose').onclick = menueSchliessen;
 const reiter = [...document.querySelectorAll('.tab')];
+el('menueSeitenwahl').onchange = () => {
+  const tab = reiter.find(t => t.dataset.tab === el('menueSeitenwahl').value);
+  if (tab) tab.onclick();
+};
 reiter.forEach((tab, index) => {
   tab.onclick = () => {
     reiter.forEach((t) => {
@@ -1762,6 +1766,7 @@ reiter.forEach((tab, index) => {
     document.querySelectorAll('.tab-panel').forEach((panel) => {
       panel.hidden = panel.dataset.panel !== tab.dataset.tab;
     });
+    el('menueSeitenwahl').value = tab.dataset.tab;
     seitenkopf(tab);
     // Auf schmalen Geräten scrollt die Leiste: den gewählten Reiter in Sicht holen.
     tab.scrollIntoView({ block: 'nearest', inline: 'nearest' });
