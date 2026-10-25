@@ -1,5 +1,11 @@
 # Bedienung im Feld
 
+## Fahrer-Eingriff bleibt wirksam (1.5.90)
+
+Ein erkannter Eingriff stoppt den Motor bereits im 50-Hz-Regelfaden. Das Signal bleibt über weitere Positionsmeldungen und AUS-Befehle erhalten; erst bewusstes neues Scharfschalten gibt die Lenkung wieder frei (Prüfbefund F6).
+
+Nicht am echten Traktor geprüft.
+
 ## Sensorverlust beendet die Feinabstimmung (1.5.89)
 
 Fällt Drehgeber oder Radwinkelsensor während eines Regelsprungs aus, wird die komplette Feinabstimmung sofort abgebrochen. Der Motor steht, weitere Sprünge bleiben aus und die ursprünglichen P/I/D- und Leistungswerte gelten wieder (Prüfbefund F3).

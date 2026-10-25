@@ -152,3 +152,29 @@ class WerkstattSensorAusfall(unittest.IsolatedAsyncioTestCase):
         finally:
             task.cancel()
             await asyncio.gather(task, return_exceptions=True)
+
+
+class FahrerEingriff(unittest.TestCase):
+    def test_eingriff_stoppt_im_motorfaden_und_bleibt_bis_neuer_freigabe(self):
+        a = ausgang()
+        s = SteeringController(SteeringConfig(enabled=True), a)
+        self.assertEqual(s.arm(), "scharf")
+        a.feedback = OutputFeedback(wheel_angle_deg=1., received_at=time.time())
+        a._override_since = time.time() - .4
+        a.command(True, 5., SteerContext(speed_ms=2.))
+        a._step(.02)
+        self.assertTrue(a.feedback.driver_override)
+        self.assertEqual(a.motor.setTargetVelocity.call_args.args[0], 0.)
+        for _ in range(10):
+            a.command(True, 5., SteerContext(speed_ms=2.))
+            a._step(.02)
+            self.assertTrue(a.feedback.driver_override)
+            self.assertEqual(a.motor.setTargetVelocity.call_args.args[0], 0.)
+        s.disarm()
+        a._step(.02)
+        self.assertTrue(a.feedback.driver_override)
+        self.assertEqual(s.arm(), "scharf")
+        self.assertFalse(a.feedback.driver_override)
+        a.command(True, 5., SteerContext(speed_ms=2.))
+        a._step(.02)
+        self.assertGreater(a.motor.setTargetVelocity.call_args.args[0], 0.)

@@ -317,6 +317,7 @@ class PhidgetOutput(SteerOutput):
         self._last_step = 0.0
         self._encoder_centre = 0.0
         self._override_since: Optional[float] = None
+        self._fahrer_eingriff = False
         self.last_error_text = ""
         self._kommando_at = 0.0                 # monotonic: letzter Lenkbefehl
         self.mitte_gelernt = False              # „Mitte lernen“ gedrückt, seit verbunden
@@ -527,7 +528,7 @@ class PhidgetOutput(SteerOutput):
     def command(self, engaged: bool, angle_deg: float, context: SteerContext) -> None:
         with self._motor_lock:
             self._kommando_generation += 1
-            self._engaged = engaged
+            self._engaged = engaged and not self._fahrer_eingriff
             self._target_angle = angle_deg
             self._context = context
             self._kommando_at = time.monotonic()
@@ -537,9 +538,13 @@ class PhidgetOutput(SteerOutput):
                 self._safe_stop()
 
     def on_arm(self) -> None:
-        self._integral = 0.0
-        self._last_error = 0.0
-        self._override_since = None
+        with self._motor_lock:
+            self._kommando_generation += 1
+            self._integral = self._last_error = 0.0
+            self._override_since = None
+            self._fahrer_eingriff = False
+            self.feedback = OutputFeedback(wheel_angle_deg=self.feedback.wheel_angle_deg,
+                                           received_at=time.time())
         if self.encoder is not None and not self.mitte_gelernt:
             # Ohne gelernte Mitte gilt: beim Scharfschalten steht das Rad gerade.
             # Mit „Mitte lernen“ bleibt die gelernte - sonst verschob jedes
@@ -732,6 +737,12 @@ class PhidgetOutput(SteerOutput):
             generation = self._kommando_generation
         if self.motor is None:
             return
+        with self._motor_lock:
+            if self._fahrer_eingriff:
+                self._safe_stop()
+                self.feedback = OutputFeedback(wheel_angle_deg=self.feedback.wheel_angle_deg,
+                                               driver_override=True, received_at=time.time())
+                return
         if self._anschlag is not None:
             roh = self._drehgeber_roh()
             if roh is not None:
@@ -814,21 +825,21 @@ class PhidgetOutput(SteerOutput):
                 # Ein bereits berechneter Wert darf ein späteres AUS nicht überholen.
                 if generation != self._kommando_generation:
                     return
+                # Eingriff in Radrichtung erkennen, bevor erneut Leistung anliegt.
+                if not regeltest and self._detect_override(measured, rad_duty, dt):
+                    self._fahrer_eingriff = True
+                    self._engaged = False
+                    self._integral = self._last_error = 0.0
+                    duty = 0.0
                 self.motor.setTargetVelocity(duty)
                 self.motor.resetFailsafe()
+                # Der langsamere GPS-Takt darf dieses Ereignis nicht verpassen.
+                self.feedback = OutputFeedback(
+                    wheel_angle_deg=measured, driver_override=self._fahrer_eingriff,
+                    duty=duty, received_at=time.time())
         except Exception as exc:  # noqa: BLE001
             self.last_error_text = str(exc)
             return
-
-        # Der Eingriff wird in Radrichtung erkannt: mit der umgekehrten Motorleistung
-        # verglichen (bis 1.5.84) sah bei "Motor umkehren" jedes zügige Nachlaufen des
-        # Rads wie ein Fahrer aus, der dagegenhält - und die Lenkung ging aus.
-        self.feedback = OutputFeedback(
-            wheel_angle_deg=measured,
-            driver_override=False if regeltest else self._detect_override(measured, rad_duty, dt),
-            duty=duty,
-            received_at=time.time(),
-        )
 
     def _rueckmeldung_pruefen(self, measured: Optional[float], engaged: bool) -> None:
         """Lenken ohne Radwinkel heißt blind lenken: dann gilt der Ausgang als gestört.
