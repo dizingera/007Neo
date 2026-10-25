@@ -1,0 +1,2248 @@
+"""HTTP + WebSocket server, and the process that wires the system together.
+
+The cab display is a web page, which is deliberate: any tablet, phone or laptop
+in the yard can open it, the Pi needs no screen driver stack, and a second
+person can watch a machine's progress from the office without extra software.
+
+The WebSocket carries the live picture at 10 Hz.  Coverage is sent as deltas -
+only the cells marked since the last frame - because sending the whole worked
+map ten times a second would saturate the link within a few hectares.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import dataclasses
+import hmac
+import struct
+import sys
+import contextlib
+import copy
+import json
+import os
+import time
+from pathlib import Path
+from typing import Any, Optional
+
+from fastapi import Body, FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi.responses import JSONResponse, PlainTextResponse, Response
+from fastapi.staticfiles import StaticFiles
+
+from . import config as config_module
+from . import checklist as checklist_module
+from . import lenkung_einrichten, feldwerkzeuge
+from .teilbreiten import TeilbreitenAusgang
+from .kalibrierung import Lenkwerkstatt, KalibrierKonflikt
+from . import settings as settings_module
+from . import export, geo, geraete as geraete_module, imu as imu_module
+from . import recorder as recorder_module, shapefile as shapefile_module, sync
+from . import update as update_module
+from . import backup as backup_module
+from . import onlineupdate as onlineupdate_module
+from . import exe as exe_module
+from . import diagnose as diagnose_module
+from . import luftbild as luftbild_module
+from . import teilen as teilen_module
+from . import myterra as myterra_module
+from .actuators import SimulatorOutput, build_output
+from .coverage import CoverageMap
+from .engine import Engine
+from .gnss import SimulatorSource, build_source
+from .ntrip import (CorrectionSource, RtcmRelay, RtcmRelayClient, build_corrections,
+                    mountpoints_holen, verbindung_testen)
+from .ntrip_protokoll import CasterFehler, rtcm_urteil
+from .steering import SteeringController
+from .storage import Storage
+
+from . import __version__ as VERSION
+
+# Als .exe (PyInstaller) liegt die Oberfläche im entpackten Bündel, nicht neben dem Code.
+# Abgleich von außen: Mindestlänge des Codes und Sperre gegen Durchprobieren.
+MINDESTLAENGE_AUSSEN = 8
+SPERRE_VERSUCHE = 8             # falsche Versuche ...
+SPERRE_FENSTER_S = 900.0        # ... innerhalb von 15 Minuten sperren den Absender
+UPDATE_SUCHE_S = 1800.0         # so oft nach einer neuen Version suchen (halbe Stunde)
+# Was über einen Tunnel hereinkommen darf: der Abgleich und das Update für die Arbeiter.
+VON_AUSSEN_ERLAUBT = frozenset({"/api/sync", "/api/sync/live", "/api/sync/setup", "/api/sync/setup/datei"})
+
+FRONTEND_DIR = (Path(getattr(sys, "_MEIPASS", "")) / "frontend"
+                if getattr(sys, "frozen", False)
+                else Path(__file__).resolve().parents[2] / "frontend")
+
+
+class OberflaecheDateien(StaticFiles):
+    """Die Oberfläche mit "Cache-Control: no-cache".
+
+    Ohne diese Angabe hält der Browser (auch WebView2 im eigenen Fenster) style.css
+    und app.js nach eigenem Ermessen für frisch - nach einem Update lief dann die neue
+    Seite mit dem alten Stil oder Programm. So fragt er jedes Mal nach; eine unveränderte
+    Datei kostet nur ein "304, unverändert".
+    """
+
+    def file_response(self, *args, **kwargs):
+        antwort = super().file_response(*args, **kwargs)
+        antwort.headers["Cache-Control"] = "no-cache"
+        return antwort
+
+
+class Application:
+    """Owns every long-running part and the shared engine."""
+
+    def __init__(self, config) -> None:
+        self.config = config
+        self.store = Storage(config.db_path)
+        self.engine = Engine(config, self.store)
+        self.abgleich_fehler: dict[str, list[float]] = {}   # Absender -> Zeitpunkte falscher Codes
+        # Rohdaten: eine Aufzeichnung, an beiden Quellen angehängt.
+        self.aufzeichnung = recorder_module.Aufzeichnung(
+            Path(config.server.data_dir) / "rohdaten")
+        self.source = None
+        self.imu = None
+        self._quellen_tasks: list[asyncio.Task] = []
+        self._korrektur_tasks: list[asyncio.Task] = []
+        self._quellen_aufbauen()
+        self.steering = self._lenkung_bauen()
+        self.engine.steering = self.steering
+        self.teilbreiten = TeilbreitenAusgang(config.teilbreiten)
+        self.engine.teilbreiten = self.teilbreiten
+        # Führt Buch über den Einbau und liest dabei mit, was sich erst
+        # über die Zeit zeigt - etwa ob "RTK fix" dauerhaft steht.
+        self.checklist = checklist_module.Checkliste(self.store)
+        self.relay: Optional[RtcmRelay] = None
+        self.corrections: Optional[CorrectionSource] = None
+        self.rtcm_client: Optional[RtcmRelayClient] = None
+        self.sync_client: Optional[sync.SyncClient] = None
+        self.tasks: list[asyncio.Task] = []
+        self.clients: set[WebSocket] = set()
+
+    def _quellen_aufbauen(self) -> None:
+        """Empfänger und Neigungssensor aus der Konfiguration bauen.
+
+        Getrennt vom Rest, weil das auch im Betrieb passieren darf: wer eine
+        Aufzeichnung ansehen will, soll dafür nicht den Dienst durchstarten.
+        """
+        config = self.config
+        self.source = build_source(config, self.engine.on_fix)
+        self.engine.simulator = (self.source if isinstance(self.source, SimulatorSource)
+                                 else None)
+        # Beim Abspielen führt die Aufzeichnung beide Ströme: Position und Lage
+        # kommen aus derselben Datei und bleiben damit im selben Takt. Ein
+        # zweiter, eigener Sensor daneben würde davonlaufen - und dann läge die
+        # Schräglage neben der Position, also genau der Fehler, den man mit der
+        # Aufzeichnung untersuchen wollte.
+        if isinstance(self.source, recorder_module.ReplaySource):
+            self.imu = self.source.imu
+        else:
+            # Der Neigungssensor kennt beim Simulator das virtuelle Fahrzeug,
+            # damit Hangausgleich und Drehrate auch ohne Hardware sichtbar werden.
+            self.imu = imu_module.build_source(config, self.engine.simulator)
+        self.engine.imu = self.imu
+        self.source.recorder = self.aufzeichnung
+        if self.imu is not None:
+            self.imu.recorder = self.aufzeichnung
+            # Die Nullung des Sensors gehört zum Einbau und darf einen Neustart
+            # überleben - sonst muss nach jedem Ausschalten neu genullt werden.
+            offsets = self.store.get_setting("imu_offsets") or {}
+            self.imu.roll_offset = float(offsets.get("roll_offset", 0.0))
+            self.imu.pitch_offset = float(offsets.get("pitch_offset", 0.0))
+
+    def _korrekturen_starten(self) -> None:
+        """Woher die RTK-Korrekturen kommen.
+
+        Ist eine eigene Quelle eingetragen, holt jedes Gerät sie selbst - auch ein
+        Arbeiter-Tablet mit Mobilfunk. Die Weitergabe vom Master ist nur der Rückfall
+        ohne eigene Quelle: sie läuft über einen eigenen Port im Hofnetz und kommt
+        über den Tunnel (nur HTTPS) gar nicht durch.
+        """
+        cfg = self.config
+        self.corrections = build_corrections(cfg, self._on_rtcm, self._current_position)
+        self._korrektur_tasks = []
+        if self.corrections is not None:
+            self._korrektur_tasks.append(asyncio.create_task(self.corrections.run()))
+        elif not cfg.is_master and cfg.network.use_master_rtcm:
+            host = _host_of(cfg.network.master_url)
+            self.rtcm_client = RtcmRelayClient(
+                host, cfg.network.rtcm_relay_port,
+                # nicht die gebundene Methode: die Quelle kann wechseln
+                lambda daten: self.source.write_rtcm(daten)
+            )
+            self._korrektur_tasks.append(asyncio.create_task(self.rtcm_client.run()))
+
+    async def korrekturen_wechseln(self) -> str:
+        """Korrekturquelle im Betrieb neu aufbauen - nach geänderten Einstellungen."""
+        for quelle in (self.corrections, self.rtcm_client):
+            if quelle is not None:
+                try:
+                    await quelle.stop()
+                except Exception as exc:  # noqa: BLE001 - weiter, aber nicht stumm
+                    self.engine.note(f"Korrekturquelle ließ sich nicht sauber beenden: {exc}")
+        for task in self._korrektur_tasks:
+            task.cancel()
+        if self._korrektur_tasks:
+            await asyncio.gather(*self._korrektur_tasks, return_exceptions=True)
+        self.corrections = None
+        self.rtcm_client = None
+        self._korrekturen_starten()
+        quelle = self.corrections or self.rtcm_client
+        return quelle.adresse if quelle is not None and quelle.adresse else "aus"
+
+    async def lenkung_neu_bauen(self) -> str:
+        """Den Lenkausgang mit der aktuellen Konfiguration neu aufbauen - nach
+        "Gefundene Geräte übernehmen" soll niemand das Programm neu starten müssen.
+        Nie bei scharfer Lenkung."""
+        if self.steering.armed:
+            return "Lenkung ist scharf - Ausgang bleibt"
+        await self.steering.stop()
+        self.steering = self._lenkung_bauen()
+        self.engine.steering = self.steering
+        await self.steering.start()
+        return self.steering.output.status
+
+    def _lenkung_bauen(self) -> SteeringController:
+        """Lenkausgang zur Quelle: im Simulator lenkt die Engine selbst, ohne Motor."""
+        if self.engine.simulator is not None:
+            return SteeringController(self.config.steering, SimulatorOutput(), simulator=True)
+        return SteeringController(self.config.steering, build_output(self.config, self.imu))
+
+    def simulator_ins_feld(self) -> bool:
+        """Den virtuellen Traktor ins geladene Feld setzen - nur im Simulator."""
+        simulator_source = self.engine.simulator
+        ziel = self.engine.startpunkt_wgs()
+        if simulator_source is None or ziel is None:
+            return False
+        simulator_source.versetzen(*ziel)
+        # Der Kurs springt mit: ohne Neubeginn hielte die Kursberechnung den
+        # Sprung für eine Umkehr, und der Traktor zeigte rückwärts.
+        self.engine.heading_filter.reset()
+        if self.engine.heading is not None:
+            self.engine.implement_heading.reset(ziel[2])
+        return True
+
+    def _quellen_starten(self) -> None:
+        # Im Simulator steht der Traktor gleich im zuletzt geladenen Feld.
+        self.simulator_ins_feld()
+        self._quellen_tasks = [asyncio.create_task(self.source.run())]
+        if self.imu is not None:
+            self._quellen_tasks.append(asyncio.create_task(self.imu.run()))
+
+    async def quelle_wechseln(self) -> dict:
+        """Empfänger und Sensor im laufenden Betrieb neu aus der Konfiguration bauen.
+
+        Die Reihenfolge ist Sicherheitssache: erst die Lenkung aus und eine
+        laufende Wende beendet - einer Maschine, die gerade lenkt, darf keine
+        andere Positionsquelle untergeschoben werden. Dann eine laufende
+        Aufzeichnung beenden, denn was danach hereinkommt, ist eine andere
+        Fahrt. Erst dann die alte Quelle anhalten und die neue starten.
+        """
+        self.steering.disarm("Positionsquelle gewechselt")
+        self.engine.stop_turn("Positionsquelle gewechselt")
+        if self.aufzeichnung.laeuft:
+            self.aufzeichnung.stop()
+            self.engine.note("Aufzeichnung beendet: Quelle gewechselt")
+        alte_quelle, alter_sensor = self.source, self.imu
+        for task in self._quellen_tasks:
+            task.cancel()
+        try:
+            await alte_quelle.stop()
+            if alter_sensor is not None:
+                await alter_sensor.stop()
+        except Exception as exc:  # noqa: BLE001 - der Wechsel geht weiter, aber nicht stumm
+            self.engine.note(f"Alte Quelle ließ sich nicht sauber beenden: {exc}")
+        # Abwarten, bis die alten Aufgaben wirklich zu Ende sind. cancel() ist
+        # nur eine Bitte; sie kommt beim nächsten await an. Bis dahin hält eine
+        # serielle Quelle ihren Port noch offen - und die neue Quelle bekäme ihn
+        # nicht -, und ein letzter Fix der alten Quelle liefe noch in die Kette.
+        if self._quellen_tasks:
+            await asyncio.gather(*self._quellen_tasks, return_exceptions=True)
+        self._quellen_tasks = []
+        self._quellen_aufbauen()
+        # Der Lenkausgang hängt am Sensor (Drehrate als Rückmeldung): neu bauen.
+        await self.steering.stop()
+        self.steering = self._lenkung_bauen()
+        self.engine.steering = self.steering
+        await self.steering.start()
+        # Kurs und Nachlauf gehören zur alten Fahrt; der erste Schritt der neuen
+        # wird von der Plausibilitätsprüfung ohnehin verworfen.
+        self.engine.heading_filter.reset()
+        self.engine.implement_heading.reset(None)
+        self._quellen_starten()
+        self.engine.note(f"Quelle: {self.config.gnss.source}")
+        return {"gnss": self.config.gnss.source, "imu": self.config.imu.source}
+
+    # -- lifecycle --------------------------------------------------------
+
+    async def start(self) -> None:
+        cfg = self.config
+        self.store.touch_device(
+            cfg.network.device_id, cfg.network.device_name,
+            cfg.network.role, VERSION,
+        )
+        await self.steering.start()
+        # Vor den Quellen: bis die erste Position kommt, steht das Feld schon da.
+        # Die Lenkung bleibt dabei unscharf - das entscheidet nur der Fahrer.
+        try:
+            self.engine.resume_session()
+        except Exception as exc:  # noqa: BLE001 - ein kaputter Stand darf den Start nicht verhindern
+            self.engine.note(f"Letzter Stand nicht lesbar: {exc}")
+        self._quellen_starten()
+
+        if cfg.is_master:
+            # The master owns the caster connection and re-serves it.
+            self.relay = RtcmRelay(cfg.network.rtcm_relay_port)
+            await self.relay.start()
+        self._korrekturen_starten()
+        if not cfg.is_master:
+            self.sync_client = sync.SyncClient(cfg, self.store, self.engine)
+            self.tasks.append(asyncio.create_task(self.sync_client.run()))
+
+        await self.teilbreiten.start()
+        self.tasks.append(asyncio.create_task(self._broadcast_loop()))
+        self.tasks.append(asyncio.create_task(self._backup_loop()))
+        if self.config.server.update_online and update_module.als_programm():
+            self.tasks.append(asyncio.create_task(self._online_loop()))
+
+    # -- Aktualisierung über das Netz -------------------------------------
+
+    def eigene_adressen(self) -> list[str]:
+        """Unter welchen Adressen die Arbeiter diesen Rechner im Netz erreichen."""
+        import socket
+        gefunden: list[str] = []
+        try:
+            for eintrag in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET):
+                ip = eintrag[4][0]
+                if not ip.startswith(("127.", "169.254.")) and ip not in gefunden:
+                    gefunden.append(ip)
+        except OSError:
+            pass
+        return [f"http://{ip}:{self.config.server.port}" for ip in gefunden]
+
+    def online_pruefen(self) -> dict:
+        """Neue Version suchen (blockiert kurz: im Faden aufrufen).
+
+        Ein Arbeiter fragt zuerst seinen Master - der gibt sein eigenes Programm
+        heraus, auch über den Tunnel. Erst wenn der nichts Neueres hat, GitHub.
+        """
+        cfg = self.config.server
+        vom_master = None
+        if not self.config.is_master and self.config.network.master_url:
+            vom_master, info = onlineupdate_module.vom_master(
+                VERSION, self.config.network.master_url, self.config.network.sync_token)
+            if vom_master["verfuegbar"]:
+                self.online_stand, self.online_info = vom_master, info
+                vom_master["geprueft"] = time.time()
+                return vom_master
+        ergebnis, info = onlineupdate_module.suche(VERSION, cfg.update_repo, cfg.update_api)
+        if ergebnis["fehler"] and vom_master is not None and not vom_master["fehler"]:
+            ergebnis = vom_master          # GitHub nicht erreichbar, der Master schon: aktuell
+        self.online_stand, self.online_info = ergebnis, info
+        ergebnis["geprueft"] = time.time()
+        return ergebnis
+
+    async def _online_loop(self) -> None:
+        """Beim Start (nach einer Minute, das Netz braucht oft etwas) und danach alle halbe Stunde.
+
+        So oft, weil der Knopf "Update" auf dem Hauptbildschirm bald nach dem
+        Ausrollen auf den Master erscheinen soll. Ein Arbeiter fragt dabei
+        zuerst den Master (eine kleine Anfrage); GitHub zweimal je Stunde liegt
+        weit unter dessen Grenze.
+        """
+        await asyncio.sleep(60)
+        while True:
+            try:
+                ergebnis = await asyncio.to_thread(self.online_pruefen)
+                if ergebnis["verfuegbar"]:
+                    self.engine.note(f"Neue Version {ergebnis['neu']} verfügbar - "
+                                     "Knopf „Update“ rechts auf dem Hauptbildschirm")
+            except Exception as exc:  # noqa: BLE001 - Suchen darf nie etwas mitreißen
+                self.engine.note(f"Update-Suche: {exc}")
+            await asyncio.sleep(UPDATE_SUCHE_S)
+
+    def setup_ordner(self) -> Path:
+        return Path(self.config.server.data_dir) / "setup"
+
+    def verteiltes_setup(self) -> Optional[tuple[Path, str]]:
+        """Was dieser Master den Arbeitern als Update gibt: Datei und Version.
+
+        Als exe ist das Programm selbst das Setup. Ein Master aus dem Quelltext
+        (der Pi) gibt das neueste abgelegte Setup heraus, siehe
+        onlineupdate.abgelegtes_setup - liegt keins da, gibt es nichts.
+        """
+        if update_module.als_programm():
+            return Path(sys.executable), VERSION
+        return onlineupdate_module.abgelegtes_setup(self.setup_ordner())
+
+    def eigenes_setup(self, pfad: Optional[Path] = None) -> tuple[int, str]:
+        """Größe und SHA-256 des Setups (ohne Pfad: die laufende AgriPilot.exe).
+        Einmal gerechnet und gemerkt, solange die Datei gleich bleibt."""
+        import hashlib
+        pfad = Path(pfad or sys.executable)
+        stat = pfad.stat()
+        schluessel = (str(pfad), stat.st_size, stat.st_mtime_ns)
+        gemerkt = getattr(self, "_eigenes_setup", None)
+        if gemerkt and gemerkt[0] == schluessel:
+            return gemerkt[1]
+        h = hashlib.sha256()
+        with open(pfad, "rb") as f:
+            for block in iter(lambda: f.read(1024 * 1024), b""):
+                h.update(block)
+        self._eigenes_setup = (schluessel, (stat.st_size, h.hexdigest()))
+        return self._eigenes_setup[1]
+
+    # -- Sicherung --------------------------------------------------------
+
+    def backup_ordner(self) -> list[Path]:
+        ziele = [Path(self.config.server.data_dir) / "sicherungen"]
+        if self.config.server.backup_dir.strip():
+            ziele.append(Path(self.config.server.backup_dir.strip()))
+        return ziele
+
+    async def sichern_jetzt(self) -> dict:
+        self.engine.suspend_job()        # laufende Arbeit mitsichern
+        ergebnis = await asyncio.to_thread(
+            backup_module.sichern, self.config.db_path, self.config.path,
+            self.backup_ordner(), self.config.server.backup_keep)
+        self.letzte_sicherung = ergebnis
+        fehler = [f"{z['ordner']}: {z['fehler']}" for z in ergebnis["ziele"] if z["fehler"]]
+        if fehler:
+            self.engine.note(("Sicherung fehlgeschlagen: " if not ergebnis["ok"]
+                              else "Sicherung nur teilweise: ") + "; ".join(fehler))
+        return ergebnis
+
+    def backup_status(self) -> dict:
+        orte = []
+        for ordner in self.backup_ordner():
+            orte.append({"ordner": str(ordner), "letzte": backup_module.letzte(ordner),
+                         "vorhanden": ordner.is_dir()})
+        return {"orte": orte, "letzter_lauf": getattr(self, "letzte_sicherung", None)}
+
+    async def _backup_loop(self) -> None:
+        """Einmal am Tag, beim Start gleich mit - ein Tablet läuft nicht rund um die Uhr."""
+        await asyncio.sleep(30)
+        while True:
+            try:
+                # Jeder Ort einzeln: ein gezogener Stick darf nicht bis morgen
+                # warten, wenn er wieder steckt.
+                if any(backup_module.faellig(o) for o in self.backup_ordner()
+                       if o.is_dir() or o == self.backup_ordner()[0]):
+                    await self.sichern_jetzt()
+            except Exception as exc:  # noqa: BLE001 - die Sicherung darf nichts mitreißen
+                self.engine.note(f"Sicherung: {exc}")
+            await asyncio.sleep(3600)
+
+    async def stop(self) -> None:
+        with contextlib.suppress(Exception):
+            self.engine.suspend_job()
+        with contextlib.suppress(Exception):
+            self.engine.close()
+        # Eine halb geschriebene Aufzeichnung ist trotzdem eine: was auf der
+        # Karte steht, bleibt lesbar - der letzte Block gehört noch dazu.
+        with contextlib.suppress(Exception):
+            self.aufzeichnung.stop()
+        await self.teilbreiten.stop()
+        await self.steering.stop()
+        await self.source.stop()
+        if self.imu is not None:
+            await self.imu.stop()
+        for component in (self.corrections, self.rtcm_client, self.sync_client):
+            if component is not None:
+                await component.stop()
+        if self.relay is not None:
+            await self.relay.stop()
+        for task in self.tasks + self._quellen_tasks + self._korrektur_tasks:
+            task.cancel()
+        self.store.close()
+
+    def korrektur_status(self) -> dict:
+        """Stand der Korrekturen - und ein Satz, woran RTK gerade scheitert."""
+        quelle = self.corrections or self.rtcm_client
+        fix = self.engine.fix
+        position = self._current_position()
+        rtcm = quelle.pruefer.zusammenfassung(position) if quelle is not None else None
+        status = {
+            "source": self.config.corrections.source,
+            "weg": ("eigene Quelle" if self.corrections is not None else
+                    "vom Master" if self.rtcm_client is not None else "aus"),
+            "status": quelle.status if quelle is not None else "aus",
+            "healthy": bool(quelle is not None and quelle.healthy),
+            "bytes": quelle.bytes_received if quelle is not None else 0,
+            # Das Alter der Korrekturen meldet der Empfänger selbst im
+            # GGA-Satz. Es ist die ehrlichste Aussage darüber, ob der Weg
+            # von der Basis zum Traktor gerade wirklich trägt.
+            "age_s": fix.age_of_corrections if fix else None,
+            "rtcm": rtcm,
+            "an_empfaenger": getattr(self.source, "rtcm_geschrieben", 0),
+        }
+        status["hinweis"] = self._rtk_hinweis(quelle, rtcm, fix)
+        return status
+
+    def _rtk_hinweis(self, quelle, rtcm: Optional[dict], fix) -> str:
+        """Der erste Grund in der Kette Caster → Prüfung → Empfänger → Fix, der hakt."""
+        if fix is not None and fix.fix_quality == 4:
+            return ""
+        if quelle is None:
+            return ("Keine Korrekturquelle eingetragen - Einstellungen → Korrekturdaten (RTK): "
+                    "Caster, Mountpoint und Zugang eintragen.")
+        if not quelle.bytes_received:
+            return f"Vom Caster kommt nichts: {quelle.status}"
+        urteil = rtcm_urteil(rtcm, quelle.bytes_received) if rtcm is not None else ""
+        if urteil:
+            return urteil
+        if not getattr(self.source, "nimmt_korrekturen", False):
+            return (f"Korrekturen kommen an, aber die Positionsquelle ({self.config.gnss.source}) "
+                    "nimmt keine an - am Traktor den Empfänger über USB/seriell anschließen.")
+        if getattr(self.source, "rtcm_fehler", ""):
+            return f"Korrekturen lassen sich nicht zum Empfänger schreiben: {self.source.rtcm_fehler}"
+        if fix is None or not fix.valid:
+            return "Korrekturen kommen an, der Empfänger hat aber noch keine Position."
+        if fix.fix_quality == 5:
+            return "RTK Float - Korrekturen wirken, der Empfänger rechnet noch auf Fix (meist unter 1 min)."
+        return ("Korrekturen gehen an den Empfänger, er nutzt sie aber nicht. Im u-center prüfen: "
+                "RTCM3 als Eingang am Anschluss erlaubt (UBX-CFG-PRT bzw. CFG-USBINPROT-RTCM3X)?")
+
+    def _on_rtcm(self, data: bytes) -> None:
+        """Corrections go to our own receiver and out to the other machines."""
+        self.source.write_rtcm(data)
+        if self.relay is not None:
+            self.relay.broadcast(data)
+
+    def _current_position(self):
+        fix = self.engine.fix
+        return (fix.lat, fix.lon) if fix and fix.valid else None
+
+    # -- live broadcast ---------------------------------------------------
+
+    async def _broadcast_loop(self) -> None:
+        interval = 1.0 / max(1.0, self.config.server.update_hz)
+        while True:
+            await asyncio.sleep(interval)
+            # Auch ohne Zuschauer: die Lenkung muss überwacht bleiben.
+            self.engine.tick()
+            # Und die Inbetriebnahme liest mit, auch wenn niemand hinsieht:
+            # ein Fix, der nur beim Hinschauen steht, ist keiner.
+            self.checklist.beobachten(self.checklist_input())
+            if not self.clients:
+                # Nobody is looking: drop the delta so a later viewer gets a
+                # full map instead of a half one.
+                self.engine.coverage.drain_new_cells()
+                self.engine.coverage.drain_fremde_zellen()
+                continue
+            message = json.dumps({
+                "type": "state",
+                **self.engine.state(),
+                "system": self.system_status(),
+                "new_cells": self.engine.coverage.drain_new_cells(),
+                "fremde_zellen": self.engine.coverage.drain_fremde_zellen(),
+            })
+            for websocket in list(self.clients):
+                try:
+                    await websocket.send_text(message)
+                except Exception:  # noqa: BLE001
+                    self.clients.discard(websocket)
+
+    def checklist_input(self) -> dict:
+        """Das Wenige, das die Beobachtung braucht - zehnmal je Sekunde.
+
+        Bewusst nicht der volle Zustand: der kostet einen Datenbankzugriff für
+        die Geräteliste, und das zehnmal je Sekunde für zwei Zahlen wäre
+        Verschwendung.
+        """
+        fix = self.engine.fix
+        return {
+            "fix": fix.to_dict() if fix else None,
+            "imu": ({"healthy": self.imu.healthy,
+                     "roll_deg": self.imu.attitude.roll_deg}
+                    if self.imu is not None else None),
+        }
+
+    def checklist_state(self) -> dict:
+        """Vollbild für die Liste selbst - hier darf es etwas kosten."""
+        return {
+            **self.engine.state(),
+            "system": self.system_status(),
+            "fahrzeit_s": checklist_module.fahrzeit_s(self.store),
+        }
+
+    def system_status(self) -> dict[str, Any]:
+        return {
+            "version": VERSION,
+            "adressen": self.eigene_adressen(),
+            "arbeitercode": self.config.network.sync_token if self.config.is_master else "",
+            "update_online": (getattr(self, "online_stand", None) or {}).get("neu")
+                             if (getattr(self, "online_stand", None) or {}).get("verfuegbar") else None,
+            "role": self.config.network.role,
+            "gnss": {
+                "source": self.config.gnss.source,
+                "status": self.source.status,
+                "healthy": self.source.healthy,
+                "lines": self.source.lines_received,
+                # Beim Abspielen: wo in der Aufzeichnung wir gerade sind.
+                "replay_s": getattr(self.source, "position_s", None),
+            },
+            "rohdaten": self.aufzeichnung.status(),
+            "corrections": self.korrektur_status(),
+            "imu": {
+                "source": self.config.imu.source,
+                "status": self.imu.status if self.imu else "aus",
+                "healthy": bool(self.imu and self.imu.healthy),
+                "compensation": self.config.imu.terrain_compensation,
+            },
+            "steering_output": self.steering.output.status_dict(),
+            "relay": {
+                "running": bool(self.relay and self.relay.server is not None),
+                "status": self.relay.status if self.relay else "aus",
+                "clients": self.relay.client_count if self.relay else 0,
+            },
+            "sync": self.sync_client.status_dict() if self.sync_client else {
+                "role": "master", "status": "Master"
+            },
+            "devices": self.store.list_devices(),
+        }
+
+
+# Nach diesen Einstellungen wird der Lenkausgang neu aufgebaut (ohne Neustart).
+LENKAUSGANG_SCHLUESSEL = {
+    "steering.output", "steering.host", "steering.port",
+    "phidget.bibliothek", "phidget.serial_number", "phidget.motor_channel",
+    "phidget.control", "phidget.feedback", "phidget.encoder_channel", "phidget.was_channel",
+}
+
+def _host_of(url: str) -> str:
+    from urllib.parse import urlparse
+    return urlparse(url).hostname or url
+
+
+# Einstellungen an Empfänger und Sensor, die nur einen Wert ändern und keine
+# neue Verbindung brauchen - alle anderen gnss./imu.-Werte bauen die Quelle neu.
+NUR_WERT = ("gnss.kalman_enabled", "gnss.kalman_acceleration_ms2", "imu.roll_sign", "imu.terrain_compensation", "imu.use_for_heading")
+
+
+def create_app(config=None) -> FastAPI:
+    config = config or config_module.load()
+    application = Application(config)
+    api = FastAPI(title="AgriPilot", version=VERSION)
+    api.state.app = application
+    engine = application.engine
+    store = application.store
+
+    @api.middleware("http")
+    async def von_aussen_nur_der_abgleich(request: Request, call_next):
+        """Was über einen Tunnel hereinkommt, darf nur zum Abgleich.
+
+        Cloudflare (und jeder ähnliche Tunnel) hängt seine Kopfzeilen an jede Anfrage.
+        Wer so ankommt, kommt aus dem Internet - der bekommt den Abgleich (mit Code),
+        aber nicht die Bedienung: Lenkung scharf schalten, Einstellungen, Datenpakete.
+        Im eigenen Netz fällt die Sperre nicht auf.
+        """
+        von_aussen = any(k in request.headers for k in ("cf-connecting-ip", "cf-ray", "x-forwarded-for"))
+        if (von_aussen and request.url.path not in VON_AUSSEN_ERLAUBT
+                and not request.url.path.startswith("/api/sync/luftbild/")):
+            return JSONResponse({"detail": "Von außen ist nur der Abgleich erreichbar"}, status_code=403)
+        return await call_next(request)
+
+    @api.on_event("startup")
+    async def _startup() -> None:
+        await application.start()
+
+    @api.on_event("shutdown")
+    async def _shutdown() -> None:
+        await application.stop()
+
+    def ok(payload: Any = None) -> JSONResponse:
+        return JSONResponse({"ok": True, "data": payload})
+
+    def guard(fn, *args, **kwargs):
+        """Turn an engine refusal into a message the driver can read."""
+        try:
+            return ok(fn(*args, **kwargs))
+        except (RuntimeError, ValueError, KeyError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    async def im_hintergrund(fn, *args):
+        try: return await asyncio.to_thread(fn,*args)
+        except (RuntimeError,ValueError,KeyError) as exc:
+            raise HTTPException(400,str(exc)) from exc
+
+    # -- live state -------------------------------------------------------
+
+    @api.get("/api/state")
+    async def get_state() -> dict:
+        return {**engine.state(), "system": application.system_status()}
+
+    @api.websocket("/ws")
+    async def websocket_endpoint(websocket: WebSocket) -> None:
+        if any(k in websocket.headers for k in ("cf-connecting-ip", "cf-ray", "x-forwarded-for")):
+            await websocket.close(code=1008)
+            return
+        await websocket.accept()
+        application.clients.add(websocket)
+        # First frame carries the full coverage map; after that only deltas.
+        await websocket.send_text(json.dumps({
+            "type": "init",
+            **engine.state(),
+            "system": application.system_status(),
+            "cells": engine.coverage.cells_for_display(),
+        }))
+        try:
+            while True:
+                await websocket.receive_text()
+        except WebSocketDisconnect:
+            pass
+        finally:
+            application.clients.discard(websocket)
+
+    # -- fields -----------------------------------------------------------
+
+    @api.get("/api/fields")
+    async def list_fields() -> list[dict]:
+        return store.list_fields()
+
+    @api.post("/api/fields")
+    async def create_field(payload: dict = Body(...)):
+        return guard(engine.create_field, payload.get("name", "Neues Feld"))
+
+    @api.post("/api/fields/import")
+    async def import_fields(payload: dict = Body(...)):
+        """Felder aus einem Shapefile übernehmen.
+
+        Die Dateien kommen base64-kodiert im JSON: .shp muss, .dbf (Namen) und
+        .prj (Koordinatensystem) dürfen. Kein Multipart - das bräuchte ein
+        weiteres Paket auf dem Pi, und drei Dateien von zusammen wenigen
+        hundert Kilobyte passen in einen Text.
+        """
+        import base64
+        try:
+            shp = base64.b64decode(payload.get("shp") or "")
+            dbf = base64.b64decode(payload["dbf"]) if payload.get("dbf") else None
+        except (ValueError, TypeError) as exc:
+            raise HTTPException(400, f"Dateien nicht lesbar: {exc}") from exc
+        if not shp:
+            raise HTTPException(400, "Die .shp-Datei fehlt")
+        if len(shp) > 20_000_000:
+            raise HTTPException(400, "Die .shp-Datei ist größer als 20 MB - das ist kein Feld")
+        prj = payload.get("prj") or None
+        try:
+            umrisse = shapefile_module.lesen(shp, dbf, prj)
+        except shapefile_module.ShapefileFehler as exc:
+            raise HTTPException(400, str(exc)) from exc
+        except (struct.error, IndexError) as exc:
+            raise HTTPException(400, f"Die .shp-Datei ist beschädigt: {exc}") from exc
+        return ok({"felder": engine.import_fields(umrisse)})
+
+    @api.post("/api/fields/{field_id}/load")
+    async def load_field(field_id: str, with_coverage: bool = True):
+        result = guard(engine.load_field, field_id)
+        if with_coverage:
+            # Pick up what has already been worked here today, including work
+            # another tractor synced over - that is the point of the master.
+            merged = sync.merge_field_coverage(store, field_id, max_age_s=86_400)
+            engine.coverage.merge(merged)
+        # Im Simulator fährt der Traktor zum gewählten Schlag mit - sonst steht
+        # er irgendwo anders und der Schlag ist nicht auf dem Bildschirm.
+        application.simulator_ins_feld()
+        return result
+
+    @api.get("/api/fields/{field_id}/grenzverlauf")
+    async def grenzverlauf(field_id: str) -> dict:
+        """Frühere Feldgrenzen zum Zurückholen im Editor, die neueste zuerst."""
+        if store.get_field(field_id) is None:
+            raise HTTPException(404, "Feld nicht gefunden")
+        return ok({"verlauf": engine.grenz_verlauf(field_id)})
+
+    @api.post("/api/fields/{field_id}/arbeitsgrenze")
+    async def arbeitsgrenze(field_id: str, payload: dict = Body(...)):
+        feld=store.get_field(field_id)
+        if feld is None or feld["deleted"]: raise HTTPException(404,"Feld nicht gefunden")
+        guard(engine._werkzeug_stillstand)
+        if payload.get("stand")!=feld["updated_at"]: raise HTTPException(409,"Feld wurde inzwischen geändert – neu öffnen")
+        punkte=payload.get("punkte")
+        if payload.get("ziel")=="feldgrenze":
+            # Die Feldgrenze selbst ändern (Rundung glatt ziehen): ohne die Bedingung "innerhalb
+            # der alten Grenze", aber geschlossen, ohne Selbstschnitt, mindestens 100 m².
+            if not punkte: raise HTTPException(400,"Eine Feldgrenze braucht Punkte")
+            geprueft=await im_hintergrund(feldwerkzeuge.grenze_pruefen,punkte,feld["boundary"])
+            return guard(engine.feldgrenze_speichern, field_id, payload, geprueft)
+        geprueft=[] if punkte==[] else await im_hintergrund(feldwerkzeuge.grenze_pruefen,punkte,feld["boundary"])
+        return guard(engine.arbeitsgrenze_speichern, field_id, payload, geprueft)
+
+    @api.post("/api/fields/{field_id}/randspuren")
+    async def randspuren_eines_feldes(field_id: str):
+        """AB- und Kurvenspuren an den Kanten der Feldgrenze anlegen (ab 20 m)."""
+        return guard(engine.randspuren_anlegen, field_id)
+
+    @api.post("/api/randspuren")
+    async def randspuren_aller_felder():
+        ergebnisse = [engine.randspuren_anlegen(f["id"]) for f in store.list_fields()]
+        return ok({"felder": ergebnisse,
+                   "spuren": sum(len(e["angelegt"]) for e in ergebnisse)})
+
+    # -- Saatplan: Säspuren und Fahrgassen vor der Aussaat ------------------
+
+    @api.get("/api/fields/{field_id}/saatplan")
+    async def saatplan_lesen(field_id: str):
+        return guard(engine.saatplan, field_id)
+
+    @api.post("/api/fields/{field_id}/saatplan")
+    async def saatplan_planen(field_id: str, payload: dict = Body(...)):
+        return guard(engine.saatplan_planen, field_id, payload)
+
+    @api.post("/api/saatplan/hier")
+    async def saatplan_hier(payload: dict = Body(default={})):
+        """Saatplan ab der Ecke, an der der Traktor steht, in seiner Fahrtrichtung."""
+        return guard(engine.saatplan_hier, payload)
+
+    @api.post("/api/fields/{field_id}/saatplan/uebernehmen")
+    async def saatplan_uebernehmen(field_id: str, payload: dict = Body(default=None)):
+        return guard(engine.saatplan_uebernehmen, field_id, (payload or {}).get("saison"))
+
+    @api.delete("/api/fields/{field_id}/saatplan")
+    async def saatplan_loeschen(field_id: str):
+        return guard(engine.saatplan_loeschen, field_id)
+
+    @api.delete("/api/fields/{field_id}")
+    async def delete_field(field_id: str):
+        store.delete_field(field_id)
+        return ok()
+
+    @api.get("/api/fields/{field_id}/coverage")
+    async def field_coverage(field_id: str, hours: float = 24.0) -> dict:
+        merged = sync.merge_field_coverage(store, field_id, max_age_s=hours * 3600)
+        return {
+            "cell_size": merged.cell_size,
+            "area_ha": merged.area_ha,
+            "cells": merged.cells_for_display(),
+        }
+
+    # -- guidance lines ---------------------------------------------------
+
+    @api.get("/api/lines")
+    async def list_lines(field_id: Optional[str] = None) -> list[dict]:
+        return store.list_lines(field_id)
+
+    @api.get("/api/line/spuren")
+    async def line_spuren() -> dict:
+        # Saatplan mit allen Spuren: einmal holen statt zehnmal je Sekunde mitschicken.
+        linie = engine.line
+        if linie is None or linie.mode != "plan":
+            return {"schluessel": "", "spuren": []}
+        return {"schluessel": linie.spuren_schluessel(), "spuren": linie.spuren_liste()}
+
+    @api.post("/api/lines/{line_id}/load")
+    async def load_line(line_id: str):
+        return guard(engine.load_line, line_id)
+
+    @api.post("/api/lines/{line_id}")
+    async def update_line(line_id: str, payload: dict = Body(...)):
+        """Umbenennen oder als Saisonspur mit Fahrgassenabstand festlegen."""
+        return guard(engine.update_line, line_id, payload)
+
+    @api.get("/api/fahrgassen")
+    async def get_fahrgassen() -> dict:
+        return {"weite_m": engine.fahrgassen_weite()}
+
+    @api.post("/api/fahrgassen")
+    async def set_fahrgassen(payload: dict = Body(...)):
+        """Fahrgassenweite für neue Saisonspuren (Menü → Spuren)."""
+        return guard(lambda: {"weite_m": engine.set_fahrgassen_weite(payload.get("weite_m"))})
+
+    @api.delete("/api/lines/{line_id}")
+    async def delete_line(line_id: str):
+        store.delete_line(line_id)
+        if engine.line and engine.line.id == line_id:
+            engine.clear_line()
+        return ok()
+
+    @api.post("/api/guidance/contour")
+    async def use_contour():
+        """Die Feldgrenze als Ringspur nehmen - ohne A- und B-Punkt."""
+        return guard(engine.use_contour)
+
+    @api.post("/api/guidance/a")
+    async def set_a():
+        return guard(engine.set_a)
+
+    @api.post("/api/guidance/b")
+    async def set_b(payload: dict = Body(default={})):
+        return guard(engine.set_b, payload.get("name", ""))
+
+    @api.post("/api/guidance/a-plus")
+    async def set_a_plus(payload: dict = Body(default={})):
+        heading = payload.get("heading")
+        if heading is None:
+            heading = engine.heading or 0.0
+        return guard(engine.set_ab_from_heading, float(heading), payload.get("name", ""))
+
+    @api.post("/api/guidance/original")
+    async def originalspur(payload: dict = Body(...)):
+        return guard(engine.originalspur, payload.get("field_id"), payload.get("line_id"), payload.get("nudge_m"))
+
+    @api.post("/api/guidance/nudge")
+    async def nudge(payload: dict = Body(...)):
+        rechts = payload.get("bildschirm_rechts")
+        return guard(engine.nudge, float(payload.get("metres", 0.0)),
+                     [float(v) for v in rechts] if isinstance(rechts, list) else None)
+
+    @api.post("/api/guidance/clear")
+    async def clear_line():
+        engine.clear_line()
+        return ok()
+
+    # -- recording --------------------------------------------------------
+
+    @api.post("/api/record/start")
+    async def start_recording(payload: dict = Body(...)):
+        return guard(engine.start_recording, payload.get("mode", "boundary"))
+
+    @api.post("/api/record/stop")
+    async def stop_recording(payload: dict = Body(default={})):
+        return guard(engine.stop_recording, payload.get("name", ""))
+
+    # -- Rohdaten: aufzeichnen und abspielen -------------------------------
+
+    @api.get("/api/rohdaten")
+    async def list_rohdaten() -> dict:
+        return {
+            "aufzeichnung": application.aufzeichnung.status(),
+            "dateien": recorder_module.liste(application.aufzeichnung.ordner),
+            "abspielen": {
+                "aktiv": config.gnss.source == "replay",
+                "datei": config.gnss.replay_file,
+                "tempo": config.gnss.replay_speed,
+                "schleife": config.gnss.replay_loop,
+                "position_s": getattr(application.source, "position_s", None),
+            },
+        }
+
+    @api.post("/api/rohdaten/start")
+    async def start_rohdaten():
+        """Mitschreiben, was hereinkommt - roh, vor jeder Auswertung."""
+        # Gefragt wird die *laufende* Quelle, nicht die Einstellung: die Quelle
+        # wechselt erst beim Neustart. Wer in der Oberfläche zurück auf
+        # "Simulator" stellt, läuft bis dahin weiter auf der Aufzeichnung - und
+        # bekäme sonst eine Kopie der Kopie, die aussieht wie eine echte Fahrt.
+        if isinstance(application.source, recorder_module.ReplaySource):
+            raise HTTPException(400, "Es läuft gerade eine Aufzeichnung ab - "
+                                     "eine Kopie davon wäre keine neue Messung")
+        try:
+            return ok(application.aufzeichnung.start())
+        except OSError as exc:
+            # Karte voll, Ordner nicht beschreibbar: dem Fahrer sagen, nicht 500.
+            raise HTTPException(400, f"Aufzeichnung kann nicht starten: {exc}") from exc
+
+    @api.post("/api/rohdaten/stop")
+    async def stop_rohdaten():
+        return ok(application.aufzeichnung.stop())
+
+    def _rohdatei(name: str) -> Path:
+        # Der Name kommt von außen und wird zu einem Pfad: nur die selbst
+        # vergebenen Namen sind gültig, sonst wäre '../../etc/passwd' einer.
+        if not recorder_module.ist_gueltiger_name(name):
+            raise HTTPException(400, "Kein gültiger Name einer Aufzeichnung")
+        pfad = application.aufzeichnung.ordner / name
+        if not pfad.exists():
+            raise HTTPException(404, "Aufzeichnung gibt es nicht")
+        return pfad
+
+    @api.get("/api/rohdaten/{name}")
+    async def download_rohdaten(name: str):
+        pfad = _rohdatei(name)
+        return PlainTextResponse(
+            pfad.read_text(encoding="ascii", errors="replace"),
+            headers={"Content-Disposition": f'attachment; filename="{name}"'})
+
+    @api.delete("/api/rohdaten/{name}")
+    async def delete_rohdaten(name: str):
+        pfad = _rohdatei(name)
+        if (application.aufzeichnung.laeuft
+                and application.aufzeichnung.pfad == pfad):
+            raise HTTPException(400, "Diese Aufzeichnung läuft gerade")
+        if config.gnss.source == "replay" and config.gnss.replay_file == name:
+            raise HTTPException(400, "Diese Aufzeichnung wird gerade abgespielt")
+        pfad.unlink()
+        return ok()
+
+    # -- Vorgewende und Wende ---------------------------------------------
+
+    @api.get("/api/headland")
+    async def get_headland() -> dict:
+        return {
+            **engine.headland.to_dict(),
+            **engine.headland_status.to_dict(),
+            "arbeitsbreite_m": engine.profile.width_m,
+            "spurabstand_m": engine.profile.spacing_m,
+        }
+
+    @api.post("/api/headland")
+    async def set_headland(payload: dict = Body(...)):
+        return guard(lambda: engine.update_headland(payload).to_dict())
+
+    @api.post("/api/turn/plan")
+    async def plan_turn(payload: dict = Body(default={})):
+        """Route berechnen und gegen die Feldgrenze prüfen - noch nicht fahren."""
+        # Rechenarbeit auf einer unveränderlichen Momentaufnahme. GNSS und
+        # Abschaltüberwachung laufen während der Hüllprüfung weiter.
+        if getattr(engine, "_plan_laeuft", False):
+            raise HTTPException(409, "Eine Wende wird bereits berechnet")
+        engine._plan_laeuft = True
+        try:
+            folge=getattr(engine,"_plan_folge",0)+1
+            engine._plan_folge=folge
+            kopie=copy.copy(engine)
+            for key in ("field","profile","headland","guidance","fix","implement_heading","line"):
+                setattr(kopie,key,copy.deepcopy(getattr(engine,key)))
+            kontext=engine.wende_kontext()
+            plan=await im_hintergrund(kopie.plan_turn,str(payload.get("muster","")),str(payload.get("richtung","")))
+            if folge!=engine._plan_folge or kontext!=engine.wende_kontext() or engine.turn is not None:
+                raise HTTPException(409,"Planung überholt – Wende erneut planen")
+            for key in ("turn_preview","turn_preview_ok","turn_preview_fahrbar","turn_preview_radius","turn_huelle","_turn_kontext","_turn_kurs","_turn_geraetekurs","_turn_optionen","_turn_planned_at"):
+                setattr(engine,key,getattr(kopie,key))
+            return ok(plan)
+        finally:
+            engine._plan_laeuft = False
+
+    @api.post("/api/turn/start")
+    async def start_turn():
+        return guard(engine.start_turn)
+
+    @api.post("/api/turn/stop")
+    async def stop_turn():
+        engine.stop_turn()
+        return ok()
+
+    # -- jobs -------------------------------------------------------------
+
+    @api.post("/api/job/start")
+    async def start_job(payload: dict = Body(default={})):
+        return guard(engine.start_job, payload.get("operation", ""))
+
+    @api.post("/api/job/stop")
+    async def stop_job():
+        return guard(engine.stop_job)
+
+    @api.get("/api/jobs")
+    async def list_jobs(field_id: Optional[str] = None) -> list[dict]:
+        return store.list_jobs(field_id=field_id)
+
+    def flaeche_neu_aufbauen() -> bool:
+        """Nach dem Löschen: die Fläche des geladenen Feldes ohne die gelöschten Arbeiten.
+
+        Nur ohne laufende Arbeit - deren eigene Spur steckt in der Karte und wäre sonst weg.
+        Wie beim Laden des Feldes: was in den letzten 24 Stunden dort gearbeitet wurde.
+        """
+        if engine.field is None or engine.job is not None:
+            return False
+        neu = CoverageMap(cell_size=engine.coverage.cell_size)
+        neu.merge(sync.merge_field_coverage(store, engine.field["id"], max_age_s=86_400))
+        engine.coverage = neu
+        return True
+
+    def arbeiten_loeschen(kennungen: list[str]) -> dict:
+        laufend = engine.job["id"] if engine.job else None
+        geloescht = [k for k in kennungen if k != laufend]
+        for kennung in geloescht:
+            store.delete_job(kennung)          # Löschvermerk: geht beim Abgleich an alle Geräte
+        if geloescht:
+            engine.note(f"{len(geloescht)} {'Arbeit' if len(geloescht) == 1 else 'Arbeiten'} gelöscht")
+        return {"geloescht": len(geloescht), "laufend_uebersprungen": laufend in kennungen,
+                "karte_neu": flaeche_neu_aufbauen() if geloescht else False}
+
+    @api.delete("/api/jobs/{job_id}")
+    async def delete_job(job_id: str):
+        if engine.job is not None and engine.job["id"] == job_id:
+            raise HTTPException(409, "Diese Arbeit läuft gerade - erst beenden, dann löschen")
+        return ok(arbeiten_loeschen([job_id]))
+
+    @api.delete("/api/jobs")
+    async def delete_jobs(field_id: Optional[str] = None, alle: bool = False):
+        """Alle Arbeiten eines Feldes oder (mit alle=true) alle. Eine laufende bleibt."""
+        if not field_id and not alle:
+            raise HTTPException(400, "Feld angeben oder alle=true")
+        kennungen = [j["id"] for j in store.list_jobs(field_id=field_id or None, limit=1_000_000)]
+        return ok(arbeiten_loeschen(kennungen))
+
+    @api.get("/api/jobs/{job_id}/referenz")
+    async def arbeitslinien_vorschau(job_id: str):
+        return ok(await im_hintergrund(engine.arbeitslinien_vorschau,job_id))
+
+    @api.post("/api/jobs/{job_id}/referenz")
+    async def arbeitslinie_speichern(job_id: str, payload: dict = Body(...)):
+        plan=await im_hintergrund(engine.arbeitslinien_vorschau,job_id)
+        return guard(engine.arbeitslinie_speichern, job_id, payload, plan)
+
+    @api.get("/api/jobs/{job_id}/gpx")
+    async def job_gpx(job_id: str):
+        try:
+            body = export.job_gpx(store, job_id)
+        except KeyError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        return Response(body, media_type="application/gpx+xml", headers={
+            "Content-Disposition": f'attachment; filename="fahrt-{job_id[:8]}.gpx"'})
+
+    @api.get("/api/jobs/{job_id}/geojson")
+    async def job_geojson(job_id: str):
+        try:
+            return export.job_geojson(store, job_id)
+        except KeyError as exc:
+            raise HTTPException(404, str(exc)) from exc
+
+    @api.get("/api/jobs/{job_id}/csv")
+    async def job_csv(job_id: str):
+        return PlainTextResponse(export.job_csv(store, job_id), headers={
+            "Content-Disposition": f'attachment; filename="fahrt-{job_id[:8]}.csv"'})
+
+    @api.get("/api/jobs.csv")
+    async def jobs_csv(field_id: Optional[str] = None):
+        return PlainTextResponse(
+            export.jobs_summary_csv(store, field_id),
+            headers={"Content-Disposition": 'attachment; filename="arbeiten.csv"'},
+        )
+
+    # -- machine ----------------------------------------------------------
+
+    @api.post("/api/profile")
+    async def update_profile(payload: dict = Body(...)):
+        from dataclasses import asdict
+        return guard(lambda: asdict(engine.update_profile(payload)))
+
+    @api.get("/api/profiles")
+    async def list_profiles() -> list[dict]:
+        return engine.list_profiles()
+
+    @api.post("/api/profiles")
+    async def create_profile(payload: dict = Body(...)):
+        """Neue Maschine aus den aktuellen Werten - unter neuem Namen."""
+        return guard(engine.save_profile_as, payload.get("name", ""), payload.get("werte"))
+
+    @api.post("/api/profiles/{profile_id}/select")
+    async def select_profile(profile_id: str):
+        from dataclasses import asdict
+        return guard(lambda: asdict(engine.select_profile(profile_id)))
+
+    @api.delete("/api/profiles/{profile_id}")
+    async def delete_profile(profile_id: str):
+        guard(engine.delete_profile, profile_id)
+        return ok()
+
+    # -- Traktoren (getrennt von den Geräten) ------------------------------
+
+    @api.get("/api/traktoren")
+    async def list_traktoren() -> list[dict]:
+        return engine.list_traktoren()
+
+    @api.post("/api/traktoren")
+    async def create_traktor(payload: dict = Body(...)):
+        """Neuer Traktor - Antenne und Lenkung vom gewählten als Vorlage."""
+        return guard(engine.save_traktor_as, payload.get("name", ""), payload.get("werte"))
+
+    @api.post("/api/traktoren/{traktor_id}/select")
+    async def select_traktor(traktor_id: str):
+        return guard(engine.traktor_waehlen, traktor_id)
+
+    @api.delete("/api/traktoren/{traktor_id}")
+    async def delete_traktor(traktor_id: str):
+        guard(engine.delete_traktor, traktor_id)
+        return ok()
+
+    @api.post("/api/traktor")
+    async def update_traktor(payload: dict = Body(...)):
+        """Den gewählten Traktor ändern: Name, Antenne, Lenkung - und Bauform: wird er
+        zum Mähdrescher, kommt das Schneidwerk als Gerät gleich mit."""
+        def aendern():
+            engine.update_traktor(payload)
+            engine.geraet_zum_fahrzeug()
+            return engine.aktiver_traktor()
+        return guard(aendern)
+
+    # -- Geräte -----------------------------------------------------------
+
+    @api.get("/api/geraete/suchen")
+    async def geraete_suchen() -> dict:
+        """Angeschlossene Empfänger, Sensoren und Lenksteuerungen aufspüren.
+
+        Blockiert einige Sekunden (Phidget und Brick Daemon wollen warten) und
+        läuft darum in einem Thread, damit die Position derweil weiterkommt.
+        """
+        ergebnis = await asyncio.to_thread(
+            geraete_module.suchen, config.imu.host, config.imu.port)
+        return ergebnis.to_dict()
+
+    @api.post("/api/sections/auto")
+    async def set_auto_sections(payload: dict = Body(...)):
+        engine.auto_sections = bool(payload.get("enabled", True))
+        if not engine.auto_sections:
+            for section in engine.sections:
+                section.enabled = True
+        return ok({"auto_sections": engine.auto_sections})
+
+    @api.post("/api/sections/modus")
+    async def set_sections_modus(payload: dict = Body(...)):
+        """Hauptschalter wie in AgOpenGPS: auto, manuell (alle an) oder aus (alle zu)."""
+        return guard(lambda: {"teilbreiten_modus": engine.teilbreiten_modus_setzen(str(payload.get("modus", "")))})
+
+    @api.post("/api/sections/{index}")
+    async def set_section(index: int, payload: dict = Body(...)):
+        if not 0 <= index < len(engine.sections):
+            raise HTTPException(404, "Sektion gibt es nicht")
+        if "zustand" in payload:              # auto | an | aus
+            return guard(engine.teilbreite_setzen, index, str(payload["zustand"]))
+        section = engine.sections[index]
+        if "forced_off" in payload:
+            section.forced_off = bool(payload["forced_off"])
+        if "auto" in payload:
+            section.auto = bool(payload["auto"])
+        return ok()
+
+    @api.post("/api/imu/level")
+    async def level_imu():
+        """Aktuelle Lage als eben merken - auf ebenem Boden ausführen."""
+        if application.imu is None:
+            raise HTTPException(400, "Kein Neigungssensor eingerichtet")
+        result = application.imu.level_here()
+        store.set_setting("imu_offsets", result)
+        engine.note("Neigungssensor genullt")
+        return ok(result)
+
+    @api.post("/api/imu/kalibrieren/{schritt}")
+    async def imu_kalibrieren(schritt: str):
+        """Wie bei Cerea: M1 messen, Traktor auf derselben Stelle um 180° wenden, M2.
+        Geht auch auf schiefem Boden - der Montagefehler ist der Mittelwert."""
+        if application.imu is None:
+            raise HTTPException(400, "Kein Neigungssensor eingerichtet")
+        if schritt == "m1":
+            return guard(application.imu.messpunkt_m1)
+        if schritt != "m2":
+            raise HTTPException(404, "Schritt m1 oder m2")
+        def fertig():
+            result = application.imu.messpunkt_m2()
+            store.set_setting("imu_offsets", {"roll_offset": result["roll_offset"],
+                                              "pitch_offset": result["pitch_offset"]})
+            engine.note(f"Neigungssensor kalibriert (M1/M2): Boden quer {result['boden_quer_deg']:+.1f}°")
+            return result
+        return guard(fertig)
+
+    @api.post("/api/imu/compensation")
+    async def set_compensation(payload: dict = Body(...)):
+        config.imu.terrain_compensation = bool(payload.get("enabled", True))
+        return ok({"compensation": config.imu.terrain_compensation})
+
+    @api.post("/api/steering/arm")
+    async def arm_steering(payload: dict = Body(default={})):
+        meldung = engine.arm_steering()
+        # Wer lenken lässt, arbeitet: Markieren geht mit an, wenn es noch aus
+        # ist - sonst fehlt am Abend die Fläche der ersten Spuren.
+        markieren = False
+        if application.steering.armed and engine.job is None and engine.field is not None:
+            engine.start_job(str(payload.get("operation") or "Arbeit"))
+            markieren = True
+        return ok({"message": meldung, "armed": application.steering.armed,
+                   "markieren_gestartet": markieren})
+
+    @api.post("/api/steering/centre")
+    async def learn_steering_centre():
+        """Aktuelle Radstellung als Geradeaus lernen.
+
+        Der Drehgeber zählt relativ und kennt keine Geradeausstellung; sie wird
+        beim Scharfschalten gelernt und lässt sich hier ausdrücklich neu setzen,
+        etwa nach einem Eingriff von Hand.
+        """
+        output = application.steering.output
+        if not hasattr(output, "learn_centre"):
+            raise HTTPException(400, "Dieser Lenkausgang lernt keine Mitte")
+        try:
+            result = output.learn_centre()
+        except RuntimeError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        if hasattr(output, "mitte_gelernt"):
+            config.save()           # die aus der Fahrt gelernte Radmitte gehörte zur alten Mitte
+            engine.radmitte.zuruecksetzen()
+        engine.note("Lenkung: Mitte gelernt")
+        return ok(result)
+
+    @api.post("/api/steering/motortest")
+    async def motortest(payload: dict = Body(default={})):
+        """Den Lenkmotor kurz und schwach drehen (Menü → Lenkung → Motor links/rechts)."""
+        output = application.steering.output
+        if not hasattr(output, "motortest"):
+            raise HTTPException(400, "Dieser Lenkausgang kennt keinen Motortest "
+                                     "(Positionsregler: Regelungsart auf „Eigener Regelkreis“ stellen)")
+        if application.steering.armed:
+            raise HTTPException(400, "Die Lenkung ist scharf - erst ausschalten")
+        try:
+            ergebnis = await output.motortest(
+                1 if str(payload.get("richtung", "rechts")) == "rechts" else -1,
+                float(payload.get("leistung", 0.15)), float(payload.get("dauer_s", 0.5)))
+        except (RuntimeError, ValueError) as exc:
+            raise HTTPException(400, str(exc)) from exc
+        engine.note(f"Motortest {ergebnis['richtung']}: Drehgeber {ergebnis['drehgeber_bewegt']}")
+        return ok(ergebnis)
+
+    # -- Lenkung einrichten (Menü → Lenkung) -------------------------------
+
+    werkstatt = Lenkwerkstatt(engine)
+
+    def _einrichtung_key():
+        return "lenkung_einrichtung:"+engine.aktiver_traktor()["id"]
+
+    def _einrichtung() -> dict:
+        stand=store.get_setting(_einrichtung_key()) or {}
+        return {k:v["werte"] for k,v in stand.items() if isinstance(v,dict)
+                and v.get("bindung")==werkstatt.schritt_kennung(k)}
+
+    def _einrichtung_merken(schritt: str, werte) -> None:
+        stand=store.get_setting(_einrichtung_key()) or {}
+        stand[schritt]={"werte":werte,"bindung":werkstatt.schritt_kennung(schritt),"zeit":time.time()}
+        store.set_setting(_einrichtung_key(),stand)
+
+    def _notaus_abgehakt() -> bool:
+        stand = application.checklist.zusammenfassung(application.checklist_state())
+        return next((s["fertig"] for s in stand["schritte"] if s["id"] == "lenkmotor"), False)
+
+    def _einrichten_stand():
+        ausgang = application.steering.output.status_dict()
+        return {
+            "schritte": lenkung_einrichten.status(
+                _einrichtung(), ausgang, bool(config.steering.enabled), _notaus_abgehakt(),
+                engine.abstimmung.status()),
+            "ausgang": ausgang,
+            "einstellungen": {"invert_motor": config.phidget.invert_motor,
+                              "encoder_invert": config.phidget.encoder_invert,
+                              "min_duty": config.phidget.min_duty,
+                              "encoder_counts_per_deg": config.phidget.encoder_counts_per_deg},
+        }
+
+    @api.get("/api/lenkung/einrichten")
+    async def lenkung_einrichten_lesen():
+        return ok(_einrichten_stand())
+
+    @api.get("/api/lenkung/kalibrierung")
+    async def kalibrierung_lesen():
+        return ok(werkstatt.stand(_einrichten_stand()["schritte"]))
+
+    @api.get("/api/lenkung/kalibrierung/export")
+    async def kalibrierung_export():
+        daten=werkstatt.stand(_einrichten_stand()["schritte"])
+        return Response(json.dumps(daten,ensure_ascii=False,indent=2),media_type="application/json",
+                        headers={"Content-Disposition":"attachment; filename=AgriPilot-Kalibrierung.json"})
+
+    @api.post("/api/lenkung/kalibrierung")
+    async def kalibrierung_aendern(payload: dict = Body(...)):
+        try:
+            werkstatt.aktion(payload,_einrichten_stand()["schritte"])
+            return ok(werkstatt.stand(_einrichten_stand()["schritte"]))
+        except KalibrierKonflikt as exc:raise HTTPException(409,str(exc)) from exc
+        except (RuntimeError,ValueError) as exc:raise HTTPException(400,str(exc)) from exc
+
+    @api.post("/api/lenkung/einrichten/richtung-test")
+    async def richtung_testen():
+        output = application.steering.output
+        if not hasattr(output, "richtung_testen"):
+            raise HTTPException(400, "Kein Phidget-Lenkmotor verbunden - erst Schritt 1")
+        if application.steering.armed:
+            raise HTTPException(400, "Die Lenkung ist scharf - erst ausschalten")
+        try:
+            ergebnis = await output.richtung_testen()
+        except (RuntimeError, ValueError) as exc:
+            raise HTTPException(400, str(exc)) from exc
+        application.richtung_bewegt = ergebnis["bewegt"]
+        return ok(ergebnis)
+
+    @api.post("/api/lenkung/einrichten/richtung")
+    async def richtung_festlegen(payload: dict = Body(...)):
+        """Der Fahrer sagt, wohin die Räder beim Test gingen - daraus folgen die Schalter."""
+        try:
+            ergebnis = lenkung_einrichten.richtung_auswerten(
+                str(payload.get("gesehen", "")), getattr(application, "richtung_bewegt", None),
+                config.phidget.invert_motor, config.phidget.encoder_invert)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        if ergebnis["aenderungen"]:
+            try:
+                settings_module.uebernehmen(config, ergebnis["aenderungen"])
+            except settings_module.EinstellungsFehler as exc:
+                raise HTTPException(400, str(exc)) from exc
+            engine.note(f"Lenkrichtung eingestellt: {ergebnis['aenderungen']}")
+        if ergebnis["erledigt"]:
+            _einrichtung_merken("richtung", {"invert_motor": config.phidget.invert_motor,
+                                             "encoder_invert": config.phidget.encoder_invert})
+        application.richtung_bewegt = None
+        return ok(ergebnis)
+
+    @api.post("/api/lenkung/einrichten/feinabstimmung")
+    async def feinabstimmung():
+        """P/I/D des Lenkmotors am Stand einstellen (Sprung 6 Grad hin und zurück)."""
+        output = application.steering.output
+        if not hasattr(output, "feinabstimmen"):
+            raise HTTPException(400, "Kein Phidget-Lenkmotor verbunden - erst Schritt 1")
+        if application.steering.armed:
+            raise HTTPException(400, "Die Lenkung ist scharf - erst ausschalten")
+        try:
+            ergebnis = await output.feinabstimmen()
+        except (RuntimeError, ValueError) as exc:
+            raise HTTPException(400, str(exc)) from exc
+        if ergebnis["gut"]:
+            config.save()                   # die neuen Werte stehen schon in config.phidget
+            _einrichtung_merken("feinabstimmung", ergebnis["ende"])
+            engine.note(f"Lenkmotor fein abgestimmt: {ergebnis['ende']}")
+        return ok(ergebnis)
+
+    @api.post("/api/lenkung/einrichten/erledigt")
+    async def einrichtung_erledigt(payload: dict = Body(...)):
+        schritt = str(payload.get("schritt", ""))
+        if schritt not in ("mindestleistung", "zaehlwerte", "probefahrt"):
+            raise HTTPException(400, "Unbekannter Schritt")
+        _einrichtung_merken(schritt, payload.get("werte") or True)
+        return ok({"schritt": schritt})
+
+    @api.post("/api/lenkung/einrichten/neu")
+    async def einrichtung_neu():
+        store.set_setting(_einrichtung_key(), {})
+        return ok({})
+
+    @api.get("/api/lenkautomatik")
+    async def lenkautomatik_status():
+        return ok(engine._automatik_holen().status())
+
+    @api.post("/api/lenkautomatik")
+    async def lenkautomatik_bedienen(payload: dict = Body(...)):
+        def bedienen():
+            try:
+                ziel = float(payload.get("ziel_cm", 3.0))
+            except (TypeError, ValueError):
+                raise ValueError("Zielabweichung muss eine Zahl sein") from None
+            return engine.automatik_bedienen(str(payload.get("aktion", "")), ziel)
+        return guard(bedienen)
+
+    @api.get("/api/abstimmung")
+    async def abstimmung_lesen():
+        return ok(engine.abstimmung.status())
+
+    @api.post("/api/abstimmung")
+    async def abstimmung_modus(payload: dict = Body(...)):
+        """Lenk-Assistent: aus, beobachten (nur Vorschläge) oder automatisch."""
+        return guard(engine.abstimmung_modus, str(payload.get("modus", "aus")))
+
+    @api.post("/api/abstimmung/zurueck")
+    async def abstimmung_zurueck():
+        return guard(engine.abstimmung_zuruecksetzen)
+
+    @api.post("/api/steering/einmessen")
+    async def motor_einmessen():
+        """Losbrechleistung des Lenkmotors am Stand messen."""
+        output = application.steering.output
+        if not hasattr(output, "einmessen"):
+            raise HTTPException(400, "Dieser Lenkausgang lässt sich nicht einmessen")
+        if application.steering.armed:
+            raise HTTPException(400, "Die Lenkung ist scharf - erst ausschalten")
+        try:
+            ergebnis = await output.einmessen()
+        except (RuntimeError, ValueError) as exc:
+            raise HTTPException(400, str(exc)) from exc
+        engine.note(f"Motor eingemessen: Losbrechleistung {ergebnis['losbrech_rechts']}/{ergebnis['losbrech_links']}")
+        return ok(ergebnis)
+
+    @api.post("/api/steering/anschlag")
+    async def anschlag_messen(payload: dict = Body(default={})):
+        """Zählwerte je Grad ausmessen: start, dann von Hand von Anschlag zu Anschlag, dann ende."""
+        output = application.steering.output
+        if not hasattr(output, "anschlag_start"):
+            raise HTTPException(400, "Dieser Lenkausgang lässt sich nicht ausmessen")
+        if application.steering.armed:
+            raise HTTPException(400, "Die Lenkung ist scharf - erst ausschalten")
+        try:
+            if str(payload.get("aktion")) == "start":
+                return ok(output.anschlag_start())
+            return ok(output.anschlag_ende(float(payload.get("gesamtwinkel_deg", 70.0))))
+        except (RuntimeError, ValueError) as exc:
+            raise HTTPException(400, str(exc)) from exc
+
+    @api.post("/api/steering/disarm")
+    async def disarm_steering():
+        application.steering.disarm()
+        return ok({"armed": False})
+
+    @api.post("/api/steering/vorwaerts")
+    async def steering_vorwaerts():
+        """Der Fahrer sagt: ich fahre vorwärts (bei „wartet · Rückwärtsfahrt“).
+
+        Anders als neu Scharfschalten lernt das keine neue Radmitte - die Räder
+        stehen nach einer Wende von Hand selten gerade (bis 1.5.84 tat der Knopf genau das).
+        """
+        engine.heading_filter.bestaetige_vorwaerts()
+        return ok({"armed": application.steering.armed})
+
+    # -- system -----------------------------------------------------------
+
+    @api.get("/api/backup")
+    async def backup_get() -> dict:
+        return application.backup_status()
+
+    @api.post("/api/backup")
+    async def backup_post():
+        ergebnis = await application.sichern_jetzt()
+        if not ergebnis["ok"]:
+            raise HTTPException(500, "Sicherung fehlgeschlagen: " + "; ".join(
+                z["fehler"] for z in ergebnis["ziele"] if z["fehler"]))
+        return ok(ergebnis)
+
+    @api.get("/api/system")
+    async def system_status() -> dict:
+        return application.system_status()
+
+    # -- Inbetriebnahme ---------------------------------------------------
+
+    @api.get("/api/checklist")
+    async def checklist() -> dict:
+        return application.checklist.zusammenfassung(application.checklist_state())
+
+    @api.post("/api/checklist/{schritt_id}")
+    async def tick_checklist(schritt_id: str, payload: dict = Body(default={})):
+        """Einen Schritt abhaken - oder die Bestätigung zurücknehmen.
+
+        Abgelehnt wird, was die laufende Anlage gerade widerlegt: ein Schritt,
+        dessen Prüfung nicht trägt, lässt sich nicht wegklicken.
+        """
+        return guard(application.checklist.abhaken, schritt_id,
+                     application.checklist_state(),
+                     bool(payload.get("erledigt", True)),
+                     config.network.device_name or config.network.device_id)
+
+    @api.delete("/api/checklist")
+    async def reset_checklist():
+        """Nach einem Umbau fängt die Inbetriebnahme von vorn an."""
+        engine.note("Inbetriebnahme zurückgesetzt")
+        return ok(application.checklist.zuruecksetzen(application.checklist_state()))
+
+    @api.get("/api/config")
+    async def get_config() -> dict:
+        return config.to_dict()
+
+    # -- Aktualisierung ---------------------------------------------------
+
+    @api.get("/api/update")
+    async def update_stand() -> dict:
+        # als_programm: in der exe gibt es nur das Online-Update und die Setup-Datei -
+        # die Oberfläche blendet Paket, GitHub und Zurückholen dann aus.
+        return {**update_module.stand(VERSION), "als_programm": update_module.als_programm()}
+
+    @api.get("/api/update/online")
+    async def update_online_pruefen() -> dict:
+        """Jetzt nachsehen, ob es eine neuere Version gibt."""
+        ergebnis = await asyncio.to_thread(application.online_pruefen)
+        ergebnis["als_programm"] = update_module.als_programm()
+        return ergebnis
+
+    @api.post("/api/update/online")
+    async def update_online_einspielen():
+        """Neue Version laden, prüfen und einspielen - nur im Stand und ohne Lenkung.
+
+        Die Setup-Datei läuft danach als eigene Aufgabe: sie hält das Programm
+        an, ersetzt es, startet es und rollt zurück, wenn es nicht anläuft.
+        """
+        if not update_module.als_programm():
+            raise HTTPException(400, "Das geht nur in der Programmversion (AgriPilot.exe). "
+                                     "Hier: Paket einspielen oder aus GitHub holen.")
+        if application.steering.armed:
+            raise HTTPException(409, "Erst die Lenkung ausschalten")
+        fix = engine.fix
+        if fix is not None and fix.valid and fix.speed_ms > 0.5:
+            raise HTTPException(409, "Erst anhalten - während der Fahrt wird nicht aktualisiert")
+        ergebnis = await asyncio.to_thread(application.online_pruefen)
+        if ergebnis["fehler"]:
+            raise HTTPException(400, ergebnis["fehler"])
+        info = getattr(application, "online_info", None)
+        if not ergebnis["verfuegbar"] or info is None:
+            return ok({"schon_aktuell": True, "version": VERSION})
+        try:
+            pfad = await asyncio.to_thread(
+                onlineupdate_module.herunterladen, info, Path(config.server.data_dir) / "update")
+        except onlineupdate_module.OnlineFehler as exc:
+            raise HTTPException(400, str(exc)) from exc
+        # Während Download/Prüfung kann der Fahrer losfahren oder scharfschalten.
+        if application.steering.armed:
+            raise HTTPException(409, "Erst die Lenkung ausschalten")
+        fix = engine.fix
+        if fix is not None and fix.valid and fix.speed_ms > 0.5:
+            raise HTTPException(409, "Erst anhalten - während der Fahrt wird nicht aktualisiert")
+        application.steering.disarm("Aktualisierung")
+        engine.suspend_job()          # die Arbeit läuft danach weiter
+        engine.note(f"Aktualisierung auf {ergebnis['neu']} wird eingespielt - das Programm startet neu")
+        try:
+            await asyncio.to_thread(exe_module.setup_starten, pfad)
+        except RuntimeError as exc:
+            raise HTTPException(500, f"Die Aktualisierung ließ sich nicht starten: {exc}") from exc
+        return ok({"version": ergebnis["neu"], "datei": str(pfad)})
+
+    @api.post("/api/update/paket")
+    async def update_paket(payload: dict = Body(...)):
+        """Ein Update-Paket (Zip, base64) prüfen und einspielen.
+
+        Vorher geht die Lenkung aus und eine laufende Arbeit wird gesichert:
+        gleich wird neu gestartet. Kopiert wird in einem Thread - ein paar
+        hundert Dateien und pip brauchen Sekunden, die Position läuft derweil.
+        """
+        import base64
+        try:
+            daten = base64.b64decode(payload.get("zip") or "")
+        except (ValueError, TypeError) as exc:
+            raise HTTPException(400, f"Paket nicht lesbar: {exc}") from exc
+        if not daten:
+            raise HTTPException(400, "Kein Paket übergeben")
+        application.steering.disarm("Aktualisierung")
+        engine.suspend_job()     # die Arbeit läuft nach dem Neustart weiter
+        try:
+            ergebnis = await asyncio.to_thread(update_module.einspielen, daten)
+        except update_module.UpdateFehler as exc:
+            raise HTTPException(400, str(exc)) from exc
+        engine.note(f"Aktualisierung eingespielt: {ergebnis['version']} {ergebnis['commit']}")
+        return ok(ergebnis)
+
+    @api.post("/api/update/git")
+    async def update_git():
+        """Aus dem Git-Klon holen (nur vorspulen) - am Hof mit Netz."""
+        application.steering.disarm("Aktualisierung")
+        try:
+            ergebnis = await asyncio.to_thread(update_module.aus_repo_holen)
+        except update_module.UpdateFehler as exc:
+            raise HTTPException(400, str(exc)) from exc
+        if ergebnis["geaendert"]:
+            engine.note(f"Aus dem Repo geholt: {ergebnis['vorher']} → {ergebnis['nachher']}")
+        return ok(ergebnis)
+
+    @api.post("/api/update/zurueck")
+    async def update_zurueck(payload: dict = Body(default={})):
+        application.steering.disarm("Aktualisierung")
+        try:
+            ergebnis = await asyncio.to_thread(update_module.zurueckholen, payload.get("name", ""))
+        except update_module.UpdateFehler as exc:
+            raise HTTPException(400, str(exc)) from exc
+        engine.note("Vorigen Stand zurückgeholt")
+        return ok(ergebnis)
+
+    @api.post("/api/update/neustart")
+    async def update_neustart():
+        """Das Programm beenden und wiederkommen lassen. Die Antwort geht vor
+        dem Beenden hinaus; die Anzeige verbindet sich von selbst neu."""
+        application.steering.disarm("Neustart")
+        engine.suspend_job()     # die Arbeit läuft nach dem Neustart weiter
+        engine.note("Neustart")
+        update_module.neustarten()
+        return ok({"neustart": update_module.neustart_art()})
+
+    # -- Einstellungen ----------------------------------------------------
+
+    @api.get("/api/settings")
+    async def get_settings() -> dict:
+        """Beschreibung aller Einstellungen und ihr aktueller Stand."""
+        return {
+            "gruppen": settings_module.schema(),
+            "werte": settings_module.werte(config),
+            "datei": str(config.path or ""),
+        }
+
+    @api.post("/api/settings")
+    async def post_settings(payload: dict = Body(...)):
+        """Geänderte Werte prüfen, setzen und in die Konfigurationsdatei schreiben.
+
+        Erst prüfen, dann setzen: eine halb übernommene Konfiguration wäre
+        schlimmer als eine abgelehnte.
+        """
+        aenderungen = payload.get("aenderungen")
+        if not isinstance(aenderungen, dict):
+            raise HTTPException(400, "Keine Änderungen übergeben")
+        # Die Freigabe der Lenkung hängt an der Inbetriebnahme - der Schritt
+        # mit dem Not-Aus muss abgehakt sein, bevor sich hier etwas bewegt.
+        stand = application.checklist.zusammenfassung(application.checklist_state())
+        motor_fertig = next(
+            (s["fertig"] for s in stand["schritte"] if s["id"] == "lenkmotor"), True)
+        try:
+            if any(k.startswith("teilbreiten.") for k in aenderungen):
+                fix=engine.fix
+                if engine.job is not None or application.steering.armed or (fix is not None and abs(fix.speed_ms)>.5):
+                    raise settings_module.EinstellungsFehler("Teilbreiten-Hardware nur im Stand, ohne Arbeit und ausgeschaltete Lenkung ändern")
+            ergebnis = settings_module.uebernehmen(config, aenderungen, motor_fertig)
+        except settings_module.EinstellungsFehler as exc:
+            raise HTTPException(400, str(exc)) from exc
+        if ergebnis["gespeichert"]:
+            engine.note(f"Einstellungen geändert ({ergebnis['gespeichert']})")
+        # Empfänger und Sensor werden im Betrieb neu gebaut - ein Neustart
+        # dafür wäre auf dem Feld eine Zumutung und beim Abspielen ein Umweg.
+        if any(k.startswith(("gnss.", "imu.")) and k not in NUR_WERT
+               for k in aenderungen):
+            ergebnis["quelle"] = await application.quelle_wechseln()
+        # Den Caster wechselt man auch auf dem Feld - dafür startet niemand den Dienst neu.
+        if any(k.startswith("corrections.") for k in aenderungen):
+            ergebnis["korrekturen"] = await application.korrekturen_wechseln()
+        # Ein anderer Lenkausgang (Gerätesuche übernommen) gilt sofort.
+        if any(k in LENKAUSGANG_SCHLUESSEL for k in aenderungen):
+            ergebnis["lenkung"] = await application.lenkung_neu_bauen()
+        if any(k.startswith("teilbreiten.") for k in aenderungen):
+            await application.teilbreiten.stop()
+            application.teilbreiten=TeilbreitenAusgang(config.teilbreiten)
+            engine.teilbreiten=application.teilbreiten
+            await application.teilbreiten.start()
+        return ok({**ergebnis, "werte": settings_module.werte(config)})
+
+    def _caster_angaben(payload: dict):
+        """Die Angaben aus der Maske, ohne sie zu speichern - Lücken aus der Konfiguration.
+
+        Das Passwort kommt nie zur Oberfläche zurück. Steht dort der Platzhalter
+        oder nichts, gilt das gespeicherte - sonst müsste man es für jeden Test neu tippen.
+        """
+        cfg = config.corrections
+        passwort = str(payload.get("password") or "")
+        if passwort == settings_module.PASSWORT_PLATZHALTER:
+            passwort = ""
+        port = payload.get("port", cfg.port)
+        try:
+            port = int(port)
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(400, "Port muss eine Zahl sein") from exc
+        if not 1 <= port <= 65535:
+            raise HTTPException(400, "Port muss zwischen 1 und 65535 liegen")
+        return dataclasses.replace(
+            cfg,
+            host=str(payload.get("host", cfg.host) or "").strip(),
+            port=port,
+            mountpoint=str(payload.get("mountpoint", cfg.mountpoint) or "").strip().lstrip("/"),
+            username=str(payload.get("username", cfg.username) or ""),
+            password=passwort or cfg.password or "",
+            send_gga=bool(payload.get("send_gga", cfg.send_gga)),
+        )
+
+    def _nur_dieser_rechner(request: Request) -> None:
+        """Beenden darf nur das Fenster auf diesem Rechner - kein Tablet im Netz."""
+        host = request.client.host if request.client else ""
+        if host not in ("127.0.0.1", "::1", "localhost"):
+            raise HTTPException(403, "Beenden geht nur am Rechner selbst")
+
+    @api.get("/api/beenden")
+    async def beenden_pruefen(request: Request):
+        """Was beim Beenden unterbrochen würde - damit das Fenster nachfragen kann."""
+        _nur_dieser_rechner(request)
+        return ok({"lenkung": bool(application.steering.armed), "arbeit": bool(engine.job)})
+
+    @api.post("/api/beenden")
+    async def beenden(request: Request):
+        """Das Programm sauber beenden: Arbeit sichern, Lenkung aus, Dienst zu.
+
+        Endet es so (mit Code 0), startet die Aufgabe es nicht neu - das tut sie
+        nur nach einem Absturz.
+        """
+        _nur_dieser_rechner(request)
+        stopp = getattr(api.state, "beenden", None)
+        if stopp is None:
+            raise HTTPException(503, "So gestartet lässt sich das Programm nicht beenden")
+        application.steering.disarm("Programm wird beendet")
+        engine.note("Programm beendet (Fenster geschlossen)")
+        asyncio.get_running_loop().call_later(0.3, stopp)
+        return ok()
+
+    @api.post("/api/ntrip/mountpoints")
+    async def ntrip_mountpoints(payload: dict = Body(...)):
+        """Die Mountpoint-Liste des Casters - nächste Basis zuerst."""
+        angaben = _caster_angaben(payload)
+        try:
+            liste = await mountpoints_holen(angaben.host, angaben.port, angaben.username,
+                                            angaben.password, application._current_position())
+        except CasterFehler as exc:
+            raise HTTPException(400, str(exc)) from exc
+        return ok({"mountpoints": liste[:300], "anzahl": len(liste)})
+
+    @api.post("/api/ntrip/test")
+    async def ntrip_test(payload: dict = Body(...)):
+        """Einmal verbinden und ein paar Sekunden mitlesen - ohne etwas zu speichern."""
+        angaben = _caster_angaben(payload)
+        return ok(await verbindung_testen(angaben, application._current_position()))
+
+    @api.post("/api/quelle/neustart")
+    async def quelle_neustart():
+        """Empfänger und Sensor neu verbinden - etwa nach dem Umstecken."""
+        return ok(await application.quelle_wechseln())
+
+    @api.post("/api/richtung/umkehren")
+    async def richtung_umkehren():
+        return guard(engine.richtung_umkehren)
+
+    @api.post("/api/simulator")
+    async def simulator(payload: dict = Body(...)):
+        simulator_source = engine.simulator
+        if simulator_source is None:
+            raise HTTPException(400, "Der Simulator läuft nicht")
+        if "speed_kmh" in payload:
+            simulator_source.set_speed_kmh(float(payload["speed_kmh"]))
+        if "steer_deg" in payload and not application.steering.command.engaged:
+            simulator_source.set_steer(float(payload["steer_deg"]))
+        if "fix_quality" in payload:
+            simulator_source.fix_quality = int(payload["fix_quality"])
+        for name in ("seitendrift_ms", "rad_versatz_deg", "mess_korrektur_deg",
+                     "lenk_traegheit_s", "lenk_rate_deg_s", "lenk_totzeit_s"):
+            if name in payload and hasattr(simulator_source, name):
+                setattr(simulator_source, name, float(payload[name]))
+        if "east" in payload and "north" in payload:
+            simulator_source.teleport(
+                float(payload["east"]), float(payload["north"]),
+                float(payload.get("heading", simulator_source.heading)),
+            )
+        if payload.get("ins_feld"):
+            # Zurück ins Feld: auf die aktive Spur (Anfang, in ihrer Richtung),
+            # sonst in die Mitte der Grenze. Der virtuelle Traktor fährt ohne
+            # Lenkung geradeaus davon - nach einer Minute ist er außerhalb.
+            if not application.simulator_ins_feld():
+                raise HTTPException(400, "Kein Feld geladen")
+        return ok({"speed_kmh": simulator_source.speed_ms * 3.6,
+                   "steer_deg": simulator_source.steer_deg})
+
+    # -- master sync endpoint ---------------------------------------------
+
+    def arbeiter_pruefen(request: Request) -> None:
+        """Darf dieser Arbeiter an den Master? Wirft, wenn nicht."""
+        if not config.is_master:
+            raise HTTPException(400, "Dieses Gerät ist kein Master")
+        # Mit Code im Heimnetz wie von außen: ohne passenden Code kein Abgleich. Ohne
+        # gesetzten Code bleibt das Heimnetz offen wie bisher, von außen geht dann nichts.
+        gesetzt = config.network.sync_token
+        von_aussen = any(k in request.headers for k in ("cf-connecting-ip", "cf-ray", "x-forwarded-for"))
+        mitgebracht = request.headers.get("x-agripilot-token", "")
+
+        def glatt(code: str) -> bytes:        # getippt wird auf dem Tablet: Groß/Klein, Leerzeichen, Strich egal
+            return "".join(c for c in code.upper() if c.isalnum()).encode()
+
+        # Wer ist das? Hinter einem Tunnel steht die echte Adresse in der Kopfzeile.
+        absender = (request.headers.get("cf-connecting-ip")
+                    or request.headers.get("x-forwarded-for", "").split(",")[0].strip()
+                    or (request.client.host if request.client else "?"))
+        jetzt = time.monotonic()
+        fehler = [t for t in application.abgleich_fehler.get(absender, []) if jetzt - t < SPERRE_FENSTER_S]
+        application.abgleich_fehler[absender] = fehler
+        if len(fehler) >= SPERRE_VERSUCHE:
+            raise HTTPException(429, "Zu viele falsche Versuche - in einer Viertelstunde noch einmal")
+        if von_aussen and gesetzt and len(glatt(gesetzt)) < MINDESTLAENGE_AUSSEN:
+            # Ein kurzer Code lässt sich aus dem Internet durchprobieren.
+            raise HTTPException(403, f"Der Arbeitercode ist für den Zugriff von außen zu kurz "
+                                     f"(mindestens {MINDESTLAENGE_AUSSEN} Zeichen) - am Master unter "
+                                     "Einstellungen → Netzwerk einen längeren setzen")
+        if (gesetzt or von_aussen) and not (
+                gesetzt and hmac.compare_digest(glatt(mitgebracht), glatt(gesetzt))):
+            fehler.append(jetzt)
+            raise HTTPException(401, "Arbeitercode fehlt oder ist falsch")
+
+    def setup_zum_verteilen() -> tuple[Path, str]:
+        setup = application.verteiltes_setup()
+        if setup is None:
+            raise HTTPException(404, "Kein Update zum Verteilen - AgriPilot-Setup-<Version>.exe "
+                                     f"in {application.setup_ordner()} ablegen")
+        return setup
+
+    @api.get("/api/sync/setup")
+    async def sync_setup_info(request: Request) -> dict:
+        """Welche Version der Master als Update für die Arbeiter bereithält."""
+        arbeiter_pruefen(request)
+        pfad, version = setup_zum_verteilen()
+        groesse, sha = await asyncio.to_thread(application.eigenes_setup, pfad)
+        return {"version": version, "groesse": groesse, "sha256": sha}
+
+    @api.get("/api/sync/setup/datei")
+    async def sync_setup_datei(request: Request):
+        arbeiter_pruefen(request)
+        pfad, version = setup_zum_verteilen()
+        from fastapi.responses import FileResponse
+        return FileResponse(pfad, media_type="application/octet-stream",
+                            filename=f"AgriPilot-Setup-{version}.exe")
+
+    @api.post("/api/sync")
+    async def sync_endpoint(request: Request, payload: dict = Body(...)) -> dict:
+        """Called by client tractors. Push their changes, hand back ours."""
+        arbeiter_pruefen(request)
+        device = payload.get("device") or {}
+        if device.get("id"):
+            store.touch_device(device["id"], device.get("name", device["id"]),
+                               device.get("role", "client"))
+        applied = sync.apply_changes(store, payload.get("changes", {}))
+        if payload.get("maschinen"):
+            engine.profile_merge(payload["maschinen"])
+        since = float(payload.get("since", 0.0))
+        return {
+            "server_time": time.time(),
+            "applied": applied,
+            "changes": sync.collect_changes(store, since),
+            "maschinen": engine.profile_export(),
+        }
+
+    @api.post("/api/sync/live")
+    async def sync_live(request: Request, payload: dict = Body(...)) -> dict:
+        """Ein Arbeiter meldet seine Lage; zurück kommen die Lagen aller anderen."""
+        arbeiter_pruefen(request)
+        geraet = str((payload.get("device") or {}).get("id") or "")
+        if payload.get("live"):
+            engine.flotte.melden(geraet, payload["live"])
+        eigene = engine.live_meldung()
+        if eigene and not eigene["simulator"]:
+            engine.flotte.melden(config.network.device_id, eigene)
+        return {"flotte": engine.flotte.liste(ohne=geraet)}
+
+    # -- Radmitte aus der Fahrt ------------------------------------------
+
+    @api.get("/api/lenkung/radmitte")
+    async def radmitte_stand() -> dict:
+        return engine.radmitte.ergebnis()
+
+    @api.post("/api/lenkung/radmitte")
+    async def radmitte_aktion(payload: dict = Body(default={})):
+        aktion = str(payload.get("aktion") or "")
+        if aktion == "start":
+            engine.radmitte.start()
+        elif aktion == "stop":
+            engine.radmitte.stop()
+        elif aktion == "zuruecksetzen":
+            engine.radmitte.zuruecksetzen()
+        elif aktion == "uebernehmen":
+            try:
+                ergebnis = engine.radmitte_uebernehmen()
+            except RuntimeError as exc:
+                raise HTTPException(400, str(exc)) from exc
+            if ergebnis.get("speichern"):
+                config.save()
+        else:
+            raise HTTPException(400, "Unbekannte Aktion")
+        return ok(engine.radmitte.ergebnis())
+
+    # -- Luftbild ---------------------------------------------------------
+
+    def luftbild_ordner() -> Path:
+        return Path(config.server.data_dir) / "luftbild"
+
+    def luftbild_holen(feld: dict):
+        s = config.server
+        master = None
+        if not config.is_master and config.network.master_url:
+            kopf = ({"X-AgriPilot-Token": config.network.sync_token} if config.network.sync_token else {})
+            master = (config.network.master_url, kopf)
+        return luftbild_module.holen(feld, luftbild_ordner(), s.luftbild_wms, s.luftbild_ebene,
+                                     s.luftbild_quelle, master=master)
+
+    def luftbild_feld(field_id: str) -> dict:
+        feld = store.get_field(field_id)
+        if feld is None:
+            raise HTTPException(404, "Feld nicht gefunden")
+        return feld
+
+    @api.get("/api/luftbild/{field_id}")
+    async def luftbild_info(field_id: str):
+        """Wo das Luftbild des Feldes liegt - holt es, wenn es noch fehlt."""
+        feld = luftbild_feld(field_id)
+        try:
+            pfad, info = await asyncio.to_thread(luftbild_holen, feld)
+        except luftbild_module.LuftbildFehler as exc:
+            raise HTTPException(503, str(exc)) from exc
+        return {**info, "bild": luftbild_adresse(field_id, pfad, info)}
+
+    def luftbild_adresse(field_id: str, pfad: Path, info: dict) -> str:
+        # Grobes und scharfes Bild liegen unter derselben Adresse, und der Browser hält
+        # Bilder einen Tag vor: ohne diese Kennung zeigte das Tablet das grobe Ersatzbild
+        # noch, als das scharfe längst da war (24.10.2026).
+        stand = f"{int(pfad.stat().st_mtime)}{'g' if info.get('grob') else 's'}"
+        return f"/api/luftbild/{field_id}/bild?v={stand}"
+
+    @api.get("/api/luftbild/{field_id}/bild")
+    async def luftbild_bild(field_id: str):
+        from fastapi.responses import FileResponse
+        feld = luftbild_feld(field_id)
+        s = config.server
+        da = luftbild_module.vorhanden(feld, luftbild_ordner(), s.luftbild_wms, s.luftbild_ebene)
+        if da is None:
+            raise HTTPException(404, "Noch kein Luftbild - erst /api/luftbild/{id} abrufen")
+        return FileResponse(da[0], media_type="image/jpeg", headers={"Cache-Control": "max-age=86400"})
+
+    @api.get("/api/sync/luftbild/{field_id}")
+    async def luftbild_fuer_arbeiter(field_id: str, request: Request):
+        """Der Master gibt sein Luftbild an Arbeiter heraus (mit Arbeitercode)."""
+        from fastapi.responses import FileResponse
+        arbeiter_pruefen(request)
+        feld = luftbild_feld(field_id)
+        try:
+            pfad, info = await asyncio.to_thread(luftbild_holen, feld)
+        except luftbild_module.LuftbildFehler as exc:
+            raise HTTPException(503, str(exc)) from exc
+        if info.get("grob"):
+            # Nur das scharfe Luftbild weitergeben - ein Ersatzbild holt sich der Arbeiter selbst,
+            # sonst hielte er es für das richtige und fragte nie wieder nach.
+            raise HTTPException(503, "Am Master liegt nur das grobe Ersatzbild")
+        return FileResponse(pfad, media_type="image/jpeg")
+
+    @api.post("/api/luftbild/alle")
+    async def luftbild_alle():
+        """Die Luftbilder aller Felder holen - vor der Fahrt ins Funkloch."""
+        geholt, fehler = 0, []
+        for feld in store.list_fields():
+            if len(feld.get("boundary") or []) < 3:
+                continue
+            try:
+                await asyncio.to_thread(luftbild_holen, feld)
+                geholt += 1
+            except luftbild_module.LuftbildFehler as exc:
+                fehler.append(f"{feld['name']}: {exc}")
+        return ok({"geholt": geholt, "fehler": fehler[:5], "fehler_gesamt": len(fehler)})
+
+    # -- Diagnosepaket ----------------------------------------------------
+
+    @api.post("/api/diagnose")
+    async def diagnosepaket(payload: dict = Body(default={})):
+        """Zip mit allem, was man zum Nachvollziehen eines Fehlers braucht - ohne Geheimnisse."""
+        daten = Path(config.server.data_dir)
+        jetzt = time.strftime("%Y%m%d-%H%M%S")
+        jobs = store.list_jobs(limit=1)
+        spur = ""
+        if jobs:
+            punkte = store.track_points(jobs[0]["id"])[-3000:]
+            if punkte:
+                spalten = list(punkte[0].keys())
+                spur = "\n".join([";".join(spalten)] + [";".join(str(p[k]) for k in spalten) for p in punkte])
+        dateien = {}
+        aufnahmen = recorder_module.liste(application.aufzeichnung.ordner)
+        if aufnahmen and aufnahmen[0]["groesse_b"] <= diagnose_module.ROHDATEN_MAX_B \
+                and time.time() - aufnahmen[0]["geaendert_at"] < diagnose_module.ROHDATEN_MAX_ALTER_S:
+            dateien["rohdaten/" + aufnahmen[0]["datei"]] = Path(application.aufzeichnung.ordner) / aufnahmen[0]["datei"]
+        teile = {
+            "LIESMICH.txt": ("AgriPilot-Diagnosepaket\n"
+                             f"Version {VERSION}, erstellt {time.strftime('%d.%m.%Y %H:%M:%S')}\n"
+                             f"Gerät: {config.network.device_name or config.network.device_id} "
+                             f"({config.network.role})\n\nNotiz des Fahrers:\n{payload.get('notiz') or '-'}\n\n"
+                             "Passwörter, Arbeitercode und Zugangsnamen sind geschwärzt.\n"),
+            "zustand.json": engine.state(),
+            "system.json": application.system_status(),
+            "einstellungen.json": settings_module.werte(config),
+            "letzte_arbeit.json": jobs[0] if jobs else None,
+            "letzte_arbeit_spurpunkte.csv": spur or None,
+            "lenkung_live.json": payload.get("lenklive"),
+            "meldungen.txt": "\n".join(engine.messages),
+            "protokoll.txt": diagnose_module.protokoll_ende(daten / "agripilot.log") or None,
+        }
+        paket = await asyncio.to_thread(diagnose_module.packen, teile, dateien)
+        name = f"AgriPilot-Diagnose-{jetzt}.zip"
+        # Zusätzlich im Datenordner ablegen: falls der Download im Browser nicht ankommt,
+        # liegt das Paket dort (die letzten zehn bleiben).
+        ablage = daten / "diagnose"
+        try:
+            ablage.mkdir(parents=True, exist_ok=True)
+            (ablage / name).write_bytes(paket)
+            for alt in sorted(ablage.glob("AgriPilot-Diagnose-*.zip"))[:-10]:
+                alt.unlink(missing_ok=True)
+        except OSError:
+            pass
+        return Response(paket, media_type="application/zip",
+                        headers={"Content-Disposition": f'attachment; filename="{name}"',
+                                 "X-Abgelegt": str(ablage / name)})
+
+    # -- Hindernisse ------------------------------------------------------
+
+    @api.get("/api/hindernisse")
+    async def hindernisse_liste(field_id: str = "") -> list[dict]:
+        return store.list_hindernisse(field_id or None)
+
+    @api.post("/api/hindernisse")
+    async def hindernis_neu(payload: dict = Body(default={})):
+        return guard(engine.hindernis_setzen, str(payload.get("name") or "Hindernis"),
+                     str(payload.get("seite") or "hier"), float(payload.get("radius_m") or 1.0))
+
+    @api.delete("/api/hindernisse/{hindernis_id}")
+    async def hindernis_weg(hindernis_id: str):
+        engine.hindernis_loeschen(hindernis_id)
+        return ok()
+
+    # -- Feldkarte: Schlagauswahl auf der Karte ----------------------------
+
+    def _scharf_versuchen(feld: dict) -> None:
+        try:
+            luftbild_holen(feld)
+        except Exception:  # noqa: BLE001 - dann bleibt das grobe, beim nächsten Mal wieder
+            pass
+
+    @api.get("/api/feldkarte")
+    async def feldkarte() -> dict:
+        """Alle Felder in WGS84 für die Kartenauswahl, dazu wo der Traktor steht.
+
+        Luftbilder kommen nur mit, wenn sie schon da sind (ohne Netz nutzbar):
+        für 30 Felder auf einmal holen wäre ein Abruf, den niemand bestellt hat.
+        Dafür gibt es "Luftbilder aller Felder laden".
+        """
+        s = config.server
+        felder, grob = [], []
+        for feld in store.list_fields():
+            if len(feld.get("boundary") or []) < 3:
+                continue
+            ebene = geo.LocalPlane(feld["datum_lat"], feld["datum_lon"])
+            eintrag = {"id": feld["id"], "name": feld["name"], "area_ha": feld.get("area_ha", 0.0),
+                       "grenze": [[round(v, 7) for v in ebene.to_wgs(*p)] for p in feld["boundary"]],
+                       "luftbild": None}
+            box = luftbild_module.ausschnitt(feld)
+            da = luftbild_module.vorhanden(feld, luftbild_ordner(), s.luftbild_wms, s.luftbild_ebene)                 if box is not None else None
+            if da is not None:
+                eintrag["luftbild"] = {"bild": luftbild_adresse(feld["id"], da[0], da[1]),
+                                       "box": [round(v, 7) for v in box]}
+                if da[1].get("grob"):
+                    grob.append(feld)
+            felder.append(eintrag)
+        if grob:
+            # Nur ein grobes Ersatzbild da: im Hintergrund das scharfe holen (vom Master
+            # zuerst) - beim nächsten Öffnen der Karte ist es da.
+            asyncio.get_running_loop().run_in_executor(None, lambda: [_scharf_versuchen(f) for f in grob])
+        position = None
+        if engine.fix is not None and engine.fix.valid:
+            position = {"lat": engine.fix.lat, "lon": engine.fix.lon, "kurs": engine.heading}
+        return {"felder": felder, "position": position,
+                "geladen": engine.field["id"] if engine.field else None}
+
+    # -- Fernansicht ------------------------------------------------------
+
+    @api.get("/api/flotte")
+    async def flotte_liste() -> dict:
+        """Alle Maschinen mit Lage, dazu die Grenzen ihrer Felder in WGS84 - für die Übersichtskarte."""
+        maschinen = engine.flotte.liste(ohne=config.network.device_id)
+        eigene = engine.live_meldung()
+        if eigene:
+            maschinen.append({**eigene, "id": config.network.device_id, "alter_s": 0.0, "selbst": True})
+        felder = {}
+        for m in maschinen:
+            fid = m.get("feld_id")
+            if not fid or fid in felder:
+                continue
+            feld = store.get_field(fid)
+            if not feld or len(feld["boundary"]) < 3:
+                continue
+            ebene = geo.LocalPlane(feld["datum_lat"], feld["datum_lon"])
+            felder[fid] = {"name": feld["name"],
+                           "grenze": [list(ebene.to_wgs(*p)) for p in feld["boundary"]]}
+        return {"maschinen": maschinen, "felder": felder}
+
+    # -- Datenpaket: Master -> Arbeiter als Datei --------------------------
+
+    @api.get("/api/daten/export")
+    async def daten_export(mit_arbeiten: int = 0):
+        """Felder, Spuren und Maschinen als Zip - zum Mitnehmen oder Verschicken."""
+        inhalt = await asyncio.to_thread(
+            teilen_module.paket_bauen, store, engine,
+            config.network.device_name or config.network.device_id, bool(mit_arbeiten))
+        name = time.strftime("agripilot-daten-%Y%m%d-%H%M.zip")
+        return Response(inhalt, media_type="application/zip",
+                        headers={"Content-Disposition": f'attachment; filename="{name}"'})
+
+    # -- Arbeiten an MyTerra übergeben: als Datei ---------------------------
+
+    @api.get("/api/myterra/arbeiten")
+    async def myterra_arbeiten() -> list[dict]:
+        """Fertige Arbeiten mit erkannter Tätigkeit und Übergabestand."""
+        return myterra_module.arbeiten(store)
+
+    @api.get("/api/myterra/maschinen")
+    async def myterra_maschinen() -> dict:
+        """Traktoren und Geräte, wie MyTerra sie nennt - für die Auswahl bei der Maschine."""
+        return store.get_setting(myterra_module.KATALOG) or {"traktoren": [], "geraete": []}
+
+    @api.post("/api/myterra/maschinen")
+    async def myterra_maschinen_uebernehmen(payload: dict = Body(...)):
+        """Die Maschinenliste aus MyTerra übernehmen: je Gerät eine Maschine."""
+        liste = payload.get("maschinen")
+        if not isinstance(liste, list):
+            raise HTTPException(400, "Keine Maschinenliste übergeben")
+        return guard(myterra_module.maschinen_uebernehmen, engine, liste,
+                     str(payload.get("traktor") or ""))
+
+    @api.post("/api/myterra/schlaege")
+    async def myterra_schlaege_uebernehmen(payload: dict = Body(...)):
+        """Schläge mit Umriss aus MyTerra als Felder übernehmen (Name wie in MyTerra)."""
+        schlaege = payload.get("schlaege")
+        if not isinstance(schlaege, list):
+            raise HTTPException(400, "Keine Schlagliste übergeben")
+        return guard(myterra_module.schlaege_uebernehmen, engine, schlaege)
+
+    @api.get("/api/myterra/export")
+    async def myterra_export(ids: str = "", alle: int = 0):
+        """Arbeitsberichte als Datei für den Prüfeingang von MyTerra.
+
+        Ohne Angabe die noch nicht übergebenen, mit ``ids`` bestimmte (auch erneut),
+        mit ``alle=1`` alle.
+        """
+        gewaehlt = [i for i in ids.split(",") if i] or None
+        inhalt, genommen = await asyncio.to_thread(
+            myterra_module.paket_bauen, store,
+            config.network.device_name or config.network.device_id, gewaehlt, not alle)
+        if genommen:
+            engine.note(f"{len(genommen)} Arbeit(en) für MyTerra exportiert")
+        name = time.strftime("agripilot-arbeiten-%Y%m%d-%H%M.json")
+        return Response(inhalt, media_type="application/json", headers={
+            "Content-Disposition": f'attachment; filename="{name}"',
+            "X-Anzahl": str(len(genommen))})
+
+    @api.post("/api/daten/import")
+    async def daten_import(payload: dict = Body(...)):
+        """Ein Datenpaket zusammenführen: je Datensatz gilt der neuere."""
+        import base64
+        try:
+            daten = base64.b64decode(payload.get("zip") or "")
+        except (ValueError, TypeError) as exc:
+            raise HTTPException(400, f"Paket nicht lesbar: {exc}") from exc
+        try:
+            ergebnis = await asyncio.to_thread(teilen_module.paket_einspielen, store, engine, daten)
+        except teilen_module.PaketFehler as exc:
+            raise HTTPException(400, str(exc)) from exc
+        engine.note(f"Datenpaket von {ergebnis['von'] or 'unbekannt'} eingespielt: "
+                    f"{ergebnis['felder']} Felder, {ergebnis['spuren']} Spuren, "
+                    f"{ergebnis['maschinen']['neu'] + ergebnis['maschinen']['aktualisiert']} Maschinen")
+        return ok(ergebnis)
+
+    @api.get("/ca.crt")
+    async def ca_zertifikat():
+        """Das CA-Zertifikat zum Einrichten eines Tablets.
+
+        Henne und Ei: das Tablet braucht die Papiere, bevor es der
+        verschlüsselten Verbindung trauen kann - also liegen sie hier offen.
+        Das ist unbedenklich, es ist der öffentliche Teil. Der Schlüssel
+        (ca.key) wird nie ausgeliefert.
+        """
+        pfad = Path(config.server.tls_cert).parent / "ca.crt" if config.server.tls_cert \
+            else Path("/etc/agripilot/tls/ca.crt")
+        if not pfad.exists():
+            raise HTTPException(404, "Kein CA-Zertifikat vorhanden "
+                                     "(scripts/make_cert.sh auf dem Pi ausführen)")
+        return Response(pfad.read_bytes(), media_type="application/x-x509-ca-cert",
+                        headers={"Content-Disposition": 'attachment; filename="agripilot-ca.crt"'})
+
+    # -- static frontend --------------------------------------------------
+
+    # Mounted last so every /api route above wins; everything else is the
+    # cab display, served straight from disk.
+    if FRONTEND_DIR.exists():
+        api.mount("/", OberflaecheDateien(directory=FRONTEND_DIR, html=True), name="app")
+
+    return api
+
+
+def main() -> None:  # pragma: no cover - entry point
+    import uvicorn
+    config = config_module.load()
+    Path(config.server.data_dir).mkdir(parents=True, exist_ok=True)
+    tls = {}
+    if config.server.tls_aktiv:
+        # Ohne HTTPS bleibt ein Android-Tablet eine Webseite; mit HTTPS wird es
+        # eine Kachel, die den Bildschirm wachhält.
+        tls = {"ssl_certfile": config.server.tls_cert,
+               "ssl_keyfile": config.server.tls_key}
+    if os.environ.get("AGRIPILOT_WARTE_AUF_PORT"):
+        # Als Nachfolger nach einer Aktualisierung gestartet: der Vorgänger
+        # gibt den Port erst frei, wenn er ganz beendet ist.
+        update_module.auf_freien_port_warten(config.server.host, config.server.port)
+    app = create_app(config)
+    server = uvicorn.Server(uvicorn.Config(
+        app,
+        host=config.server.host,
+        port=config.server.port,
+        log_level="info",
+        **tls,
+    ))
+    # Sauber beenden, wenn das Fenster zugeht: wie Strg+C, also mit dem
+    # Abschluss in Application.stop() (Arbeit sichern, Ports frei, Datenbank zu).
+    app.state.beenden = lambda: setattr(server, "should_exit", True)
+    server.run()
+
+
+if __name__ == "__main__":  # pragma: no cover
+    main()

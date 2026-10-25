@@ -1,0 +1,645 @@
+"""SQLite storage.
+
+SQLite because it needs no server, survives a Raspberry Pi losing power mid-row
+(WAL mode), and copies to a USB stick as one file.  Every record carries a UUID
+and an `updated_at` stamp so the same rows can be merged between machines
+without a central id counter - see sync.py.
+"""
+
+from __future__ import annotations
+
+import json
+import sqlite3
+import time
+import uuid
+from pathlib import Path
+from typing import Any, Iterable, Optional
+
+SCHEMA = """
+CREATE TABLE IF NOT EXISTS fields (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    datum_lat REAL NOT NULL,
+    datum_lon REAL NOT NULL,
+    boundary TEXT NOT NULL DEFAULT '[]',
+    working_boundary TEXT NOT NULL DEFAULT '[]',
+    area_ha REAL NOT NULL DEFAULT 0,
+    note TEXT NOT NULL DEFAULT '',
+    updated_at REAL NOT NULL,
+    deleted INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS lines (
+    id TEXT PRIMARY KEY,
+    field_id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    mode TEXT NOT NULL,
+    points TEXT NOT NULL,
+    spacing_m REAL NOT NULL,
+    nudge_m REAL NOT NULL DEFAULT 0,
+    rand_innen REAL,                       -- fester Randbezug der gespeicherten Spur
+    saison INTEGER NOT NULL DEFAULT 0,      -- Jahr der Fahrgassen, 0 = keine Saisonspur
+    fahrgasse_m REAL NOT NULL DEFAULT 0,    -- Fahrgassenabstand, 0 = keine Fahrgassen
+    fahrgassen TEXT NOT NULL DEFAULT '',    -- Saatplan: Fahrgassen in m neben der Spur (JSON), '' = alle fahrgasse_m
+    spuren TEXT NOT NULL DEFAULT '',        -- Saatplan mit allen Spuren (mode "plan"): jede Spur einzeln (JSON)
+    aussaat_at REAL NOT NULL DEFAULT 0,    -- ausdrücklich festgelegte Aussaat, Umbenennen ändert sie nicht
+    updated_at REAL NOT NULL,
+    deleted INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS jobs (
+    id TEXT PRIMARY KEY,
+    field_id TEXT NOT NULL,
+    line_id TEXT,
+    device_id TEXT NOT NULL,
+    vehicle TEXT NOT NULL DEFAULT '',
+    tractor TEXT NOT NULL DEFAULT '',
+    operation TEXT NOT NULL DEFAULT '',
+    started_at REAL NOT NULL,
+    ended_at REAL,
+    distance_m REAL NOT NULL DEFAULT 0,
+    area_ha REAL NOT NULL DEFAULT 0,
+    overlap_ha REAL NOT NULL DEFAULT 0,
+    working_time_s REAL NOT NULL DEFAULT 0,
+    coverage BLOB,
+    genauigkeit TEXT NOT NULL DEFAULT '',  -- JSON aus genauigkeit.py, '' = nicht gelenkt
+    updated_at REAL NOT NULL,
+    deleted INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS track_points (
+    job_id TEXT NOT NULL,
+    t REAL NOT NULL,
+    lat REAL NOT NULL,
+    lon REAL NOT NULL,
+    altitude REAL,
+    speed_ms REAL,
+    heading REAL,
+    fix_quality INTEGER,
+    cross_track_m REAL
+);
+CREATE INDEX IF NOT EXISTS idx_track_job ON track_points(job_id, t);
+
+CREATE TABLE IF NOT EXISTS devices (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    role TEXT NOT NULL DEFAULT 'client',
+    last_seen REAL NOT NULL,
+    software TEXT NOT NULL DEFAULT '',
+    updated_at REAL NOT NULL,
+    deleted INTEGER NOT NULL DEFAULT 0
+);
+
+-- Nur lokal: wann ein fremder Stand hier angekommen ist. Dessen ursprüngliches
+-- updated_at bleibt die Konfliktzeit, aber verspätete Offline-Daten müssen weiter.
+CREATE TABLE IF NOT EXISTS sync_received (
+    table_name TEXT NOT NULL,
+    record_id TEXT NOT NULL,
+    received_at REAL NOT NULL,
+    PRIMARY KEY (table_name, record_id)
+);
+CREATE INDEX IF NOT EXISTS idx_sync_received ON sync_received(table_name, received_at);
+
+CREATE TABLE IF NOT EXISTS hindernisse (
+    id TEXT PRIMARY KEY,
+    field_id TEXT NOT NULL DEFAULT '',
+    name TEXT NOT NULL DEFAULT 'Hindernis',
+    lat REAL NOT NULL,
+    lon REAL NOT NULL,
+    radius_m REAL NOT NULL DEFAULT 1.0,
+    updated_at REAL NOT NULL,
+    deleted INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL,
+    updated_at REAL NOT NULL
+);
+"""
+
+SYNCED_TABLES = ("fields", "lines", "jobs", "devices", "hindernisse")
+
+
+def new_id() -> str:
+    return uuid.uuid4().hex
+
+
+class Storage:
+    def __init__(self, path: str | Path, schema: bool = True) -> None:
+        """``schema=False``: nur verbinden - für den Hintergrundschreiber, der eine
+        Datenbank öffnet, die das Programm längst angelegt hat."""
+        self.path = Path(path)
+        # Wer im Hintergrund in diese Datenbank schreibt, trägt sich hier ein:
+        # beim Schließen wird erst zu Ende geschrieben (engine.py).
+        self.vor_schliessen = None
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.db = sqlite3.connect(self.path, check_same_thread=False, timeout=10.0)
+        self.db.row_factory = sqlite3.Row
+        # WAL keeps readers going while a job writes, and survives a hard power
+        # cut - which in a tractor is the normal way to switch the system off.
+        self.db.execute("PRAGMA journal_mode=WAL")
+        self.db.execute("PRAGMA synchronous=NORMAL")
+        if not schema:
+            return
+        self.db.executescript(SCHEMA)
+        self._nachruesten()
+        self.db.commit()
+
+    def _nachruesten(self) -> None:
+        """Spalten, die es in älteren Datenbanken noch nicht gibt, anfügen.
+
+        CREATE TABLE IF NOT EXISTS lässt eine vorhandene Tabelle unangetastet -
+        eine Datenbank vom Frühjahr kennt die Saisonspalten nicht. Anfügen mit
+        Vorgabewert ist verlustfrei, und sync.apply_remote filtert ohnehin auf
+        die Spalten, die es jeweils gibt.
+        """
+        vorhanden = {c[1] for c in self.db.execute("PRAGMA table_info(lines)")}
+        for spalte, definition in (("saison", "INTEGER NOT NULL DEFAULT 0"),
+                                   ("fahrgasse_m", "REAL NOT NULL DEFAULT 0"),
+                                   ("fahrgassen", "TEXT NOT NULL DEFAULT ''"),
+                                   ("spuren", "TEXT NOT NULL DEFAULT ''")):
+            if spalte not in vorhanden:
+                self.db.execute(f"ALTER TABLE lines ADD COLUMN {spalte} {definition}")
+        if "rand_innen" not in vorhanden:
+            self.db.execute("ALTER TABLE lines ADD COLUMN rand_innen REAL")
+        # Bestehende Spuren beziehen sich auf die ursprüngliche Feldgrenze.
+        # Der Bezug bleibt mit der Spur erhalten, auch nach einer Arbeitsgrenze.
+        for row in self.db.execute("SELECT * FROM lines WHERE rand_innen IS NULL").fetchall():
+            record = _line_row(row)
+            self.db.execute("UPDATE lines SET rand_innen=? WHERE id=?",
+                            (self._randbezug(record), record["id"]))
+        if "aussaat_at" not in vorhanden:
+            self.db.execute("ALTER TABLE lines ADD COLUMN aussaat_at REAL NOT NULL DEFAULT 0")
+            self.db.execute("UPDATE lines SET aussaat_at=updated_at WHERE saison>0 AND fahrgasse_m>0")
+        if "working_boundary" not in {c[1] for c in self.db.execute("PRAGMA table_info(fields)")}:
+            self.db.execute("ALTER TABLE fields ADD COLUMN working_boundary TEXT NOT NULL DEFAULT '[]'")
+        for name,typ in (("tool_lat","REAL"),("tool_lon","REAL"),("working","INTEGER"),("turning","INTEGER")):
+            if name not in {c[1] for c in self.db.execute("PRAGMA table_info(track_points)")}:
+                self.db.execute(f"ALTER TABLE track_points ADD COLUMN {name} {typ}")
+        if "reference_spacing_m" not in {c[1] for c in self.db.execute("PRAGMA table_info(jobs)")}:
+            self.db.execute("ALTER TABLE jobs ADD COLUMN reference_spacing_m REAL NOT NULL DEFAULT 0")
+        # Seit 1.5.7: mit welchem Traktor eine Arbeit gefahren wurde (Gerät steht in vehicle).
+        if "tractor" not in {c[1] for c in self.db.execute("PRAGMA table_info(jobs)")}:
+            self.db.execute("ALTER TABLE jobs ADD COLUMN tractor TEXT NOT NULL DEFAULT ''")
+        if "genauigkeit" not in {c[1] for c in self.db.execute("PRAGMA table_info(jobs)")}:
+            self.db.execute("ALTER TABLE jobs ADD COLUMN genauigkeit TEXT NOT NULL DEFAULT ''")
+
+    def close(self) -> None:
+        if self.vor_schliessen is not None:
+            hook, self.vor_schliessen = self.vor_schliessen, None
+            hook()
+        self.db.close()
+
+    # -- fields -----------------------------------------------------------
+
+    def save_field(self, record: dict) -> dict:
+        record = dict(record)
+        record.setdefault("id", new_id())
+        record.setdefault("boundary", [])
+        alt = self.get_field(record["id"])
+        record.setdefault("working_boundary", (alt or {}).get("working_boundary", [])
+                          if alt and alt["boundary"] == record["boundary"] else [])
+        record.setdefault("note", "")
+        record.setdefault("area_ha", 0.0)
+        record["updated_at"] = time.time()
+        self.db.execute(
+            """INSERT INTO fields (id, name, datum_lat, datum_lon, boundary, working_boundary, area_ha,
+                                   note, updated_at, deleted)
+               VALUES (:id, :name, :datum_lat, :datum_lon, :boundary, :working_boundary, :area_ha,
+                       :note, :updated_at, 0)
+               ON CONFLICT(id) DO UPDATE SET
+                   name=excluded.name, boundary=excluded.boundary, working_boundary=excluded.working_boundary,
+                   area_ha=excluded.area_ha, note=excluded.note,
+                   datum_lat=excluded.datum_lat, datum_lon=excluded.datum_lon,
+                   updated_at=excluded.updated_at, deleted=0""",
+            {**record, "boundary": json.dumps(record["boundary"]),
+             "working_boundary": json.dumps(record["working_boundary"])},
+        )
+        self.db.commit()
+        return self.get_field(record["id"])
+
+    def get_field(self, field_id: str) -> Optional[dict]:
+        row = self.db.execute("SELECT * FROM fields WHERE id=?", (field_id,)).fetchone()
+        return _field_row(row) if row else None
+
+    def list_fields(self) -> list[dict]:
+        rows = self.db.execute(
+            "SELECT * FROM fields WHERE deleted=0 ORDER BY name"
+        ).fetchall()
+        return [_field_row(r) for r in rows]
+
+    def delete_field(self, field_id: str) -> None:
+        self._soft_delete("fields", field_id)
+
+    # -- guidance lines ---------------------------------------------------
+
+    def _randbezug(self, record: dict, grenze=None) -> float:
+        from .guidance import GuidanceLine, rand_seite
+        from .randspuren import ist_randspur
+        if not ist_randspur(record.get("name", "")):
+            return 0.0
+        feld = self.get_field(record.get("field_id"))
+        if feld is None:
+            return 0.0
+        if grenze is None:
+            grenze = feld["boundary"]
+        punkte = record.get("points", [])
+        if isinstance(punkte, str):
+            punkte = json.loads(punkte)
+        if len(punkte) < 2:
+            return 0.0
+        linie = GuidanceLine(record["mode"], punkte, record["spacing_m"], record["name"])
+        return rand_seite(linie, [tuple(p) for p in grenze])
+
+    def save_line(self, record: dict) -> dict:
+        record = dict(record)
+        record.setdefault("id", new_id())
+        record.setdefault("nudge_m", 0.0)
+        alt = self.get_line(record["id"])
+        record.setdefault("rand_innen", alt["rand_innen"] if alt else self._randbezug(record))
+        # Versatz-/Geometriespeicherung ist keine neue Aussaat. Fehlende Angaben
+        # einer vorhandenen Spur erhalten deren gemeinsame Fahrgassen.
+        record.setdefault("saison", (alt or {}).get("saison", 0))
+        record.setdefault("fahrgasse_m", (alt or {}).get("fahrgasse_m", 0.0))
+        record.setdefault("fahrgassen", (alt or {}).get("fahrgassen", []))
+        record.setdefault("spuren", (alt or {}).get("spuren", []))
+        record.setdefault("aussaat_at", (alt or {}).get("aussaat_at") or (
+            time.time() if record["saison"] and record["fahrgasse_m"] > 0 else 0.0))
+        record["updated_at"] = time.time()
+        self.db.execute(
+            """INSERT INTO lines (id, field_id, name, mode, points, spacing_m,
+                                  nudge_m, rand_innen, saison, fahrgasse_m, fahrgassen, spuren, aussaat_at, updated_at, deleted)
+               VALUES (:id, :field_id, :name, :mode, :points, :spacing_m,
+                       :nudge_m, :rand_innen, :saison, :fahrgasse_m, :fahrgassen, :spuren, :aussaat_at, :updated_at, 0)
+               ON CONFLICT(id) DO UPDATE SET
+                   name=excluded.name, mode=excluded.mode, points=excluded.points,
+                   spacing_m=excluded.spacing_m, nudge_m=excluded.nudge_m, rand_innen=excluded.rand_innen,
+                   saison=excluded.saison, fahrgasse_m=excluded.fahrgasse_m,
+                   fahrgassen=excluded.fahrgassen, spuren=excluded.spuren, aussaat_at=excluded.aussaat_at,
+                   updated_at=excluded.updated_at, deleted=0""",
+            {**record, "points": json.dumps(record["points"]),
+             "fahrgassen": json.dumps(record["fahrgassen"]) if record["fahrgassen"] else "",
+             "spuren": json.dumps(record["spuren"]) if record["spuren"] else ""},
+        )
+        self.db.commit()
+        return self.get_line(record["id"])
+
+    def get_line(self, line_id: str) -> Optional[dict]:
+        row = self.db.execute("SELECT * FROM lines WHERE id=?", (line_id,)).fetchone()
+        return _line_row(row) if row else None
+
+    def list_lines(self, field_id: Optional[str] = None) -> list[dict]:
+        # Saisonspuren zuerst, die neuesten oben: was man gerade braucht, steht oben.
+        if field_id:
+            rows = self.db.execute(
+                "SELECT * FROM lines WHERE deleted=0 AND field_id=? "
+                "ORDER BY saison DESC, updated_at DESC",
+                (field_id,),
+            ).fetchall()
+        else:
+            rows = self.db.execute(
+                "SELECT * FROM lines WHERE deleted=0 ORDER BY field_id, saison DESC, updated_at DESC"
+            ).fetchall()
+        return [_line_row(r) for r in rows]
+
+    def update_line(self, line_id: str, **values: Any) -> Optional[dict]:
+        """Name, Saison oder Fahrgassenabstand einer Spur ändern - die Punkte nie."""
+        erlaubt = {k: v for k, v in values.items() if k in ("name", "saison", "fahrgasse_m")}
+        if not erlaubt:
+            return self.get_line(line_id)
+        if "saison" in erlaubt or "fahrgasse_m" in erlaubt:
+            stand = {**(self.get_line(line_id) or {}), **erlaubt}
+            erlaubt["aussaat_at"] = (time.time() if stand.get("saison", 0) > 0
+                                     and stand.get("fahrgasse_m", 0) > 0 else 0.0)
+        setzer = ", ".join(f"{k}=:{k}" for k in erlaubt)
+        self.db.execute(
+            f"UPDATE lines SET {setzer}, updated_at=:updated_at WHERE id=:id",
+            {**erlaubt, "updated_at": time.time(), "id": line_id},
+        )
+        self.db.commit()
+        return self.get_line(line_id)
+
+    def season_line(self, field_id: str, saison: Optional[int] = None) -> Optional[dict]:
+        """Letzte festgelegte Aussaat; das Kalenderjahr setzt Fahrgassen nicht zurück.
+
+        Mit explizitem Jahr lässt sich weiterhin ein historischer Stand abfragen.
+        """
+        bedingung = " AND saison=?" if saison is not None else ""
+        parameter = (field_id, int(saison)) if saison is not None else (field_id,)
+        row = self.db.execute(
+            "SELECT * FROM lines WHERE deleted=0 AND field_id=? AND saison>0 "
+            "AND fahrgasse_m>0" + bedingung + " ORDER BY aussaat_at DESC, id DESC LIMIT 1",
+            parameter,
+        ).fetchone()
+        return _line_row(row) if row else None
+
+    def delete_line(self, line_id: str) -> None:
+        self._soft_delete("lines", line_id)
+
+    # -- jobs -------------------------------------------------------------
+
+    def start_job(self, field_id: str, device_id: str, vehicle: str = "",
+                  operation: str = "", line_id: Optional[str] = None,
+                  tractor: str = "") -> dict:
+        job = {
+            "id": new_id(),
+            "field_id": field_id,
+            "line_id": line_id,
+            "device_id": device_id,
+            "vehicle": vehicle,
+            "tractor": tractor,
+            "operation": operation,
+            "started_at": time.time(),
+            "updated_at": time.time(),
+        }
+        self.db.execute(
+            """INSERT INTO jobs (id, field_id, line_id, device_id, vehicle, tractor, operation,
+                                 started_at, updated_at)
+               VALUES (:id, :field_id, :line_id, :device_id, :vehicle, :tractor, :operation,
+                       :started_at, :updated_at)""",
+            job,
+        )
+        self.db.commit()
+        return self.get_job(job["id"])
+
+    def update_job(self, job_id: str, **values: Any) -> None:
+        if not values:
+            return
+        values["updated_at"] = time.time()
+        assignments = ", ".join(f"{k}=:{k}" for k in values)
+        self.db.execute(
+            f"UPDATE jobs SET {assignments} WHERE id=:id", {**values, "id": job_id}
+        )
+        self.db.commit()
+
+    def get_job(self, job_id: str) -> Optional[dict]:
+        row = self.db.execute("SELECT * FROM jobs WHERE id=?", (job_id,)).fetchone()
+        return _job_row(row) if row else None
+
+    def get_job_coverage(self, job_id: str) -> Optional[bytes]:
+        row = self.db.execute(
+            "SELECT coverage FROM jobs WHERE id=?", (job_id,)
+        ).fetchone()
+        return row["coverage"] if row else None
+
+    def list_jobs(self, field_id: Optional[str] = None, limit: int = 200) -> list[dict]:
+        if field_id:
+            rows = self.db.execute(
+                """SELECT * FROM jobs WHERE deleted=0 AND field_id=?
+                   ORDER BY started_at DESC LIMIT ?""",
+                (field_id, limit),
+            ).fetchall()
+        else:
+            rows = self.db.execute(
+                "SELECT * FROM jobs WHERE deleted=0 ORDER BY started_at DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+        return [_job_row(r) for r in rows]
+
+    def find_resumable_job(self, device_id: str, max_age_s: float) -> Optional[dict]:
+        """Die jüngste offene Arbeit dieses Geräts, falls sie frisch genug ist.
+
+        „Frisch" heißt: zuletzt gesichert vor höchstens ``max_age_s``. Was länger
+        liegt, ist keine unterbrochene Arbeit mehr, sondern eine vergessene.
+        """
+        row = self.db.execute(
+            """SELECT * FROM jobs WHERE ended_at IS NULL AND deleted=0
+               AND device_id=? AND updated_at>=? ORDER BY updated_at DESC LIMIT 1""",
+            (device_id, time.time() - max_age_s),
+        ).fetchone()
+        return _job_row(row) if row else None
+
+    def close_orphan_jobs(self, device_id: str, keep_id: Optional[str] = None) -> int:
+        """Arbeiten dieses Geräts ohne Ende abschließen - Stromausfall, Neustart.
+
+        Der Traktor wird mit dem Zündschlüssel ausgeschaltet, nicht mit „Arbeit
+        beenden". Was dann offen bleibt, stünde ewig als „läuft" in der Liste.
+        Als Ende gilt die letzte Änderung; die Fläche ist, was bis dahin
+        gespeichert war (der Motor sichert unterwegs). Fremde Geräte werden
+        nicht angefasst: deren laufende Arbeit ist vielleicht wirklich am Laufen.
+        """
+        cursor = self.db.execute(
+            """UPDATE jobs SET ended_at=updated_at, updated_at=?
+               WHERE ended_at IS NULL AND deleted=0 AND device_id=? AND id IS NOT ?""",
+            (time.time(), device_id, keep_id),
+        )
+        self.db.commit()
+        return cursor.rowcount
+
+    def delete_job(self, job_id: str) -> None:
+        self._soft_delete("jobs", job_id)
+
+    # -- track points -----------------------------------------------------
+
+    def add_track_points(self, job_id: str, points: Iterable[tuple]) -> None:
+        """Bulk insert. Called with a buffered batch, not per fix."""
+        self.db.executemany(
+            """INSERT INTO track_points
+               (job_id, t, lat, lon, altitude, speed_ms, heading, fix_quality, cross_track_m, tool_lat, tool_lon, working, turning)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            [(job_id, *p, *([None] * (12-len(p)))) for p in points],
+        )
+        self.db.commit()
+
+    def track_points(self, job_id: str) -> list[dict]:
+        rows = self.db.execute(
+            "SELECT * FROM track_points WHERE job_id=? ORDER BY t", (job_id,)
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    # -- devices ----------------------------------------------------------
+
+    def touch_device(self, device_id: str, name: str, role: str = "client",
+                     software: str = "") -> None:
+        now = time.time()
+        self.db.execute(
+            """INSERT INTO devices (id, name, role, last_seen, software, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?)
+               ON CONFLICT(id) DO UPDATE SET
+                   name=excluded.name, role=excluded.role,
+                   last_seen=excluded.last_seen, software=excluded.software,
+                   updated_at=excluded.updated_at""",
+            (device_id, name, role, now, software, now),
+        )
+        self.db.commit()
+
+    def list_devices(self) -> list[dict]:
+        rows = self.db.execute(
+            "SELECT * FROM devices WHERE deleted=0 ORDER BY last_seen DESC"
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    # -- hindernisse ------------------------------------------------------
+
+    def save_hindernis(self, record: dict) -> dict:
+        record = {"id": new_id(), "field_id": "", "name": "Hindernis", "radius_m": 1.0, **record}
+        record["updated_at"] = time.time()
+        self.db.execute(
+            """INSERT INTO hindernisse (id, field_id, name, lat, lon, radius_m, updated_at, deleted)
+               VALUES (:id, :field_id, :name, :lat, :lon, :radius_m, :updated_at, 0)
+               ON CONFLICT(id) DO UPDATE SET field_id=excluded.field_id, name=excluded.name,
+                   lat=excluded.lat, lon=excluded.lon, radius_m=excluded.radius_m,
+                   updated_at=excluded.updated_at, deleted=0""", record)
+        self.db.commit()
+        return record
+
+    def list_hindernisse(self, field_id: Optional[str] = None) -> list[dict]:
+        if field_id:
+            rows = self.db.execute("SELECT * FROM hindernisse WHERE deleted=0 AND field_id=? "
+                                   "ORDER BY updated_at DESC", (field_id,)).fetchall()
+        else:
+            rows = self.db.execute("SELECT * FROM hindernisse WHERE deleted=0 "
+                                   "ORDER BY updated_at DESC").fetchall()
+        return [dict(r) for r in rows]
+
+    def delete_hindernis(self, hindernis_id: str) -> None:
+        self._soft_delete("hindernisse", hindernis_id)
+
+    # -- settings ---------------------------------------------------------
+
+    def set_setting(self, key: str, value: Any) -> None:
+        self.db.execute(
+            """INSERT INTO settings (key, value, updated_at) VALUES (?, ?, ?)
+               ON CONFLICT(key) DO UPDATE SET value=excluded.value,
+                                             updated_at=excluded.updated_at""",
+            (key, json.dumps(value), time.time()),
+        )
+        self.db.commit()
+
+    def get_setting(self, key: str, default: Any = None) -> Any:
+        row = self.db.execute("SELECT value FROM settings WHERE key=?", (key,)).fetchone()
+        return json.loads(row["value"]) if row else default
+
+    # -- sync helpers -----------------------------------------------------
+
+    def changes_since(self, table: str, since: float) -> list[dict]:
+        if table not in SYNCED_TABLES:
+            raise ValueError(f"Tabelle {table} wird nicht synchronisiert")
+        rows = self.db.execute(
+            f"SELECT * FROM {table} WHERE updated_at > ? OR id IN "
+            "(SELECT record_id FROM sync_received WHERE table_name=? AND received_at>?) "
+            "ORDER BY updated_at", (since, table, since),
+        ).fetchall()
+        out = []
+        for row in rows:
+            record = dict(row)
+            if "coverage" in record and record["coverage"] is not None:
+                import base64
+                record["coverage"] = base64.b64encode(record["coverage"]).decode()
+            out.append(record)
+        return out
+
+    def apply_remote(self, table: str, records: list[dict]) -> int:
+        """Merge rows from another machine.
+
+        Last write wins per row: the machine that touched a field most recently
+        has the most current picture of it.  Coverage is the exception - two
+        tractors on one field both did real work, so their maps are unioned in
+        sync.py before the row lands here.
+        """
+        if table not in SYNCED_TABLES:
+            raise ValueError(f"Tabelle {table} wird nicht synchronisiert")
+        applied = 0
+        for record in records:
+            record = dict(record)
+            if table == "jobs" and record.get("coverage"):
+                import base64
+                record["coverage"] = base64.b64decode(record["coverage"])
+            existing = self.db.execute(
+                f"SELECT * FROM {table} WHERE id=?", (record["id"],)
+            ).fetchone()
+            if existing and existing["updated_at"] >= record.get("updated_at", 0):
+                # Flächen sind tatsächlich geleistete Arbeit. Auch ein älterer
+                # Stand darf neue Zellen beitragen; die neueren Metadaten bleiben.
+                if (table == "jobs" and record.get("coverage")
+                        and not existing["deleted"] and not record.get("deleted")):
+                    from .coverage import CoverageMap
+                    try:
+                        alt = CoverageMap.unpack(existing["coverage"]) if existing["coverage"] else None
+                        neu = CoverageMap.unpack(record["coverage"])
+                        if alt is not None:
+                            vorher = set(alt.cells)
+                            alt.merge(neu)
+                            neu = alt
+                        else:
+                            vorher = set()
+                        if neu.cells != vorher:
+                            self.db.execute("UPDATE jobs SET coverage=? WHERE id=?",
+                                            (neu.pack(), record["id"]))
+                            # Eigene Empfangszeit macht die Vereinigung für weitere
+                            # Gegenstellen sichtbar, ohne Metadaten umzudatieren.
+                            self.db.execute(
+                                "INSERT INTO sync_received (table_name, record_id, received_at) VALUES (?, ?, ?) "
+                                "ON CONFLICT(table_name, record_id) DO UPDATE SET received_at=excluded.received_at",
+                                (table, record["id"], time.time()),
+                            )
+                            applied += 1
+                    except (ValueError, TypeError):
+                        pass  # Unvereinbare Raster: vorhandenen Stand behalten.
+                continue
+            if table == "lines" and "rand_innen" not in record:
+                alt = self.get_line(record["id"])
+                record["rand_innen"] = alt["rand_innen"] if alt else self._randbezug(record)
+            if table == "lines" and "aussaat_at" not in record:
+                # Alte Gegenstellen kennen die Spalte noch nicht. Vorhandene
+                # Aussaatzeit bewahren; beim ersten Empfang den Altstand übernehmen.
+                alt = self.get_line(record["id"])
+                record["aussaat_at"] = (alt["aussaat_at"] if alt else
+                    record.get("updated_at", 0) if record.get("saison", 0) > 0
+                    and record.get("fahrgasse_m", 0) > 0 else 0.0)
+            if table == "fields" and "working_boundary" not in record:
+                alt = self.get_field(record["id"])
+                if alt and json.loads(record.get("boundary") or "[]") != alt["boundary"]:
+                    record["working_boundary"] = "[]"
+            columns = [c[1] for c in self.db.execute(f"PRAGMA table_info({table})")]
+            record = {k: v for k, v in record.items() if k in columns}
+            placeholders = ", ".join(f":{k}" for k in record)
+            updates = ", ".join(f"{k}=excluded.{k}" for k in record if k != "id")
+            self.db.execute(
+                f"""INSERT INTO {table} ({', '.join(record)}) VALUES ({placeholders})
+                    ON CONFLICT(id) DO UPDATE SET {updates}""",
+                record,
+            )
+            self.db.execute(
+                "INSERT INTO sync_received (table_name, record_id, received_at) VALUES (?, ?, ?) "
+                "ON CONFLICT(table_name, record_id) DO UPDATE SET received_at=excluded.received_at",
+                (table, record["id"], time.time()),
+            )
+            applied += 1
+        self.db.commit()
+        return applied
+
+    def _soft_delete(self, table: str, record_id: str) -> None:
+        # Soft delete, because a hard delete would come back on the next sync
+        # from a machine that has not heard about it yet.
+        self.db.execute(
+            f"UPDATE {table} SET deleted=1, updated_at=? WHERE id=?",
+            (time.time(), record_id),
+        )
+        self.db.commit()
+
+
+def _field_row(row: sqlite3.Row) -> dict:
+    record = dict(row)
+    record["boundary"] = json.loads(record["boundary"] or "[]")
+    record["working_boundary"] = json.loads(record.get("working_boundary") or "[]")
+    return record
+
+
+def _line_row(row: sqlite3.Row) -> dict:
+    record = dict(row)
+    record["points"] = json.loads(record["points"] or "[]")
+    record["fahrgassen"] = json.loads(record.get("fahrgassen") or "[]")
+    record["spuren"] = json.loads(record.get("spuren") or "[]")
+    return record
+
+
+def _job_row(row: sqlite3.Row) -> dict:
+    record = dict(row)
+    record.pop("coverage", None)  # blob stays out of JSON responses
+    try:
+        record["genauigkeit"] = json.loads(record.get("genauigkeit") or "null")
+    except ValueError:
+        record["genauigkeit"] = None
+    return record
