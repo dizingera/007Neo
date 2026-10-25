@@ -2137,6 +2137,59 @@ function renderLenkregler(erzwingen = false) {
     : 'Diese Werte wirken erst mit der Regelart Cerea – „OK“ schaltet sie für diesen Traktor ein.';
 }
 
+let motorstaerkeGespeichert = null;
+let motorstaerkeBeschaeftigt = false;
+function motorstaerkeZeigen() {
+  const wert = Number(el('motorstaerkeRegler').value);
+  el('motorstaerkeWert').textContent = `${wert} %`;
+  el('motorstaerkeRegler').disabled = motorstaerkeBeschaeftigt || motorstaerkeGespeichert === null;
+  el('btnMotorstaerkeSpeichern').disabled = motorstaerkeBeschaeftigt || motorstaerkeGespeichert === null
+    || wert === motorstaerkeGespeichert;
+}
+async function motorstaerkeLaden() {
+  if (motorstaerkeBeschaeftigt) return;
+  motorstaerkeBeschaeftigt = true;
+  motorstaerkeZeigen();
+  try {
+    const r = await api('GET', '/api/settings');
+    const wert = r && r.werte && r.werte['phidget.max_duty'];
+    if (!Number.isFinite(wert)) {
+      motorstaerkeGespeichert = null;
+      el('motorstaerkeHinweis').textContent = 'Motorstärke konnte nicht geladen werden. Menü erneut öffnen.';
+      return;
+    }
+    motorstaerkeGespeichert = Math.round(wert * 100);
+    el('motorstaerkeRegler').value = String(motorstaerkeGespeichert);
+    el('motorstaerkeHinweis').textContent = `Gespeichert: ${motorstaerkeGespeichert} %. Änderungen erst mit „Übernehmen“ anwenden.`;
+  } finally {
+    motorstaerkeBeschaeftigt = false;
+    motorstaerkeZeigen();
+  }
+}
+el('motorstaerkeRegler').oninput = motorstaerkeZeigen;
+el('btnMotorstaerkeSpeichern').onclick = async () => {
+  if (motorstaerkeBeschaeftigt || motorstaerkeGespeichert === null) return;
+  const wert = Number(el('motorstaerkeRegler').value);
+  if (!Number.isFinite(wert) || wert < 5 || wert > 100) return;
+  motorstaerkeBeschaeftigt = true;
+  motorstaerkeZeigen();
+  try {
+    const r = await api('POST', '/api/settings', { aenderungen: { 'phidget.max_duty': wert / 100 } });
+    if (!r) {
+      el('motorstaerkeHinweis').textContent = 'Nicht übernommen. Bisherige Einstellung bleibt bestehen.';
+      return;
+    }
+    motorstaerkeGespeichert = Math.round(r.data.werte['phidget.max_duty'] * 100);
+    el('motorstaerkeRegler').value = String(motorstaerkeGespeichert);
+    el('motorstaerkeHinweis').textContent = `${motorstaerkeGespeichert} % gespeichert und sofort wirksam.`;
+    settings.geladen = false;
+    toast(`Motorstärke ${motorstaerkeGespeichert} % übernommen`);
+  } finally {
+    motorstaerkeBeschaeftigt = false;
+    motorstaerkeZeigen();
+  }
+};
+
 function automatikZeigen(s) {
   const a = s && s.lenkautomatik;
   if (!a) return;
@@ -3244,7 +3297,7 @@ async function refreshLists(takt = false) {
   if (active === 'headland') fillHeadland();
   if (active === 'lenkregler') {
     // Im Takt nur die Anzeige - sonst sprängen Werte, die gerade verstellt werden, zurück.
-    if (!takt) await renderTraktoren();
+    if (!takt) { await renderTraktoren(); await motorstaerkeLaden(); }
     renderLenkregler();
     reglerLiveZeigen(state.live);
   }

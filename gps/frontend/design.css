@@ -488,3 +488,8 @@ body.tag { --f-flaeche: rgba(23, 140, 70, .38); --f-doppelt: rgba(200, 104, 12, 
 .sheet .lenkautomatik #automatikHinweis { font-size: 19px; font-weight: 600; }
 .sheet .lenkautomatik ul { padding-left: 20px; line-height: 1.6; }
 .sheet .regler-manuell > summary { cursor: pointer; font-weight: 600; font-size: 18px; padding: 14px 0; }
+
+.sheet .motorstaerke { padding: 20px; margin-bottom: 20px; }
+.sheet .motorstaerke input[type="range"] { width: 100%; min-height: 48px; }
+.sheet .motorstaerke output { font-weight: 700; }
+.sheet .motorstaerke .row { justify-content: space-between; margin-bottom: 14px; }

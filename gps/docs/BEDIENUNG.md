@@ -2005,3 +2005,15 @@ Nach einem Neustart wird ein unbestätigter Versuch zurückgenommen; die Automat
 muss erneut gestartet werden. Der ältere Lenk-Assistent und diese Automatik laufen
 nicht gleichzeitig. Motorleistung, Fahrzeuggeometrie und Auffahraggressivität werden
 nicht automatisch kalibriert. Eine Feldprüfung und die Aufsicht des Fahrers bleiben nötig.
+
+
+## Motorstärke (ab 1.5.96)
+
+Im Menü Lenkregler steht ein Schieberegler für 5–100 % höchste Motorleistung.
+Der gespeicherte Wert wird geladen. Verstellen allein ändert den Motor nicht;
+„Motorstärke übernehmen“ speichert und wirkt sofort, ohne Neustart. In kleinen
+Schritten erhöhen und bei langsamer Fahrt prüfen. Höhere Höchstleistung hilft nur,
+wenn der Regler bisher an diese Grenze kam. Für Kriechen bei kleinen Korrekturen
+die Mindestleistung unter Lenkung prüfen. Stromgrenze, Not-Aus und Eingriffserkennung
+bleiben unverändert. Die Einstellung gilt lokal für die angeschlossene Motorsteuerung.
+Bestehende Einstellungen werden durch das Update nicht pauschal erhöht.

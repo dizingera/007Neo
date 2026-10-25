@@ -643,6 +643,19 @@
   <section class="tab-panel" data-panel="lenkregler" hidden>
     <!-- Die Werte wie im Cerea-Dialog: ein Punkt voraus auf der Spur (cerearegler.py).
          Sie gehören zum gewählten Traktor; „OK“ schaltet die Regelart Cerea ein. -->
+    <section class="karte motorstaerke" aria-labelledby="motorstaerkeTitel">
+      <h3 id="motorstaerkeTitel">Motorstärke</h3>
+      <p>Mehr verfügbare Motorleistung, wenn das Lenkrad zu langsam nachdreht.</p>
+      <label for="motorstaerkeRegler">Höchste Motorleistung: <output id="motorstaerkeWert" for="motorstaerkeRegler">–</output></label>
+      <input id="motorstaerkeRegler" type="range" min="5" max="100" step="1" value="55" disabled>
+      <div class="row"><span>5 % · schwach</span><span>100 % · volle Leistung</span></div>
+      <button id="btnMotorstaerkeSpeichern" class="primary" disabled>Motorstärke übernehmen</button>
+      <p id="motorstaerkeHinweis" role="status">Lädt die gespeicherte Motorstärke …</p>
+      <p class="note">In kleinen Schritten erhöhen und bei langsamer Fahrt prüfen. Mehr Leistung
+        hilft, wenn die bisherige Höchstleistung erreicht wird. Kriecht der Motor auch bei kleinen
+        Korrekturen, unter Lenkung die Mindestleistung prüfen. Stromgrenze und Eingriffserkennung
+        bleiben bestehen. Für den eigenen Motorregelkreis (Phidget21/1065) an diesem Gerät.</p>
+    </section>
     <section class="karte lenkautomatik" aria-labelledby="automatikTitel">
       <h3 id="automatikTitel">Lenk-Automatik</h3>
       <p>Stimmt die Spurführung beim Arbeiten selbst ab. Eine Änderung wird erst nach einer

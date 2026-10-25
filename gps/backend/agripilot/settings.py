@@ -296,7 +296,7 @@ GRUPPEN: list[Gruppe] = [
                  minimum=0.1, maximum=8.0,
                  warnung="Niedrig halten - das Lenkrad muss von Hand übersteuerbar bleiben.",
                  hilfe="Die dritte Rückfallebene neben Not-Aus und Wachhund."),
-            Feld("phidget.max_duty", "Größte Leistung", "zahl", minimum=0.05, maximum=1.0,
+            Feld("phidget.max_duty", "Größte Leistung", "zahl", minimum=0.05, maximum=1.0, sofort=True,
                  hilfe="Anteil der vollen Motorleistung."),
             Feld("phidget.min_duty", "Mindestleistung", "zahl", minimum=0.0, maximum=0.6,
                  hilfe="Eigener Regelkreis: unter dieser Leistung läuft der Motor nicht an "

@@ -58,6 +58,38 @@ class OhneFaden(MitDLL):
         patcher.start()
         self.addCleanup(patcher.stop)
 
+    def test_motorstaerke_wirkt_gespeichert_sofort_bis_zur_ausgabe(self):
+        import tempfile
+        from pathlib import Path
+        from agripilot.config import Config
+        from agripilot.settings import uebernehmen, EinstellungsFehler
+        cfg = Config()
+        a = ausgang(max_duty=.55)
+        cfg.phidget = a.config
+        async def ablauf():
+            await a.start()
+            try:
+                a.command(True, 20., actuators.SteerContext(speed_ms=2.))
+                a._step(.02)
+                self.assertAlmostEqual(abs(self.dll.geschwindigkeit[0]), 55.)
+                with tempfile.TemporaryDirectory() as d:
+                    cfg.path = Path(d) / 'config.yaml'
+                    ergebnis = uebernehmen(cfg, {'phidget.max_duty': .75})
+                    self.assertEqual(ergebnis['neustart_noetig'], [])
+                    self.assertIn('max_duty: 0.75', cfg.path.read_text(encoding='utf-8'))
+                    a._step(.02)
+                    self.assertAlmostEqual(abs(self.dll.geschwindigkeit[0]), 75.)
+                    for falsch in (0., 1.01, float('nan')):
+                        with self.assertRaises(EinstellungsFehler):
+                            uebernehmen(cfg, {'phidget.max_duty': falsch})
+                    self.assertEqual(a.config.max_duty, .75)
+                    a.command(False, 0., actuators.SteerContext())
+                    a._step(.02)
+                    self.assertEqual(self.dll.geschwindigkeit[0], 0.)
+            finally:
+                await a.stop()
+        asyncio.run(ablauf())
+
     def test_an_inverted_motor_following_quickly_is_no_driver(self):
         a = ausgang(invert_motor=True, gain_p=0.5)
 
