@@ -2264,3 +2264,50 @@ Unter **Arbeitstag** steht die Arbeitszentrale. Nur der Arbeitsstart ist anfangs
 16. **Verbindungsverlauf:** GPS, RTK, IMU und Master-Abgleich werden getrennt mit Zeitpunkten protokolliert. Ausfälle zwischen Neustarts oder ohne Beobachtung bleiben unbekannt; der Verlauf ist keine lückenlose Rohdatenaufzeichnung.
 
 Die vorgeschlagenen Punkte17–22 sind nicht Teil dieser Version. Eine reale Probefahrt und physische Kabinenabnahme sind durch Softwaretests nicht ersetzt.
+
+
+## Markierung erhalten und Fehlerprüfung (1.5.105)
+
+Der Markieren-Schalter pausiert und setzt denselben Arbeitsgang fort. Bereits
+markierte Flächen bleiben beim Aus- und Einschalten sichtbar, gespeichert und
+werden mit ihren bisherigen Flächen-, Strecken- und Zeitwerten weitergeführt.
+Die Strecke während der Pause wird nicht nachträglich eingefärbt. Eine neue
+Tätigkeit wird ausdrücklich im Arbeitstag begonnen; dort lässt sich die Arbeit
+auch abschließen. Eine Wiederaufnahme mit unpassendem Gespann wird abgewiesen.
+
+Manuelles Ausschalten der Lenkung schaltet auch die Markierung aus. Das gilt
+auch, wenn die Lenkung gerade auf Vorwärtsfahrt wartet: der Lenkschalter ist
+in diesem Zustand ebenfalls AUS. Erneutes Scharfschalten setzt die passende
+pausierte Markierung fort. Eine automatische Sicherheitsunterbrechung bleibt
+von diesem bewussten Ausschaltbefehl getrennt.
+
+Die drei persönlichen Schnellzugriffe befinden sich im Menü Arbeitstag und
+verdecken keine Kartenfläche mehr. Bestätigte Pausen erscheinen sofort in der
+Chronik. Kostenfelder sind erst nach erfolgreichem Laden des ausgewählten
+Arbeitsgangs beschreibbar; Speichern und erneutes Laden können sich nicht mehr
+gegenseitig mit alten Werten überschreiben. Beim Mähdrescher bietet der
+Arbeitsstart ausschließlich Schneidwerke an.
+
+Die Fehlerprüfung korrigiert außerdem:
+- Erneutes Laden des aktiven Felds erhält die laufende Fläche; ein anderer
+  Feldbezug ist erst nach Pause oder Abschluss erlaubt.
+- Fehlende/beschädigte Arbeitskarten werden vor dem Fortsetzen erkannt.
+  Vorhandene Originaldaten und Kennzahlen bleiben zur Wiederherstellung erhalten.
+- Datenabgleich prüft Karten und Auftragsbesitzer, nimmt fehlerhafte Stapel zurück
+  und erhält gültige Pausen-/Papierkorbzustände. Bestehende Gerätekennungen bleiben gültig.
+- Veraltete Radwinkel fließen nicht in Radmitte und Nachlaufmessung ein.
+  Der Phidget-Positionsausgang stoppt bei ungültiger Rückmeldung; erkannter
+  Fahrereingriff bleibt bis zum bewussten neuen Scharfschalten wirksam.
+- Automatische Abstimmungsversuche überschreiben beim Zurücknehmen keine
+  zwischenzeitlichen Handänderungen. IMU-Offsets werden sofort angewendet,
+  ohne alte Sensordaten künstlich als frisch auszugeben.
+- Jahresberichte verwenden die angezeigte Zeitzone. Unberechenbare Kosten
+  bleiben unbekannt; begrenzte Planprüfungen melden ihre Unvollständigkeit.
+- Unvollständige Planzeichnungen halten die gesamte Karte nicht mehr an;
+  ungültige Teile werden mit Hinweis ausgelassen, gespeicherte Pläne bleiben erhalten.
+- Gesperrte Update-Dateien liefern eine verständliche Fehlermeldung. Bereits
+  vollständig geprüfte Setups werden wiederverwendet; parallele Downloads
+  verwenden getrennte Teildateien und behalten die Prüfsummenprüfung.
+
+Mit automatisierten Gegenproben und getrennten Übungsdaten geprüft.
+Keine Prüfung am echten Traktor und keine Zusage perfekter Lenkgenauigkeit.

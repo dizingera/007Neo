@@ -25,6 +25,15 @@ def _punkte(value):
             all(isinstance(p, (list, tuple)) and len(p) == 2 and all(_zahl(x) for x in p) for p in value))
 
 
+def _arbeitsstatus_wert(value):
+    """Fachlicher Status; lokale Geraetekennungen kommen unveraendert aus Config."""
+    if (not isinstance(value, dict) or not _zahl(value.get("zeit")) or value["zeit"] < 0
+            or not isinstance(value.get("pausiert"), bool) or not isinstance(value.get("papierkorb"), bool)
+            or not isinstance(value.get("device_id"), str) or not value["device_id"]):
+        raise ValueError("Arbeitsstatus ungueltig")
+    return {k: value[k] for k in ("zeit", "pausiert", "papierkorb", "device_id")}
+
+
 def _wert(key, value):
     """Nur bekannte Datentypen; unbekannte Zusatzfelder werden nicht weitergegeben."""
     if key.startswith("arbeitskosten:") and _ID.fullmatch(key.split(":", 1)[1]):
@@ -41,11 +50,10 @@ def _wert(key, value):
             out[feld] = zahl
         return out
     if key.startswith("arbeitsablauf:") and _ID.fullmatch(key.split(":", 1)[1]):
-        if (not isinstance(value, dict) or not _zahl(value.get("zeit")) or value["zeit"] < 0
-                or not isinstance(value.get("pausiert"), bool) or not isinstance(value.get("papierkorb"), bool)
-                or not isinstance(value.get("device_id"), str) or not _ID.fullmatch(value["device_id"])):
-            raise ValueError("Arbeitsstatus ungültig")
-        return {k: value[k] for k in ("zeit", "pausiert", "papierkorb", "device_id")}
+        status = _arbeitsstatus_wert(value)
+        if not _ID.fullmatch(status["device_id"]):
+            raise ValueError("Arbeitsstatus ungueltig")
+        return status
     if key.startswith("grenze_verlauf:") and _ID.fullmatch(key.split(":", 1)[1]):
         if not isinstance(value, list) or len(value) > 100:
             raise ValueError("Grenzverlauf ungültig")
@@ -186,12 +194,18 @@ def uebernehmen(store, items, device_id=None):
                 # Empfangszeit ist kein Bearbeitungszeitpunkt: Original-Zeit separat erhalten.
                 local = meta.get(key, {})
                 local_stamp = local.get("zeit", 0) if row and row["updated_at"] == local.get("empfang") else (row["updated_at"] if row else -1)
-                existing = store.get_setting(key)
+                existing = (store._arbeitsmeta(key.split(":", 1)[1]) if key.startswith("arbeitsablauf:")
+                            else store.get_setting(key))
                 zeitfeld = "aktualisiert_am" if key.startswith("arbeitskosten:") else "zeit"
                 if zeitfeld in value:
                     stamp = value[zeitfeld]
                 if isinstance(existing, dict) and _zahl(existing.get(zeitfeld)):
                     local_stamp = existing[zeitfeld]
+                if key.startswith("arbeitsablauf:") and (existing is None or
+                        (existing and existing.get("device_id") != value["device_id"])):
+                    # Vor dem Auftrag angekommene fremde oder defekte Metadaten
+                    # sind keine gueltige Version des Status seines Besitzers.
+                    local_stamp = -1
                 # Bei gleicher Versionszeit gewinnt die Löschung; alte Geräte
                 # dürfen durch erneutes Senden keinen gelöschten Punkt beleben.
                 deletion_wins_tie = (stamp == local_stamp and isinstance(existing, dict) and
@@ -199,7 +213,9 @@ def uebernehmen(store, items, device_id=None):
                      (key.startswith("arbeitsablauf:") and value.get("pausiert") is True and existing.get("pausiert") is not True)))
                 if stamp < local_stamp or (stamp == local_stamp and not deletion_wins_tie):
                     continue
-            if store.get_setting(key) != value:
+            current = (store._arbeitsmeta(key.split(":", 1)[1]) if key.startswith("arbeitsablauf:")
+                       else store.get_setting(key))
+            if current != value:
                 store.set_setting(key, value)
                 result["angewendet"] += 1
                 if key.startswith(("feld_einfahrt:", "arbeitsablauf:", "arbeitskosten:")):

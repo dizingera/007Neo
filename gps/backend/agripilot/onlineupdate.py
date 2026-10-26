@@ -22,6 +22,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import tempfile
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -186,44 +187,91 @@ def pruefen(aktuell: str, repo: str = STANDARD_REPO, api: str = STANDARD_API) ->
     return suche(aktuell, repo, api)[0]
 
 
+def _gepruefte_setup_groesse(pfad: Path, sha: str) -> Optional[int]:
+    """Nur ein vollstaendig gelesenes, passendes Windows-Setup wiederverwenden."""
+    try:
+        with open(pfad, "rb") as f:
+            kopf = f.read(2)
+            if kopf != b"MZ":
+                return None
+            hash_ = hashlib.sha256(kopf)
+            groesse = len(kopf)
+            while block := f.read(256 * 1024):
+                hash_.update(block)
+                groesse += len(block)
+    except FileNotFoundError:
+        return None
+    return groesse if hash_.hexdigest() == sha else None
+
+
 def herunterladen(info: dict, ordner: Path, timeout: float = 30.0,
                   fortschritt: Optional[Callable[[int, int], None]] = None) -> Path:
-    """Die Setup-Datei laden und prüfen. Gibt den Pfad der fertigen Datei zurück."""
+    """Setup laden/pruefen; wiederholte Aufrufe erhalten eine gueltige Zieldatei."""
     ordner = Path(ordner)
-    ordner.mkdir(parents=True, exist_ok=True)
-    sha = info.get("sha256") or ""
-    if not sha and info.get("pruefsumme_url"):
-        text = _lesen(info["pruefsumme_url"], timeout).decode("ascii", "replace")
-        sha = text.split()[0].lower() if text.split() else ""
-    if not sha:
-        raise OnlineFehler("Zu diesem Release gibt es keine Prüfsumme - es wird nicht eingespielt")
-    ziel = ordner / f"AgriPilot-Setup-{info['version']}.exe"
-    teil = ordner / (ziel.name + ".teil")
-    hash_ = hashlib.sha256()
-    gelesen = 0
-    anfrage = urllib.request.Request(info["url"], headers=info.get("kopf") or KOPF)
+    teil = None
     try:
-        with urllib.request.urlopen(anfrage, timeout=timeout) as antwort, open(teil, "wb") as aus:
-            gesamt = int(antwort.headers.get("Content-Length") or info.get("groesse") or 0)
-            while True:
-                block = antwort.read(256 * 1024)
-                if not block:
-                    break
-                aus.write(block)
-                hash_.update(block)
-                gelesen += len(block)
-                if fortschritt:
-                    fortschritt(gelesen, gesamt)
-    except (urllib.error.URLError, TimeoutError, OSError) as exc:
-        teil.unlink(missing_ok=True)
+        ordner.mkdir(parents=True, exist_ok=True)
+        sha = info.get("sha256") or ""
+        if not sha and info.get("pruefsumme_url"):
+            text = _lesen(info["pruefsumme_url"], timeout).decode("ascii", "replace")
+            sha = text.split()[0].lower() if text.split() else ""
+        if not sha:
+            raise OnlineFehler("Zu diesem Release gibt es keine Prüfsumme - es wird nicht eingespielt")
+        ziel = ordner / f"AgriPilot-Setup-{info['version']}.exe"
+        vorhanden = _gepruefte_setup_groesse(ziel, sha)
+        if vorhanden is not None:
+            if fortschritt:
+                fortschritt(vorhanden, vorhanden)
+            return ziel
+        hash_ = hashlib.sha256()
+        gelesen = 0
+        anfrage = urllib.request.Request(info["url"], headers=info.get("kopf") or KOPF)
+        # Exklusiv erzeugte Datei je Aufruf; parallele Downloads koennen weder
+        # den fremden Stand kuerzen noch dessen Teildatei beim Aufraeumen loeschen.
+        with tempfile.NamedTemporaryFile(mode="wb", dir=ordner, prefix=ziel.name + ".",
+                                         suffix=".teil", delete=False) as aus:
+            teil = Path(aus.name)
+            with urllib.request.urlopen(anfrage, timeout=timeout) as antwort:
+                gesamt = int(antwort.headers.get("Content-Length") or info.get("groesse") or 0)
+                while True:
+                    block = antwort.read(256 * 1024)
+                    if not block:
+                        break
+                    aus.write(block)
+                    hash_.update(block)
+                    gelesen += len(block)
+                    if fortschritt:
+                        fortschritt(gelesen, gesamt)
+        if hash_.hexdigest() != sha:
+            raise OnlineFehler("Die geladene Datei passt nicht zur Prüfsumme - sie wird verworfen")
+        with open(teil, "rb") as f:
+            kopf = f.read(2)
+        if kopf != b"MZ":
+            raise OnlineFehler("Die geladene Datei ist kein Windows-Programm - sie wird verworfen")
+        # Ein paralleler Aufruf kann inzwischen fertig sein und den Installer
+        # gestartet haben. Dessen gueltiges Setup braucht keinen Austausch.
+        if _gepruefte_setup_groesse(ziel, sha) is not None:
+            return ziel
+        try:
+            teil.replace(ziel)
+        except OSError:
+            # Auch das Rennen zwischen letzter Pruefung und Umbenennen abdecken.
+            # Ein gescheitertes Nachlesen darf den urspruenglichen Fehler nicht ersetzen.
+            try:
+                if _gepruefte_setup_groesse(ziel, sha) is not None:
+                    return ziel
+            except OSError:
+                pass
+            raise
+        return ziel
+    except (urllib.error.URLError, TimeoutError) as exc:
         raise OnlineFehler("Der Download ist abgebrochen - Netz prüfen und noch einmal versuchen") from exc
-    if hash_.hexdigest() != sha:
-        teil.unlink(missing_ok=True)
-        raise OnlineFehler("Die geladene Datei passt nicht zur Prüfsumme - sie wird verworfen")
-    with open(teil, "rb") as f:
-        kopf = f.read(2)
-    if kopf != b"MZ":                    # erst schließen, dann löschen: Windows hält die Datei sonst fest
-        teil.unlink(missing_ok=True)
-        raise OnlineFehler("Die geladene Datei ist kein Windows-Programm - sie wird verworfen")
-    teil.replace(ziel)
-    return ziel
+    except OSError as exc:
+        raise OnlineFehler("Die Update-Datei kann nicht gelesen oder gespeichert werden - "
+                           "laufende Installation beenden und Schreibrechte prüfen") from exc
+    finally:
+        if teil is not None:
+            try:
+                teil.unlink(missing_ok=True)
+            except OSError:
+                pass  # Ein gesperrter Rest darf weder Erfolg noch Fehlerursache verdecken.

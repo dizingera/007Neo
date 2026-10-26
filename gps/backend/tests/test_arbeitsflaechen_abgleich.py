@@ -76,7 +76,8 @@ class ArbeitsflaechenAbgleich(unittest.TestCase):
                     record.update(coverage=incoming, updated_at=record['updated_at'] + 1, operation='Neu')
                     apply_changes(s, {'jobs': [record]})
                     self.assertEqual(CoverageMap.unpack(s.get_job_coverage(job['id'])).cells, {(1, 1)})
-                    self.assertEqual(s.get_job(job['id'])['operation'], 'Neu')
+                    # Ein beschädigter Eingang wird als ganzer Arbeitsstand verworfen.
+                    self.assertEqual(s.get_job(job['id'])['operation'], 'Lokal' if incoming == 'kein-base64!' else 'Neu')
                 finally:
                     s.close()
 

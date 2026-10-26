@@ -780,6 +780,9 @@ def create_app(config=None) -> FastAPI:
     async def load_field(field_id: str, with_coverage: bool = True):
         result = guard(engine.load_field, field_id)
         if isinstance(result,JSONResponse) and result.status_code>=400:return result
+        # Bereits aktives Feld: keine fremde Fläche in den laufenden Auftrag
+        # mischen und den Simulator nicht erneut an den Feldanfang versetzen.
+        if engine.job is not None:return result
         from .arbeitskomfort import besucht
         besucht(store,field_id)
         if with_coverage:
@@ -1065,6 +1068,14 @@ def create_app(config=None) -> FastAPI:
     async def start_job(payload: dict = Body(default={})):
         return guard(engine.start_job, payload.get("operation", ""))
 
+    @api.post("/api/job/markierung")
+    async def markierung(payload: dict = Body(...)):
+        if type(payload.get("an")) is not bool:
+            raise HTTPException(400, "Markieren an oder aus angeben")
+        if payload["an"]:
+            return guard(engine.mark_job, str(payload.get("operation") or "Arbeit"))
+        return guard(engine.pause_job) if engine.job is not None else ok(engine.paused_job)
+
     @api.post("/api/job/stop")
     async def stop_job():
         return guard(engine.stop_job)
@@ -1294,7 +1305,11 @@ def create_app(config=None) -> FastAPI:
         # ist - sonst fehlt am Abend die Fläche der ersten Spuren.
         markieren = False
         if application.steering.armed and engine.job is None and engine.field is not None:
-            engine.start_job(str(payload.get("operation") or "Arbeit"))
+            try:
+                engine.mark_job(str(payload.get("operation") or "Arbeit"))
+            except (RuntimeError, ValueError) as exc:
+                application.steering.disarm()
+                raise HTTPException(400, str(exc)) from exc
             markieren = True
         return ok({"message": meldung, "armed": application.steering.armed,
                    "markieren_gestartet": markieren})
@@ -1541,7 +1556,12 @@ def create_app(config=None) -> FastAPI:
     @api.post("/api/steering/disarm")
     async def disarm_steering():
         application.steering.disarm()
-        return ok({"armed": False})
+        # Motor zuerst aus, dann die Aufzeichnung pausieren; keine Arbeit abschließen.
+        if engine.job is not None:
+            result = guard(engine.pause_job)
+            if isinstance(result, JSONResponse) and result.status_code >= 400:
+                return result
+        return ok({"armed": False, "markieren": False, "pausierte_arbeit": engine.paused_job})
 
     @api.post("/api/steering/vorwaerts")
     async def steering_vorwaerts():

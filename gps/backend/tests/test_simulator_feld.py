@@ -298,10 +298,12 @@ class LenkungMarkiertTests(unittest.TestCase):
             self.assertTrue(antwort["markieren_gestartet"])
             job = client.get("/api/state").json()["job"]
             self.assertEqual(job["operation"], "Säen")
-            # Schon markierend: kein zweiter Auftrag
+            # Ausschalten pausiert, erneutes Einschalten erhält denselben Auftrag.
             client.post("/api/steering/disarm")
+            self.assertIsNone(client.get("/api/state").json()["job"])
             zweite = client.post("/api/steering/arm").json()["data"]
-            self.assertFalse(zweite["markieren_gestartet"])
+            self.assertTrue(zweite["markieren_gestartet"])
+            self.assertEqual(client.get("/api/state").json()["job"]["id"], job["id"])
 
 
 class FahrgasseUndWendeTests(unittest.TestCase):

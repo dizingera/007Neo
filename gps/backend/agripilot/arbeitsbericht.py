@@ -242,11 +242,19 @@ def _kosten(reader,job):
     hours=seconds/3600 if isinstance(seconds,(int,float)) and math.isfinite(seconds) and seconds>=0 else None
     fuel=values["diesel_liter"]*values["diesel_preis_eur_l"] if all(values[k] is not None for k in ("diesel_liter","diesel_preis_eur_l")) else None
     labour=hours*values["stundensatz_eur"] if hours is not None and values["stundensatz_eur"] is not None else None
+    # Endliche importierte Zeit-/Flächenwerte können beim Rechnen überlaufen.
+    if labour is not None and not math.isfinite(labour):
+        labour=None
     parts=[fuel,values["betriebsmittel_eur"],labour]
     complete=all(p is not None for p in parts)
     total=sum(parts) if complete else None
+    if total is not None and not math.isfinite(total):
+        total=None
+        complete=False
     area=job.get("area_ha")
     perha=total/area if total is not None and isinstance(area,(int,float)) and math.isfinite(area) and area>0 else None
+    if perha is not None and not math.isfinite(perha):
+        perha=None
     return dict(job_id=job["id"],**values,herkunft="manuell",berechnung_herkunft="schaetzung",
                 aktualisiert_am=stamp,diesel_eur=fuel,arbeit_eur=labour,gesamt_eur=total,
                 kosten_eur_ha=perha,vollstaendig=complete,
@@ -341,17 +349,19 @@ def _dauer(seconds):
     return f"{minutes//60} h {minutes%60:02d} min" if minutes>=60 else f"{minutes} min"
 
 
+def _berichtszone():
+    from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+    try:
+        return ZoneInfo("Europe/Berlin"), "Europe/Berlin"
+    except ZoneInfoNotFoundError:
+        return timezone.utc, "UTC"
+
+
 def _datum(timestamp):
     if timestamp is None:
         return "noch nicht beendet"
     try:
-        from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
-        try:
-            zone=ZoneInfo("Europe/Berlin")
-            label="Europe/Berlin"
-        except ZoneInfoNotFoundError:
-            zone=timezone.utc
-            label="UTC"
+        zone,label=_berichtszone()
         date=datetime.fromtimestamp(timestamp,timezone.utc).astimezone(zone)
         offset=date.strftime("%z")
         offset=offset[:3]+":"+offset[3:]
@@ -416,7 +426,7 @@ def _fuss(ref,number,total):
 def bericht_pdf(store,field_id,jahr=None,job_id=None):
     """PDF-bytes: Felddeckblatt mit echtem Umriss, eine Seite pro Auftrag.
 
-    Jahr filtert UTC-Startjahr. Maximal 1000 Aufträge, niemals still abschneiden.
+    Jahr filtert das angezeigte Startjahr. Maximal 1000 ausgewählte Aufträge.
     Jahresbericht aggregiert keine sich überlagernden Arbeitsflächen.
     """
     if jahr is not None and (type(jahr) is not int or not 1970<=jahr<=2200):
@@ -429,16 +439,29 @@ def bericht_pdf(store,field_id,jahr=None,job_id=None):
             if not field or field.get("deleted"):
                 raise ValueError("Feld nicht gefunden")
             poly=_grenze(field.get("boundary"))
+            if jahr is not None:
+                zone,_=_berichtszone()
+                anfang=datetime(jahr,1,1,tzinfo=zone).timestamp()
+                ende=datetime(jahr+1,1,1,tzinfo=zone).timestamp()
             if job_id is not None:
                 jobs=[_job(reader,job_id)]
                 if jobs[0]["field_id"]!=field_id:
                     raise ValueError("Auftrag gehört nicht zum Feld")
+                if jahr is not None:
+                    jobs=[j for j in jobs if anfang<=j["started_at"]<ende]
             else:
-                jobs=reader.list_jobs(field_id,limit=MAX_JOBS+1)
-                if len(jobs)>MAX_JOBS:
+                # Vor dem Limit filtern; andere Jahre blockieren den Bericht nicht.
+                # Zuerst IDs lesen, keine Rasterblobs aller Aufträge gleichzeitig.
+                query="SELECT id FROM jobs WHERE deleted=0 AND field_id=?"
+                args=[field_id]
+                if jahr is not None:
+                    query+=" AND started_at>=? AND started_at<?"
+                    args.extend((anfang,ende))
+                ids=reader.db.execute(query+" ORDER BY started_at DESC LIMIT ?",
+                                      (*args,MAX_JOBS+1)).fetchall()
+                if len(ids)>MAX_JOBS:
                     raise ValueError("Zu viele Aufträge; einzelnen Auftrag auswählen")
-            if jahr is not None:
-                jobs=[j for j in jobs if datetime.fromtimestamp(j["started_at"],timezone.utc).year==jahr]
+                jobs=[_job(reader,row["id"]) for row in ids]
             name=str(field.get("name") or "Unbenanntes Feld")
             first=_kopf(name,"Feldübersicht"+(f" · {jahr}" if jahr else " · Alle Arbeitsgänge"))
             first+=_kennzahlen([

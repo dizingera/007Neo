@@ -849,6 +849,12 @@ class Engine:
     # -- field and line ---------------------------------------------------
 
     def load_field(self, field_id: str) -> dict:
+        # Eine laufende Arbeit gehört unveränderlich zu ihrem Feldbezug.
+        # Wiederholtes Laden desselben Feldes ist ohne Rasterwechsel idempotent.
+        if self.job is not None:
+            if self.field is not None and self.field["id"] == field_id:
+                return self.field
+            raise RuntimeError("Vor dem Feldwechsel die laufende Arbeit pausieren oder abschließen")
         field = self.store.get_field(field_id)
         if field is None:
             raise KeyError("Feld nicht gefunden")
@@ -1004,6 +1010,8 @@ class Engine:
         The datum is what makes coverage grids from different machines line up,
         so it is fixed once at creation and never moved afterwards.
         """
+        if self.job is not None:
+            raise RuntimeError("Vor dem Anlegen eines Feldes die laufende Arbeit pausieren oder abschließen")
         if self.fix is None or not self.fix.valid:
             raise RuntimeError("Ohne GPS-Fix lässt sich kein Feld anlegen")
         field = self.store.save_field({
@@ -1208,6 +1216,8 @@ class Engine:
     def saatplan_uebernehmen(self, field_id: str, saison=None) -> dict:
         """Den Plan als Saisonspur speichern: eine AB-Spur durch eine Fahrgasse,
         Fahrgassen alle fahrgasse_m. Ersetzt den Saatplan desselben Erntejahres."""
+        if self.job is not None and (self.field is None or self.field["id"] != field_id):
+            raise RuntimeError("Vor dem Feldwechsel die laufende Arbeit pausieren oder abschließen")
         feld, _ = self._feld_mit_grenze(field_id)
         gespeichert = self.store.get_setting(f"saatplan:{field_id}") or {}
         plan = gespeichert.get("plan")
@@ -1677,11 +1687,23 @@ class Engine:
 
         arbeit = False
         if job is not None and job["field_id"] == feld["id"]:
-            self.job = job
             blob = self.store.get_job_coverage(job["id"])
-            if blob:
-                self.coverage = CoverageMap.unpack(blob)
-                self.coverage.applied_area_m2 += (job.get("overlap_ha") or 0.0) * 10_000.0
+            try:
+                if blob is None and (job.get("area_ha") or 0.0) > 0:
+                    raise ValueError("Arbeitskarte fehlt trotz aufgezeichneter Fläche")
+                karte = storage.arbeitskarte_laden(blob) if blob is not None else CoverageMap(cell_size=0.5)
+            except ValueError:
+                # Originalkarte und Kennzahlen erhalten. Eine leere Ersatzkarte
+                # würde beim nächsten Checkpoint die letzte Arbeit überschreiben.
+                self.paused_job = self.store.arbeitsstatus_setzen(job["id"], pausiert=True)
+                self._remember_session()
+                text = "Arbeit nicht fortgesetzt: Arbeitskarte fehlt oder ist beschädigt. Gespeicherte Daten bleiben erhalten."
+                self.note(text)
+                return {"text": text, "feld": feld["name"], "arbeit": False,
+                        "flaeche_ha": job.get("area_ha"), "fehler": "arbeitskarte"}
+            self.job = job
+            self.coverage = karte
+            self.coverage.applied_area_m2 += (job.get("overlap_ha") or 0.0) * 10_000.0
             self.distance_m = job.get("distance_m") or 0.0
             self.working_time_s = job.get("working_time_s") or 0.0
             self._checkpoint_at = time.time()
@@ -2106,6 +2128,7 @@ class Engine:
             tractor=self.aktiver_traktor()["name"],
         )
         self.store.update_job(self.job["id"], reference_spacing_m=self.profile.spacing_m)
+        self.paused_job = None
         self.distance_m = 0.0
         self.working_time_s = 0.0
         self.genauigkeit.zuruecksetzen(self.steering.abgaben if self.steering else 0,
@@ -2114,6 +2137,49 @@ class Engine:
         self._checkpoint_at = time.time()
         self._remember_session()
         return self.job
+
+    def mark_job(self, operation: str = "") -> dict:
+        """Markieren einschalten: die pausierte Arbeit dieses Feldes fortsetzen.
+
+        Hier wird während der Fahrt ausschließlich der geladene Feldbezug
+        verwendet. Ein anderer Auftrag/Feld/Gespann wird nicht umgeschaltet.
+        Neue Tätigkeiten werden weiterhin ausdrücklich mit start_job begonnen.
+        """
+        if self.job is not None:
+            return self.job
+        if self.field is None:
+            raise RuntimeError("Kein Feld ausgewählt")
+        job = self.store.get_job(self.paused_job["id"]) if self.paused_job else None
+        if not job or job.get("deleted") or job.get("ended_at") is not None or job["field_id"] != self.field["id"]:
+            return self.start_job(operation)
+        if job["device_id"] != self.config.network.device_id:
+            raise RuntimeError("Diese Arbeit gehört zu einem anderen Gerät")
+        if ((job.get("tractor") and job["tractor"] != self.aktiver_traktor()["name"])
+                or (job.get("vehicle") and job["vehicle"] != self.profile.name)
+                or (job.get("reference_spacing_m") and abs(job["reference_spacing_m"] - self.profile.spacing_m) > .001)):
+            raise RuntimeError("Gespann passt nicht zur pausierten Arbeit – im Arbeitstag prüfen")
+        blob = self.store.get_job_coverage(job["id"])
+        if blob is None and (job.get("area_ha") or 0) > 0:
+            raise ValueError("Arbeitskarte fehlt trotz gespeicherter Fläche; Markierung bleibt aus")
+        coverage = storage.arbeitskarte_laden(blob) if blob is not None else CoverageMap(cell_size=.5)
+        coverage.applied_area_m2 += (job.get("overlap_ha") or 0) * 10000
+        job = self.store.arbeitsstatus_setzen(job["id"], pausiert=False)
+        self.coverage = coverage
+        self.job = job
+        self.paused_job = None
+        self.distance_m = job.get("distance_m") or 0
+        self.working_time_s = job.get("working_time_s") or 0
+        # Kein Streifen und keine Arbeitszeit über die ausgeschaltete Strecke.
+        self._last_track_point = None
+        self._last_update_at = None
+        self.tool_position = None
+        self.implement_position = None
+        self._genau_at = None
+        self._tb_ventil = []
+        self._checkpoint_at = time.time()
+        self._remember_session()
+        self.note("Markierung fortgesetzt; bisherige Fläche erhalten")
+        return job
 
     def pause_job(self) -> dict:
         if self.job is None:
@@ -2648,12 +2714,14 @@ class Engine:
             messen = getattr(self.simulator, "gemessener_radwinkel", None)
             if self.steering is not None and messen is not None:
                 self.steering.output.feedback.wheel_angle_deg = messen()
+                self.steering.output.feedback.received_at = time.time()
         self._steering_was_engaged = command.engaged
         ausgang = getattr(self.steering, "output", None)
         feedback = getattr(ausgang, "feedback", None)
+        radwinkel = feedback.wheel_angle_deg if feedback is not None and feedback.fresh else None
         self.nachlauf.probe(fix.received_at or time.time(), command.angle_deg,
-                            getattr(feedback, "wheel_angle_deg", None), command.engaged)
-        self.radmitte.probe(ausgang.feedback.wheel_angle_deg if ausgang is not None else None, command.engaged,
+                            radwinkel, command.engaged)
+        self.radmitte.probe(radwinkel, command.engaged,
                             self.line is not None and self.line.mode == "ab" and self.turn is None,
                             fix.speed_ms, self.guidance.cross_track_m, self.guidance.heading_error_deg)
 

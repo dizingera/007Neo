@@ -12,6 +12,8 @@ MAX_BEFUNDE = 100
 
 
 def _zahl(wert):
+    if isinstance(wert, bool):
+        return None
     try:
         zahl = float(wert)
         return zahl if math.isfinite(zahl) else None
@@ -168,6 +170,8 @@ def pruefen(plan: dict, feld: dict, breite_m: float) -> dict:
                 vollstaendig = False
                 continue
             if art == 'H':
+                if len(teile) > MAX_SEGMENTE:
+                    vollstaendig = False
                 for paar in teile[:MAX_SEGMENTE]:
                     if isinstance(paar, (list, tuple)) and len(paar) == 2:
                         segment(*paar, art, nr)
@@ -225,14 +229,45 @@ def pruefen(plan: dict, feld: dict, breite_m: float) -> dict:
         if vergleiche > MAX_VERGLEICHE:
             break
     # Bereits berechnete Rand-/Reststreifenhinweise behalten; keine zweite Planung.
-    konflikte = plan.get('konflikte') or []
-    if isinstance(konflikte,list):
-        for k in konflikte[:100]:
-            if isinstance(k,dict) and isinstance(k.get('text'),str):
-                pts=[_punkt(p) for p in (k.get('punkte') or [])[:100]]
-                melden('plan_'+str(k.get('art') or 'hinweis')[:30], k['text'][:1000], [p for p in pts if p is not None])
-    for h in (plan.get('hinweise') or [])[:30]:
-        if isinstance(h,str): hinweise.append(h[:1000])
+    konflikte = plan.get('konflikte', [])
+    if konflikte is None:
+        konflikte = []
+    if not isinstance(konflikte, (list, tuple)):
+        melden('daten', 'Konfliktliste ist ungültig.', severity='fehler')
+        vollstaendig = False
+    else:
+        if len(konflikte) > MAX_BEFUNDE:
+            vollstaendig = False
+        for k in konflikte[:MAX_BEFUNDE]:
+            if not isinstance(k, dict) or not isinstance(k.get('text'), str):
+                melden('daten', 'Plankonflikt ist ungültig.', severity='fehler')
+                vollstaendig = False
+                continue
+            raw_punkte = k.get('punkte', [])
+            if raw_punkte is None:
+                raw_punkte = []
+            if not isinstance(raw_punkte, (list, tuple)):
+                pts = []
+                vollstaendig = False
+            else:
+                pts = [_punkt(p) for p in raw_punkte[:100]]
+                if len(raw_punkte) > 100 or any(p is None for p in pts):
+                    vollstaendig = False
+            melden('plan_'+str(k.get('art') or 'hinweis')[:30], k['text'][:1000], [p for p in pts if p is not None])
+    planhinweise = plan.get('hinweise', [])
+    if planhinweise is None:
+        planhinweise = []
+    if not isinstance(planhinweise, (list, tuple)):
+        melden('daten', 'Hinweisliste ist ungültig.', severity='fehler')
+        vollstaendig = False
+    else:
+        if len(planhinweise) > 30:
+            vollstaendig = False
+        for h in planhinweise[:30]:
+            if isinstance(h, str):
+                hinweise.append(h[:1000])
+            else:
+                vollstaendig = False
     if not vollstaendig:
         hinweise.append('Prüfung unvollständig: fehlende Daten oder Aufwands-/Befundlimit erreicht.')
     hinweise.append('Grenzprüfung als Stichprobe (Enden/Mitten); Restflächen und Maschinenhülle nicht berechnet. Keine Sicherheitsgarantie.')

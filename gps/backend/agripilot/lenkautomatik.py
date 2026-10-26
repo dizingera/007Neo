@@ -49,10 +49,13 @@ class Lenkautomatik:
             self.protokoll = list(stand.get('protokoll') or [])[-30:]
             self.ziel_cm = float(stand.get('ziel_cm', 3.0))
             pending = stand.get('versuch')
-            if pending and all(self._erwartet.get(k) == v for k, v in pending['nach'].items()):
-                self.setzen(pending['vor'])
-                self.hinweis = 'Unbestätigten Versuch nach Neustart zurückgenommen.'
-                self._erwartet = dict(lesen())
+            if pending:
+                self.versuch = pending
+                self._zurueck('Unbestätigten Versuch nach Neustart zurückgenommen')
+                self.hinweis = 'Offenen Versuch nach Neustart beendet – Automatik erneut starten.'
+                # Auch ein inzwischen manuell ersetzter Versuch ist erledigt.
+                # Er darf bei einem späteren Neustart nicht erneut zurückrollen.
+                self._sichern()
             elif stand.get('aktiv'):
                 self.hinweis = 'Nach Neustart bereit – Automatik erneut starten.'
 
@@ -90,9 +93,15 @@ class Lenkautomatik:
 
     def _zurueck(self, grund):
         if self.versuch:
-            self.setzen(self.versuch['vor'])
-            self.protokoll.append({'aktion': 'zurück', 'grund': grund,
-                                   'werte': self.versuch['vor']})
+            aktuell = dict(self.lesen())
+            # Nur unsere noch unveränderten Versuchswerte zurücknehmen.
+            # Manuelle Werte bleiben erhalten; andere Versuchswerte nicht liegen.
+            vorher = {k: v for k, v in self.versuch['vor'].items()
+                      if aktuell.get(k) == self.versuch['nach'].get(k)}
+            if vorher:
+                self.setzen(vorher)
+                self.protokoll.append({'aktion': 'zurück', 'grund': grund,
+                                       'werte': vorher})
             self._erwartet = dict(self.lesen())
         self.versuch = None
         self._daten.clear()
@@ -167,11 +176,10 @@ class Lenkautomatik:
             self.unterbrechen('Wartet auf gültige Messwerte.')
             return
         if dict(self.lesen()) != self._erwartet:
-            # Externe Änderungen haben Vorrang; ein alter Versuch darf sie nicht überschreiben.
-            self.versuch = None
+            # Externe Änderungen haben Vorrang; unveränderte Versuchswerte
+            # trotzdem zurücknehmen, bevor die Automatik endet.
             self.aktiv = False
-            self.phase = 'aus'
-            self._daten.clear()
+            self._zurueck('Einstellungen außerhalb der Automatik geändert')
             self.hinweis = 'Wegen geänderter Einstellungen gestoppt.'
             self._sichern()
             return

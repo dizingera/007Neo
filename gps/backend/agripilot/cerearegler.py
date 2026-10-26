@@ -146,3 +146,7 @@ class CereaIntegral:
     def verschieben(self, grad: float) -> None:
         """Nach einer Korrektur der Radmitte den Teil, den I2 dafür gegengelenkt hat, herausnehmen."""
         self.i2_deg = max(-GRENZE_DEG, min(GRENZE_DEG, self.i2_deg + grad))
+        # Die Radmitte gilt für beide Fahrtrichtungen. Nach der Wende darf
+        # kein noch unkorrigierter I2-Wert aus dem Gedächtnis zurückkommen.
+        self._gemerkt = {r: (i, max(-GRENZE_DEG, min(GRENZE_DEG, i2 + grad)))
+                        for r, (i, i2) in self._gemerkt.items()}

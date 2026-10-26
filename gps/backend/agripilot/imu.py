@@ -130,6 +130,11 @@ class ImuSource:
         m2 = self.roh()
         self.roll_offset = (m1[0] + m2[0]) / 2.0
         self.pitch_offset = (m1[1] + m2[1]) / 2.0
+        # Der aktuelle Schnappschuss gehört bereits zur neuen Kalibrierung;
+        # der ursprüngliche Messzeitpunkt bleibt dabei unverändert.
+        self.attitude = replace(self.attitude,
+                                roll_deg=m2[0] - self.roll_offset,
+                                pitch_deg=m2[1] - self.pitch_offset)
         self._m1 = None
         return {"roll_offset": self.roll_offset, "pitch_offset": self.pitch_offset,
                 "boden_quer_deg": round((m1[0] - m2[0]) / 2.0, 2),

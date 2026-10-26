@@ -1096,6 +1096,9 @@ class PhidgetPositionOutput(SteerOutput):
         self.target_deg = 0.0
         self.last_error_text = ""
         self._error_since: Optional[float] = None
+        self._fahrer_eingriff = False
+        self._gestoert = False
+        self._status_ok = ""
 
     # -- Aufbau -----------------------------------------------------------
 
@@ -1109,10 +1112,12 @@ class PhidgetPositionOutput(SteerOutput):
         cfg = self.config
         try:
             controller = MotorPositionController()
+            self.controller = controller  # auch bei halb gelungenem Aufbau sicher schließen
             if cfg.serial_number >= 0:
                 controller.setDeviceSerialNumber(cfg.serial_number)
             controller.setChannel(cfg.motor_channel)
             controller.openWaitForAttachment(5000)
+            controller.setEngaged(False)
 
             # Ab hier rechnet die Platine in Grad Radeinschlag statt in
             # Zählwerten - das ist der Kern dieser Betriebsart.
@@ -1132,13 +1137,12 @@ class PhidgetPositionOutput(SteerOutput):
             controller.setKd(cfg.position_kd)
             if cfg.stall_velocity > 0:
                 controller.setStallVelocity(cfg.stall_velocity)
-            controller.setEngaged(False)
             try:
                 controller.enableFailsafe(int(cfg.failsafe_ms))
             except Exception:  # noqa: BLE001
                 self.last_error_text = (
                     "Diese Steuerung kennt keinen Failsafe - Not-Aus ist Pflicht")
-            self.controller = controller
+            self._gestoert = False
             self.ready = True
             self.status = (f"Positionsregler {controller.getDeviceSerialNumber()}"
                            f"/{cfg.motor_channel}, {cfg.counts_per_deg:g} Zählwerte je Grad")
@@ -1159,6 +1163,9 @@ class PhidgetPositionOutput(SteerOutput):
         if self.controller is not None:
             try:
                 self.controller.setEngaged(False)
+            except Exception:  # noqa: BLE001
+                pass
+            try:
                 self.controller.close()
             except Exception:  # noqa: BLE001
                 pass
@@ -1169,6 +1176,9 @@ class PhidgetPositionOutput(SteerOutput):
 
     def on_arm(self) -> None:
         self.learn_centre()
+        self._fahrer_eingriff = False
+        self.feedback = OutputFeedback(wheel_angle_deg=self.feedback.wheel_angle_deg,
+                                       received_at=self.feedback.received_at)
 
     def learn_centre(self) -> dict:
         """Aktuelle Stellung als Geradeaus merken.
@@ -1192,35 +1202,70 @@ class PhidgetPositionOutput(SteerOutput):
     def command(self, engaged: bool, angle_deg: float, context: SteerContext) -> None:
         if self.controller is None:
             return
-        limit = self.config.max_wheel_angle_deg
-        self.target_deg = _clamp(angle_deg, -limit, limit)
         try:
-            if engaged and self.centred:
-                self.controller.setTargetPosition(self.target_deg)
-                self.controller.setEngaged(True)
-            else:
-                # Nicht scharf: Motor stromlos, damit von Hand gelenkt werden
-                # kann - ein gehaltener Sollwert wäre hier das Falsche.
+            if not engaged or not self.centred or self._fahrer_eingriff:
+                # AUS hat Vorrang vor jedem möglicherweise fehlschlagenden Lesen.
                 self.controller.setEngaged(False)
                 self._error_since = None
-            self.controller.resetFailsafe()
+                self._read_back(False)
+            else:
+                war_gestoert = self._gestoert
+                # Erst die tatsächliche Radstellung prüfen. Ein fehlgeschlagenes
+                # Lesen darf keinen alten Sollwert samt Failsafe am Leben halten.
+                if not self._read_back(True):
+                    return
+                if war_gestoert or self._fahrer_eingriff:
+                    # Der erste wieder gültige Takt bleibt noch stromlos.
+                    self.controller.setEngaged(False)
+                else:
+                    limit = self.config.max_wheel_angle_deg
+                    self.target_deg = _clamp(angle_deg, -limit, limit)
+                    self.controller.setTargetPosition(self.target_deg)
+                    self.controller.setEngaged(True)
+            if not self._gestoert:
+                self.controller.resetFailsafe()
         except Exception as exc:  # noqa: BLE001
-            self.last_error_text = str(exc)
-            return
-        self._read_back(engaged)
+            self._ausfall(exc)
 
-    def _read_back(self, engaged: bool) -> None:
+    def _ausfall(self, fehler) -> None:
+        if not self._gestoert:
+            self._status_ok = self.status
+        self._gestoert = True
+        self.ready = False
+        self.status = self.last_error_text = f"Positionsregler gestört: {fehler}"
+        self._error_since = None
+        self.feedback = OutputFeedback(driver_override=self._fahrer_eingriff)
+        try:
+            self.controller.setEngaged(False)
+        except Exception:  # noqa: BLE001 - Hardware-Failsafe nicht mehr bestätigen
+            pass
+
+    def _read_back(self, engaged: bool) -> bool:
         try:
             measured = self.controller.getPosition()
             duty = self.controller.getDutyCycle()
-        except Exception:  # noqa: BLE001
-            return
+            if not all(isinstance(v, (int, float)) and math.isfinite(v)
+                       for v in (measured, duty)):
+                raise ValueError("Ungültige Rückmeldung des Positionsreglers")
+            if self._detect_override(measured, duty, engaged):
+                self._fahrer_eingriff = True
+            if self._fahrer_eingriff:
+                self.controller.setEngaged(False)
+        except Exception as exc:  # noqa: BLE001
+            self._ausfall(exc)
+            return False
+        if self._gestoert:
+            self._gestoert = False
+            self.ready = True
+            self.status = self._status_ok
+            self.last_error_text = ""
         self.feedback = OutputFeedback(
             wheel_angle_deg=measured,
-            driver_override=self._detect_override(measured, duty, engaged),
-            duty=duty,
+            driver_override=self._fahrer_eingriff,
+            duty=0.0 if self._fahrer_eingriff else duty,
             received_at=time.time(),
         )
+        return True
 
     def _detect_override(self, measured: float, duty: float, engaged: bool) -> bool:
         """Der Motor drückt, das Rad folgt nicht.

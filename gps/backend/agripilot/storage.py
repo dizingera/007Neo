@@ -9,6 +9,8 @@ without a central id counter - see sync.py.
 from __future__ import annotations
 
 import json
+import math
+import struct
 import sqlite3
 import time
 import uuid
@@ -123,6 +125,23 @@ SYNCED_TABLES = ("fields", "lines", "jobs", "devices", "hindernisse")
 
 def new_id() -> str:
     return uuid.uuid4().hex
+
+
+def arbeitskarte_laden(blob: bytes):
+    """Gespeicherte Arbeitskarte streng lesen; Teilraster sind keine leere Arbeit."""
+    from .coverage import CoverageMap
+    if not isinstance(blob, bytes) or len(blob) < 4 or (len(blob) - 4) % 8:
+        raise ValueError("Arbeitskarte ist beschaedigt: unvollstaendiges Raster")
+    cell_size = struct.unpack_from("<f", blob)[0]
+    if not math.isfinite(cell_size) or cell_size <= 0:
+        raise ValueError("Arbeitskarte ist beschaedigt: ungueltige Rastergroesse")
+    return CoverageMap.unpack(blob)
+
+
+def _job_bezug_pruefen(record, existing):
+    if existing and any(k in record and record[k] != existing[k]
+                        for k in ("device_id", "field_id")):
+        raise ValueError("Arbeit gehoert zu einem anderen Geraet oder Feld")
 
 
 class Storage:
@@ -403,49 +422,64 @@ class Storage:
         „Frisch" heißt: zuletzt gesichert vor höchstens ``max_age_s``. Was länger
         liegt, ist keine unterbrochene Arbeit mehr, sondern eine vergessene.
         """
-        row = self.db.execute(
+        rows = self.db.execute(
             """SELECT * FROM jobs WHERE ended_at IS NULL AND deleted=0
-               AND device_id=? AND updated_at>=?
-               AND NOT EXISTS (SELECT 1 FROM settings s WHERE s.key='arbeitsablauf:' || jobs.id
-                   AND json_extract(s.value,'$.pausiert')=1
-                   AND json_extract(s.value,'$.device_id')=jobs.device_id)
-               ORDER BY updated_at DESC LIMIT 1""",
+               AND device_id=? AND updated_at>=? ORDER BY updated_at DESC""",
             (device_id, time.time() - max_age_s),
-        ).fetchone()
-        return _job_row(row) if row else None
+        ).fetchall()
+        for row in rows:
+            job = self._arbeitsstatus(_job_row(row))
+            if not job["pausiert"]:
+                return job
+        return None
 
     def find_paused_job(self, device_id: str) -> Optional[dict]:
-        row = self.db.execute(
+        rows = self.db.execute(
             "SELECT jobs.* FROM jobs JOIN settings s ON s.key='arbeitsablauf:' || jobs.id "
             "WHERE jobs.device_id=? AND jobs.deleted=0 AND jobs.ended_at IS NULL "
-            "AND json_extract(s.value,'$.pausiert')=1 "
-            "AND json_extract(s.value,'$.device_id')=jobs.device_id "
-            "ORDER BY s.updated_at DESC LIMIT 1", (device_id,)).fetchone()
-        return self._arbeitsstatus(_job_row(row)) if row else None
+            "ORDER BY s.updated_at DESC", (device_id,)).fetchall()
+        for row in rows:
+            job = self._arbeitsstatus(_job_row(row))
+            if job["pausiert"]:
+                return job
+        return None
 
     def close_orphan_jobs(self, device_id: str, keep_id: Optional[str] = None) -> int:
-        """Arbeiten dieses Geräts ohne Ende abschließen - Stromausfall, Neustart.
+        """Offene eigene Arbeit abschliessen, ausser sie ist bewusst/unklar pausiert.
 
-        Der Traktor wird mit dem Zündschlüssel ausgeschaltet, nicht mit „Arbeit
-        beenden". Was dann offen bleibt, stünde ewig als „läuft" in der Liste.
-        Als Ende gilt die letzte Änderung; die Fläche ist, was bis dahin
-        gespeichert war (der Motor sichert unterwegs). Fremde Geräte werden
-        nicht angefasst: deren laufende Arbeit ist vielleicht wirklich am Laufen.
+        Ende ist der letzte gesicherte Stand. Fremde Geraete, der fortsetzbare
+        Auftrag und Arbeiten mit defektem Pausenstatus bleiben unangetastet.
         """
-        cursor = self.db.execute(
-            """UPDATE jobs SET ended_at=updated_at, updated_at=?
-               WHERE ended_at IS NULL AND deleted=0 AND device_id=? AND id IS NOT ?
-               AND NOT EXISTS (SELECT 1 FROM settings s WHERE s.key='arbeitsablauf:' || jobs.id
-                   AND json_extract(s.value,'$.pausiert')=1
-                   AND json_extract(s.value,'$.device_id')=jobs.device_id)""",
-            (time.time(), device_id, keep_id),
-        )
-        self.db.commit()
-        return cursor.rowcount
+        rows = self.db.execute(
+            "SELECT * FROM jobs WHERE ended_at IS NULL AND deleted=0 AND device_id=? AND id IS NOT ?",
+            (device_id, keep_id),).fetchall()
+        ids = [row["id"] for row in rows if not self._arbeitsstatus(_job_row(row))["pausiert"]]
+        with self.db:
+            self.db.executemany("UPDATE jobs SET ended_at=updated_at,updated_at=? WHERE id=?",
+                                [(time.time(), jid) for jid in ids])
+        return len(ids)
+
+    def _arbeitsmeta(self, job_id: str) -> Optional[dict]:
+        """Fehlender Altstatus ist {}, beschaedigter vorhandener Status ist None.
+
+        Keine Reparatur beim Lesen: Originaldaten bleiben fuer Diagnose und
+        Abgleich erhalten. Unklarer Pausenstatus darf keine Aufnahme starten.
+        """
+        from .zusatzsync import _arbeitsstatus_wert
+        key = "arbeitsablauf:" + job_id
+        row = self.db.execute("SELECT value FROM settings WHERE key=?", (key,)).fetchone()
+        if not row:
+            return {}
+        try:
+            return _arbeitsstatus_wert(json.loads(row["value"]))
+        except (ValueError, TypeError):
+            return None
 
     def _arbeitsstatus(self, job: dict) -> dict:
-        meta = self.get_setting("arbeitsablauf:" + job["id"], {})
-        job["pausiert"] = bool(meta.get("device_id") == job["device_id"] and meta.get("pausiert") and job.get("ended_at") is None and not job.get("deleted"))
+        meta = self._arbeitsmeta(job["id"])
+        job["pausiert"] = bool((meta is None or (meta.get("device_id") == job["device_id"]
+                                and meta.get("pausiert")))
+                               and job.get("ended_at") is None and not job.get("deleted"))
         job["status"] = "geloescht" if job.get("deleted") else "beendet" if job.get("ended_at") is not None else "pausiert" if job["pausiert"] else "offen"
         return job
 
@@ -454,7 +488,9 @@ class Storage:
         job = self.get_job(job_id)
         if not job:
             raise KeyError("Arbeit nicht gefunden")
-        meta = self.get_setting("arbeitsablauf:" + job_id, {})
+        meta = self._arbeitsmeta(job_id) or {}
+        if meta.get("device_id") != job["device_id"]:
+            meta = {}
         stamp = max(time.time(), job["updated_at"] + .000001, meta.get("zeit", 0) + .000001)
         value = dict(zeit=stamp, pausiert=bool(pausiert), papierkorb=bool(papierkorb), device_id=job["device_id"])
         with self.db:
@@ -477,13 +513,19 @@ class Storage:
 
     def list_deleted_jobs(self, device_id: Optional[str] = None) -> list[dict]:
         rows = self.db.execute("SELECT * FROM jobs WHERE deleted=1 ORDER BY updated_at DESC").fetchall()
-        return [self._arbeitsstatus(_job_row(r)) for r in rows
-                if (device_id is None or r["device_id"] == device_id)
-                and self.get_setting("arbeitsablauf:" + r["id"], {}).get("papierkorb") is True]
+        jobs = []
+        for row in rows:
+            meta = self._arbeitsmeta(row["id"]) or {}
+            if ((device_id is None or row["device_id"] == device_id)
+                    and meta.get("device_id") == row["device_id"] and meta.get("papierkorb") is True):
+                jobs.append(self._arbeitsstatus(_job_row(row)))
+        return jobs
 
     def restore_job(self, job_id: str) -> dict:
         job = self.get_job(job_id)
-        if not job or not job.get("deleted") or not self.get_setting("arbeitsablauf:" + job_id, {}).get("papierkorb"):
+        meta = self._arbeitsmeta(job_id) or {}
+        if (not job or not job.get("deleted") or meta.get("papierkorb") is not True
+                or meta.get("device_id") != job["device_id"]):
             raise RuntimeError("Diese Arbeit liegt nicht im wiederherstellbaren Papierkorb")
         field = self.get_field(job["field_id"])
         if not field or field.get("deleted"):
@@ -602,76 +644,82 @@ class Storage:
         """
         if table not in SYNCED_TABLES:
             raise ValueError(f"Tabelle {table} wird nicht synchronisiert")
-        applied = 0
-        for record in records:
-            record = dict(record)
-            if table == "jobs" and record.get("coverage"):
-                import base64
-                record["coverage"] = base64.b64decode(record["coverage"])
-            existing = self.db.execute(
-                f"SELECT * FROM {table} WHERE id=?", (record["id"],)
-            ).fetchone()
-            if existing and existing["updated_at"] >= record.get("updated_at", 0):
-                # Flächen sind tatsächlich geleistete Arbeit. Auch ein älterer
-                # Stand darf neue Zellen beitragen; die neueren Metadaten bleiben.
-                if (table == "jobs" and record.get("coverage")
-                        and not existing["deleted"] and not record.get("deleted")):
-                    from .coverage import CoverageMap
-                    try:
-                        alt = CoverageMap.unpack(existing["coverage"]) if existing["coverage"] else None
-                        neu = CoverageMap.unpack(record["coverage"])
-                        if alt is not None:
-                            vorher = set(alt.cells)
-                            alt.merge(neu)
-                            neu = alt
-                        else:
-                            vorher = set()
-                        if neu.cells != vorher:
-                            self.db.execute("UPDATE jobs SET coverage=? WHERE id=?",
-                                            (neu.pack(), record["id"]))
-                            # Eigene Empfangszeit macht die Vereinigung für weitere
-                            # Gegenstellen sichtbar, ohne Metadaten umzudatieren.
-                            self.db.execute(
-                                "INSERT INTO sync_received (table_name, record_id, received_at) VALUES (?, ?, ?) "
-                                "ON CONFLICT(table_name, record_id) DO UPDATE SET received_at=excluded.received_at",
-                                (table, record["id"], time.time()),
-                            )
-                            applied += 1
-                    except (ValueError, TypeError):
-                        pass  # Unvereinbare Raster: vorhandenen Stand behalten.
-                continue
-            if table == "jobs" and existing and not record.get("coverage") and existing["coverage"]:
-                record["coverage"] = existing["coverage"]
-            if table == "lines" and "rand_innen" not in record:
-                alt = self.get_line(record["id"])
-                record["rand_innen"] = alt["rand_innen"] if alt else self._randbezug(record)
-            if table == "lines" and "aussaat_at" not in record:
-                # Alte Gegenstellen kennen die Spalte noch nicht. Vorhandene
-                # Aussaatzeit bewahren; beim ersten Empfang den Altstand übernehmen.
-                alt = self.get_line(record["id"])
-                record["aussaat_at"] = (alt["aussaat_at"] if alt else
-                    record.get("updated_at", 0) if record.get("saison", 0) > 0
-                    and record.get("fahrgasse_m", 0) > 0 else 0.0)
-            if table == "fields" and "working_boundary" not in record:
-                alt = self.get_field(record["id"])
-                if alt and json.loads(record.get("boundary") or "[]") != alt["boundary"]:
-                    record["working_boundary"] = "[]"
-            columns = [c[1] for c in self.db.execute(f"PRAGMA table_info({table})")]
-            record = {k: v for k, v in record.items() if k in columns}
-            placeholders = ", ".join(f":{k}" for k in record)
-            updates = ", ".join(f"{k}=excluded.{k}" for k in record if k != "id")
-            self.db.execute(
-                f"""INSERT INTO {table} ({', '.join(record)}) VALUES ({placeholders})
-                    ON CONFLICT(id) DO UPDATE SET {updates}""",
-                record,
-            )
-            self.db.execute(
-                "INSERT INTO sync_received (table_name, record_id, received_at) VALUES (?, ?, ?) "
-                "ON CONFLICT(table_name, record_id) DO UPDATE SET received_at=excluded.received_at",
-                (table, record["id"], time.time()),
-            )
-            applied += 1
-        self.db.commit()
+        with self.db:
+            applied = 0
+            for record in records:
+                record = dict(record)
+                if table == "jobs" and record.get("coverage") is not None:
+                    import base64
+                    record["coverage"] = base64.b64decode(record["coverage"], validate=True)
+                    arbeitskarte_laden(record["coverage"])
+                existing = self.db.execute(
+                    f"SELECT * FROM {table} WHERE id=?", (record["id"],)
+                ).fetchone()
+                if table == "jobs":
+                    _job_bezug_pruefen(record, existing)
+                if existing and existing["updated_at"] >= record.get("updated_at", 0):
+                    # Flächen sind tatsächlich geleistete Arbeit. Auch ein älterer
+                    # Stand darf neue Zellen beitragen; die neueren Metadaten bleiben.
+                    if (table == "jobs" and record.get("coverage")
+                            and not existing["deleted"] and not record.get("deleted")):
+                        try:
+                            alt = arbeitskarte_laden(existing["coverage"]) if existing["coverage"] else None
+                        except ValueError:
+                            alt = None  # Ein gueltiger Fremdstand kann ein defektes Raster ersetzen.
+                        try:
+                            neu = arbeitskarte_laden(record["coverage"])
+                            if alt is not None:
+                                vorher = set(alt.cells)
+                                alt.merge(neu)
+                                neu = alt
+                            else:
+                                vorher = set()
+                            if neu.cells != vorher:
+                                self.db.execute("UPDATE jobs SET coverage=? WHERE id=?",
+                                                (neu.pack(), record["id"]))
+                                # Eigene Empfangszeit macht die Vereinigung für weitere
+                                # Gegenstellen sichtbar, ohne Metadaten umzudatieren.
+                                self.db.execute(
+                                    "INSERT INTO sync_received (table_name, record_id, received_at) VALUES (?, ?, ?) "
+                                    "ON CONFLICT(table_name, record_id) DO UPDATE SET received_at=excluded.received_at",
+                                    (table, record["id"], time.time()),
+                                )
+                                applied += 1
+                        except (ValueError, TypeError):
+                            pass  # Unvereinbare Raster: vorhandenen Stand behalten.
+                    continue
+                if (table == "jobs" and existing and record.get("coverage") is None
+                        and existing["coverage"] is not None):
+                    record["coverage"] = existing["coverage"]
+                if table == "lines" and "rand_innen" not in record:
+                    alt = self.get_line(record["id"])
+                    record["rand_innen"] = alt["rand_innen"] if alt else self._randbezug(record)
+                if table == "lines" and "aussaat_at" not in record:
+                    # Alte Gegenstellen kennen die Spalte noch nicht. Vorhandene
+                    # Aussaatzeit bewahren; beim ersten Empfang den Altstand übernehmen.
+                    alt = self.get_line(record["id"])
+                    record["aussaat_at"] = (alt["aussaat_at"] if alt else
+                        record.get("updated_at", 0) if record.get("saison", 0) > 0
+                        and record.get("fahrgasse_m", 0) > 0 else 0.0)
+                if table == "fields" and "working_boundary" not in record:
+                    alt = self.get_field(record["id"])
+                    if alt and json.loads(record.get("boundary") or "[]") != alt["boundary"]:
+                        record["working_boundary"] = "[]"
+                columns = [c[1] for c in self.db.execute(f"PRAGMA table_info({table})")]
+                record = {k: v for k, v in record.items() if k in columns}
+                placeholders = ", ".join(f":{k}" for k in record)
+                updates = ", ".join(f"{k}=excluded.{k}" for k in record if k != "id")
+                self.db.execute(
+                    f"""INSERT INTO {table} ({', '.join(record)}) VALUES ({placeholders})
+                        ON CONFLICT(id) DO UPDATE SET {updates}""",
+                    record,
+                )
+                self.db.execute(
+                    "INSERT INTO sync_received (table_name, record_id, received_at) VALUES (?, ?, ?) "
+                    "ON CONFLICT(table_name, record_id) DO UPDATE SET received_at=excluded.received_at",
+                    (table, record["id"], time.time()),
+                )
+                applied += 1
         return applied
 
     def _soft_delete(self, table: str, record_id: str) -> None:

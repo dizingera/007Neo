@@ -909,8 +909,32 @@ function drawSaatplan() {
   const feld = state.live && state.live.field;
   if (!feld) return;
   if (saat.feld !== feld.id) { if (!saat.laedt) saatplanLaden(feld.id); return; }
-  const plan = saat.plan;
+  let plan = saat.plan;
   if (!plan || !saat.zeigen) return;
+  // Gespeicherte Alt-/Teildaten dürfen den gesamten Karten-Renderloop nicht stoppen.
+  // Einmal pro empfangenem Plan prüfen; die gespeicherten Daten bleiben unverändert.
+  if (saat.zeichnungsQuelle !== plan) {
+    let unvollstaendig = false;
+    const liste = v => { if (Array.isArray(v)) return v; unvollstaendig = true; return []; };
+    const punkt = p => Array.isArray(p) && p.length === 2 && p.every(Number.isFinite);
+    const linie = p => Array.isArray(p) && p.length >= 2 && p.every(punkt);
+    const ringe = liste(plan.ringe).filter(r => { const ok = r && linie(r.punkte); if (!ok) unvollstaendig = true; return ok; });
+    const spuren = [];
+    liste(plan.spuren).forEach(s => {
+      if (!s || typeof s !== 'object') { unvollstaendig = true; return; }
+      const stuecke = liste(s.stuecke).filter(p => { const ok = Array.isArray(p) && p.length === 2 && p.every(punkt); if (!ok) unvollstaendig = true; return ok; });
+      if (stuecke.length) spuren.push({...s, stuecke});
+      else unvollstaendig = true;
+    });
+    const konflikte = liste(plan.konflikte).filter(k => {
+      if (k && typeof k === 'object' && (k.punkte == null || (Array.isArray(k.punkte) && !k.punkte.length))) return false;
+      const ok = k && linie(k.punkte); if (!ok) unvollstaendig = true; return ok;
+    });
+    saat.zeichnungsQuelle = plan;
+    saat.zeichnungsPlan = {...plan, ringe, spuren, konflikte};
+    if (unvollstaendig) toast('Saatplan unvollständig – ungültige Teile sind ausgeblendet. Plan im Menü prüfen.', true);
+  }
+  plan = saat.zeichnungsPlan;
   const px = 1 / state.view.scale;
   ctx.save();
   plan.ringe.forEach((runde) => {
@@ -941,7 +965,7 @@ function drawSaatplan() {
   // Abstand zwischen zwei Fahrgassen - auf halbem Weg, in der Mitte der Spur.
   // Weit herausgezoomt lägen die Schriften übereinander: dann nur die Linien.
   const gassen = plan.spuren.filter((s) => s.fahrgasse && !s.rest);
-  if (plan.fahrgasse_m * state.view.scale < 44) { ctx.restore(); return; }
+  if (!Number.isFinite(plan.fahrgasse_m) || plan.fahrgasse_m * state.view.scale < 44) { ctx.restore(); return; }
   const belegt = [];
   gassen.forEach((gasse, i) => {
     const naechste = gassen[i + 1];
@@ -949,7 +973,7 @@ function drawSaatplan() {
       Math.hypot(s[1][0] - s[0][0], s[1][1] - s[0][1]) > Math.hypot(l[1][0] - l[0][0], l[1][1] - l[0][1]) ? s : l);
     const mx = (a[0] + b[0]) / 2, my = (a[1] + b[1]) / 2;
     weltText(`FG ${i + 1}`, mx, my, F.fahrgasse, belegt);
-    if (naechste) {
+    if (naechste && Number.isFinite(naechste.versatz_m) && Number.isFinite(gasse.versatz_m)) {
       const d = naechste.versatz_m - gasse.versatz_m;
       const ex = b[0] - a[0], ey = b[1] - a[1], l = Math.hypot(ex, ey) || 1;
       // Normale zur Spur, in Richtung der nächsten Fahrgasse.
@@ -1669,16 +1693,21 @@ function arbeitBezeichnung() {
   try { return localStorage.getItem('agripilot.arbeit') || 'Arbeit'; } catch (e) { return 'Arbeit'; }
 }
 el('btnJob').onclick = async () => {
-  if (state.live && state.live.job) {
-    const result = await api('POST', '/api/job/stop');
-    if (result && !result.data) { toast('Markierung ist bereits pausiert oder beendet'); return; }
-    if (result) {
-      toast(result.data.verworfen ? 'Markieren aus – nichts gefahren, Arbeit verworfen'
-                                  : `Markieren aus – ${result.data.area_ha.toFixed(2)} ha`);
-    }
-  } else if (await api('POST', '/api/job/start', { operation: arbeitBezeichnung() })) {
-    toast(`Markieren an – ${arbeitBezeichnung()}`);
-  }
+  const taste = el('btnJob');
+  if (taste.disabled) return;
+  taste.disabled = true;
+  const an = !state.live?.job, pausiert = state.live?.pausierte_arbeit;
+  try {
+    const result = await api('POST', '/api/job/markierung', { an, operation: arbeitBezeichnung() });
+    if (!result || (an && !result.data)) return;
+    if (!state.live) state.live = {};
+    state.live.job = an ? result.data : null;
+    state.live.pausierte_arbeit = an ? null : (result.data || null);
+    if (an) {
+      const text = pausiert?.id === result.data.id ? 'Markieren fortgesetzt' : 'Markieren an';
+      toast(`${text} – ${result.data.operation || 'Arbeit'}`);
+    } else toast('Markieren pausiert – Fläche bleibt erhalten');
+  } finally { taste.disabled = false; }
 };
 
 el('feldVorschlag').onclick = async () => {
@@ -1724,23 +1753,34 @@ el('btnWarnProbe').onclick = () => {
 };
 
 el('btnSteer').onclick = async () => {
-  const steering = state.live && state.live.steering;
-  if (steering && steering.armed && !steering.command.engaged && steering.command.reason === 'Rückwärtsfahrt') {
-    // Wartet, weil die Anlage Rückwärts vermutet - ohne Gyro auch nach einer Wende von
-    // Hand. Tippen heißt hier: ich fahre vorwärts. Nicht neu scharf schalten: das lernte
-    // die Radmitte neu, und nach einer Wende von Hand stehen die Räder selten gerade.
-    if (await api('POST', '/api/steering/vorwaerts')) toast('Vorwärts bestätigt');
-  } else if (steering && steering.armed) {
-    await api('POST', '/api/steering/disarm');
-    toast('Lenkung aus');
-  } else {
-    const result = await api('POST', '/api/steering/arm', { operation: arbeitBezeichnung() });
-    if (result) {
-      const zusatz = result.data.markieren_gestartet ? ' · Markieren an' : '';
-      toast(result.data.armed ? `Lenkung scharf – Hände ans Lenkrad${zusatz}`
-                              : result.data.message, !result.data.armed);
+  const taste = el('btnSteer');
+  if (taste.disabled) return;
+  taste.disabled = true;
+  try {
+    const steering = state.live && state.live.steering;
+    // Auch beim Warten auf Vorwärtsfahrt bedeutet dieser Schalter immer AUS.
+    if (steering && steering.armed) {
+      const result = await api('POST', '/api/steering/disarm');
+      if (!result) return;
+      if (state.live) {
+        if (state.live.steering) {
+          state.live.steering.armed = false;
+          if (state.live.steering.command) state.live.steering.command.engaged = false;
+        }
+        state.live.job = null;
+        state.live.pausierte_arbeit = result.data.pausierte_arbeit || null;
+      }
+      toast('Lenkung und Markierung aus – Fläche bleibt erhalten');
+    } else {
+      const result = await api('POST', '/api/steering/arm', { operation: arbeitBezeichnung() });
+      if (result) {
+        if (state.live?.steering) state.live.steering.armed = result.data.armed;
+        const zusatz = result.data.markieren_gestartet ? ' · Markieren an' : '';
+        toast(result.data.armed ? `Lenkung scharf – Hände ans Lenkrad${zusatz}`
+                                : result.data.message, !result.data.armed);
+      }
     }
-  }
+  } finally { taste.disabled = false; }
 };
 
 /* ------------------------------------------------------------- Ansicht */

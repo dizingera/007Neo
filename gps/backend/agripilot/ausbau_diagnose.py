@@ -135,6 +135,10 @@ class DiagnoseService:
             if aktion == "nachher" and (not self._aktiv or self._aktiv["etappe"] != etappe
                     or self._aktiv.get("phase") != "bereit"):
                 raise ValueError("Zuerst Vorher-Messung dieser Etappe abschließen")
+            if aktion == "nachher":
+                vorher = self.engine.probefahrt.status().get("vorher") or {}
+                if vorher.get("zeit") != self._aktiv.get("vorher_zeit"):
+                    raise ValueError("Vorher-Messung wurde ersetzt; Etappe erneut starten")
             # Ausschließlich bestehender Prüfweg; niemals Probefahrt.bedienen direkt.
             if etappe == "wiederanfahrt":
                 fix = getattr(self.engine, "fix", None)
@@ -165,13 +169,24 @@ class DiagnoseService:
         a = self._aktiv
         if p["phase"] == "bereit" and a["phase"] == "vorher" and p.get("vorher"):
             a["phase"] = "bereit"
+            a["vorher_zeit"] = p["vorher"].get("zeit")
             self._stand["letzte_etappe"] = {**deepcopy(a), "vorher": deepcopy(p["vorher"].get("werte", {}))}
             self._dirty = True
+        elif p["phase"] == "bereit" and a["phase"] == "nachher" and p.get("vorher"):
+            # Einstellungswechsel brechen Nachher im Messkern ab, erhalten aber
+            # Vorher. Die geführte Serie muss den erneuten Nachher-Start erlauben.
+            if p["vorher"].get("zeit") == a.get("vorher_zeit"):
+                a["phase"] = "bereit"
+            else:
+                self._aktiv = None
         elif p["phase"] == "fertig" and a["phase"] == "nachher":
             b = p.get("bericht") or {}
             # Niemals einen alten Bericht einer neu gestarteten Messung zuordnen.
             nach = b.get("nachher") or {}
             if not _zahl(nach.get("zeit")) or nach["zeit"] < a["start"]:
+                return
+            if (b.get("vorher") or {}).get("zeit") != a.get("vorher_zeit"):
+                self._aktiv = None
                 return
             fp = self.fingerprint()
             if fp != a.get("fingerprint_nachher"):
@@ -304,7 +319,8 @@ class DiagnoseService:
                             hinweis="Entwürfe und gespeicherte Planspuren gegen heutige Feldgrenze; keine volle Fahrbarkeit.")
                 except Exception:
                     # Keine Ausnahmefreitexte persistieren (mögliche Geheimnisse).
-                    eintrag.update(status="fehler", befunde=[], hinweis="Plan konnte nicht geprüft werden")
+                    eintrag.update(status="fehler", befunde=[], vollstaendig=False,
+                                   hinweis="Plan konnte nicht geprüft werden")
                 with self._lock:
                     self._job["felder"].append(eintrag)
                     self._job["fertig"] += 1

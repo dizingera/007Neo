@@ -8,6 +8,7 @@ from dataclasses import asdict
 from datetime import datetime
 from . import geo, gespann
 from .coverage import CoverageMap
+from .storage import arbeitskarte_laden
 
 
 def im_stand(engine):
@@ -149,7 +150,9 @@ def fortsetzen(engine, job_id):
     if j.get("reference_spacing_m") and abs(j["reference_spacing_m"]-engine.profile.spacing_m) > .001:
         raise RuntimeError("Arbeitsbreite passt nicht zur offenen Arbeit – zuerst das richtige Gespann wählen")
     blob = engine.store.get_job_coverage(job_id)
-    coverage = CoverageMap.unpack(blob) if blob else CoverageMap(cell_size=.5)
+    if blob is None and (j.get("area_ha") or 0) > 0:
+        raise ValueError("Arbeitskarte fehlt trotz gespeicherter Flaeche; Fortsetzen abgebrochen")
+    coverage = arbeitskarte_laden(blob) if blob is not None else CoverageMap(cell_size=.5)
     engine.load_field(j["field_id"])
     if j.get("line_id"): engine.load_line(j["line_id"])
     engine._last_track_point = None

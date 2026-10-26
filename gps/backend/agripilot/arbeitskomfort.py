@@ -54,6 +54,10 @@ def starten(app,payload):
     t=next((x for x in e.list_traktoren() if x['id']==traktor_id),None)
     p=next((x for x in e.list_profiles() if x['id']==profile_id),None)
     if not t or not p:raise ValueError('Traktor und Gerät auswählen')
+    # Vor jedem Wechsel prüfen: Die Startauswahl darf die automatische
+    # Schneidwerk-Zuordnung beim Mähdrescher nicht anschließend überschreiben.
+    if (t.get('bauform') == 'maehdrescher') != (p.get('geraet_art') == 'schneidwerk'):
+        raise ValueError('Zum Mähdrescher ein Schneidwerk, zum Traktor ein passendes Gerät auswählen')
     operation=payload.get('operation')
     if not isinstance(operation,str) or not 1<=len(operation.strip())<=120:raise ValueError('Tätigkeit mit höchstens120 Zeichen angeben')
     # Die Auswahl verweist auf vorhandene Maße. Keine Breite aus einer Tätigkeitsvorlage setzen.

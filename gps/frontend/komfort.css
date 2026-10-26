@@ -20,9 +20,9 @@
 .sheet .komfort-vorschau table{width:100%;border-collapse:collapse}.sheet.komfort-vorschau{position:fixed;inset:0;margin:auto;width:min(850px,calc(100vw - 32px));height:fit-content;max-height:calc(100dvh - 32px);padding:24px;box-sizing:border-box;overflow:auto;background:var(--panel);color:var(--text);border:2px solid var(--line);border-radius:14px}
 .sheet.komfort-vorschau::backdrop{background:#000b}.sheet.komfort-vorschau table{width:100%;border-collapse:collapse;table-layout:fixed}.sheet.komfort-vorschau :is(th,td){padding:12px;border-bottom:1px solid var(--line);text-align:left;overflow-wrap:anywhere;font-size:15px;line-height:1.5}
 .sheet.komfort-vorschau .row{justify-content:flex-end;margin-top:20px}
-.komfort-schnell{position:absolute;bottom:16px;left:16px;z-index:6;display:flex;gap:8px;max-width:60%;flex-wrap:wrap}
-.komfort-schnell button{font:inherit;font-size:14px;font-weight:600;min-height:48px;padding:10px 16px;color:var(--text);background:var(--glas);border:1px solid var(--line);border-radius:8px;cursor:pointer}
-.sheet #komfortInhalt :is(button,select,input,summary,a):focus-visible,.komfort-schnell button:focus-visible{outline:3px solid var(--ui-focus);outline-offset:3px}
-@media(max-width:650px){.sheet .komfort-raster{grid-template-columns:1fr}.sheet .komfort-daten{grid-template-columns:1fr}.komfort-schnell{bottom:10px;left:10px;max-width:calc(100% - 110px)}.komfort-schnell button{padding:8px 12px;min-height:44px}}
+.sheet .komfort-schnell{position:static;display:flex;gap:8px;max-width:100%;flex-wrap:wrap;margin:12px 0}
+.sheet .komfort-schnell button{font:inherit;font-size:14px;font-weight:600;min-height:48px;padding:10px 16px;color:var(--text);background:var(--glas);border:1px solid var(--line);border-radius:8px;cursor:pointer}
+.sheet #komfortInhalt :is(button,select,input,summary,a):focus-visible,.sheet .komfort-schnell button:focus-visible{outline:3px solid var(--ui-focus);outline-offset:3px}
+@media(max-width:650px){.sheet .komfort-raster{grid-template-columns:1fr}.sheet .komfort-daten{grid-template-columns:1fr}.sheet .komfort-schnell button{padding:8px 12px;min-height:44px}}
 
 .sheet .komfort-planfeld{margin:12px 0;border-top:1px solid var(--line);padding:12px}.sheet .komfort-planfeld canvas{display:block;width:100%;height:auto;background:var(--panel-2);margin-top:12px}.sheet .komfort-planfeld summary{min-height:48px;font-weight:600;cursor:pointer}

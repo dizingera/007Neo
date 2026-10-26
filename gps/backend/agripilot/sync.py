@@ -24,7 +24,7 @@ from typing import Optional
 
 from .coverage import CoverageMap
 from . import zusatzsync
-from .storage import SYNCED_TABLES, Storage
+from .storage import SYNCED_TABLES, Storage, arbeitskarte_laden, _job_bezug_pruefen
 
 
 def merge_field_coverage(store: Storage, field_id: str,
@@ -47,7 +47,7 @@ def merge_field_coverage(store: Storage, field_id: str,
         if not blob:
             continue
         try:
-            merged.merge(CoverageMap.unpack(blob))
+            merged.merge(arbeitskarte_laden(blob))
         except ValueError:
             continue  # different cell size: skip rather than corrupt the map
     return merged
@@ -63,10 +63,18 @@ def apply_changes(store: Storage, changes: dict) -> dict:
     for table, records in (changes or {}).items():
         if table not in SYNCED_TABLES:
             continue
-        for record in records:
-            zusatzsync.konflikt_sichern(store, table, record)
+        # Erst Bezuege und Raster pruefen, dann Konflikte archivieren.
+        # Im Archiv bleibt die tatsaechlich empfangene, unvereinigte Karte.
+        original_records = records
         if table == "jobs":
-            records = [_merge_job_coverage(store, r) for r in records]
+            records, original_records = [], []
+            for record in changes[table]:
+                merged = _merge_job_coverage(store, record)
+                if merged is not None:
+                    records.append(merged)
+                    original_records.append(record)
+        for record in original_records:
+            zusatzsync.konflikt_sichern(store, table, record)
         applied[table] = store.apply_remote(table, records)
         if table in ("fields", "lines", "jobs"):
             for record in records:
@@ -79,19 +87,36 @@ def apply_changes(store: Storage, changes: dict) -> dict:
     return applied
 
 
-def _merge_job_coverage(store: Storage, record: dict) -> dict:
+def _merge_job_coverage(store: Storage, record: dict) -> Optional[dict]:
     """Union an incoming job's coverage with whatever we already hold for it."""
+    existing = store.db.execute("SELECT * FROM jobs WHERE id=?", (record["id"],)).fetchone()
+    _job_bezug_pruefen(record, existing)
     incoming = record.get("coverage")
-    existing_blob = store.get_job_coverage(record["id"])
-    if not existing_blob:
+    if incoming is None:
+        # Absichtlich ohne Karte gesendete Metadaten/Loeschvermerke sind erlaubt.
+        # Storage bewahrt den lokalen Originalblob, auch wenn er beschaedigt ist.
         return record
-    if not incoming:
-        # Neuere Angaben ohne Karte dürfen bereits bearbeitete Fläche nicht löschen.
-        return {**record, "coverage": base64.b64encode(existing_blob).decode()}
+    existing_blob = existing["coverage"] if existing else None
+    merged = None
+    if existing_blob is not None:
+        try:
+            merged = arbeitskarte_laden(existing_blob)
+        except ValueError:
+            pass  # Nur eine nachweislich gueltige Gegenkarte darf sie ersetzen.
     try:
-        merged = CoverageMap.unpack(existing_blob)
-        merged.merge(CoverageMap.unpack(base64.b64decode(incoming)))
-    except Exception:  # noqa: BLE001 - vorhandene Karte bei fehlerhafter Gegenstelle erhalten
+        blob = base64.b64decode(incoming, validate=True)
+        neu = arbeitskarte_laden(blob)
+    except (ValueError, TypeError) as exc:
+        if existing is None:
+            raise ValueError("Arbeitskarte der Gegenstelle ist beschaedigt") from exc
+        # Karte, Kennzahlen und Versionszeit bilden einen Stand. Einen defekten
+        # Eingang komplett verwerfen, statt nur seine Karte auszutauschen.
+        return None
+    if merged is None:
+        return {**record, "coverage": base64.b64encode(blob).decode()}
+    try:
+        merged.merge(neu)
+    except ValueError:
         return {**record, "coverage": base64.b64encode(existing_blob).decode()}
     return {**record, "coverage": base64.b64encode(merged.pack()).decode()}
 
@@ -179,25 +204,25 @@ class SyncClient:
             self.status = "httpx fehlt (pip install httpx)"
             return {"ok": False, "error": self.status}
 
-        since = self.cursor
-        push_since = float(self.store.get_setting("sync_push_cursor", 0.0))
-        push_bis = time.time()  # vor dem Snapshot, damit spätere Änderungen in der nächsten Runde bleiben
-        payload = {
-            "device": {
-                "id": self.config.network.device_id,
-                "name": self.config.network.device_name,
-                "role": "client",
-            },
-            "since": since,
-            "changes": collect_changes(self.store, push_since),
-            "zusatzdaten": zusatzsync.exportieren(self.store, push_since, self.config.network.device_id),
-        }
-        if self.engine is not None:
-            payload["maschinen"] = self.engine.profile_export()
-        url = self.config.network.master_url.rstrip("/") + "/api/sync"
-        kopf = ({"X-AgriPilot-Token": self.config.network.sync_token}
-                if self.config.network.sync_token else {})
         try:
+            since = self.cursor
+            push_since = float(self.store.get_setting("sync_push_cursor", 0.0))
+            push_bis = time.time()  # vor dem Snapshot, damit spätere Änderungen in der nächsten Runde bleiben
+            payload = {
+                "device": {
+                    "id": self.config.network.device_id,
+                    "name": self.config.network.device_name,
+                    "role": "client",
+                },
+                "since": since,
+                "changes": collect_changes(self.store, push_since),
+                "zusatzdaten": zusatzsync.exportieren(self.store, push_since, self.config.network.device_id),
+            }
+            if self.engine is not None:
+                payload["maschinen"] = self.engine.profile_export()
+            url = self.config.network.master_url.rstrip("/") + "/api/sync"
+            kopf = ({"X-AgriPilot-Token": self.config.network.sync_token}
+                    if self.config.network.sync_token else {})
             # 60 s: über Mobilfunk mit einem Stapel bearbeiteter Flächen dauert eine Runde.
             async with httpx.AsyncClient(timeout=60.0) as client:
                 response = await client.post(url, json=payload, headers=kopf)
@@ -238,7 +263,8 @@ class SyncClient:
             (push, table, push)).fetchone()[0] for table in SYNCED_TABLES}
         pending["zusatzdaten"] = self.store.db.execute(
             "SELECT COUNT(*) FROM settings WHERE updated_at>? AND (key LIKE 'grenze_verlauf:%' "
-            "OR key LIKE 'feld_einfahrt:%' OR key='probefahrt_bericht' OR key LIKE 'probefahrt_fremd:%')",
+            "OR key LIKE 'feld_einfahrt:%' OR key='probefahrt_bericht' OR key LIKE 'probefahrt_fremd:%' "
+            "OR key LIKE 'arbeitsablauf:%' OR key LIKE 'arbeitskosten:%')",
             (push,)).fetchone()[0]
         conflicts = self.store.get_setting("sync_konflikte", [])
         return {
